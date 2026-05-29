@@ -3,6 +3,27 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+// Helper to determine proxy target based on the request's origin/host
+const getProxyTarget = (req, localTarget, remoteTarget) => {
+  const host = req.headers.host || '';
+  const referer = req.headers.referer || '';
+  const origin = req.headers.origin || '';
+
+  const isLocal = 
+    host.includes('localhost') || 
+    host.includes('127.0.0.1') || 
+    host.includes('0.0.0.0') || 
+    host.includes('[::1]') ||
+    referer.includes('localhost') || 
+    referer.includes('127.0.0.1') ||
+    origin.includes('localhost') || 
+    origin.includes('127.0.0.1');
+
+  const target = isLocal ? localTarget : remoteTarget;
+  console.log(`[Proxy] Routing ${req.url} (Host: ${host}) -> ${target}`);
+  return target;
+};
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
@@ -19,36 +40,38 @@ export default defineConfig({
     proxy: {
       // ── ETL Backend ───────────────────────────────────────────
       '/etl/api': {
-        target: process.env.VITE_USE_REMOTE === 'true' ? 'https://etlmain.onestopanalytics.com' : 'http://127.0.0.1:8111',
-        // target: 'https://etlmain.onestopanalytics.com', // Remote Domain
-        // target: 'http://127.0.0.1:8111', // Local Fallback
+        target: 'http://127.0.0.1:8111',
         changeOrigin: true,
         secure: false,
+        router: (req) => getProxyTarget(req, 'http://127.0.0.1:8111', 'https://etlmain.onestopanalytics.com')
       },
       '/etl/ws': {
-        target: process.env.VITE_USE_REMOTE === 'true' ? 'wss://etlmain.onestopanalytics.com' : 'ws://127.0.0.1:8111',
+        target: 'ws://127.0.0.1:8111',
         changeOrigin: true,
         secure: false,
         ws: true,
+        router: (req) => getProxyTarget(req, 'ws://127.0.0.1:8111', 'wss://etlmain.onestopanalytics.com')
       },
 
       // ── Analytics Backend ─────────────────────────────────────
       '/analytics/api': {
-        target: process.env.VITE_USE_REMOTE === 'true' ? 'https://analyticsmain.onestopanalytics.com/analytics' : 'http://127.0.0.1:8010',
+        target: 'http://127.0.0.1:8010',
         changeOrigin: true,
         secure: false,
+        router: (req) => getProxyTarget(req, 'http://127.0.0.1:8010', 'https://analyticsmain.onestopanalytics.com/analytics')
       },
       // Legacy Analytics API routes
       '/api': {
-        target: process.env.VITE_USE_REMOTE === 'true' ? 'https://analyticsmain.onestopanalytics.com/analytics' : 'http://127.0.0.1:8010/analytics',
+        target: 'http://127.0.0.1:8010/analytics',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        router: (req) => getProxyTarget(req, 'http://127.0.0.1:8010/analytics', 'https://analyticsmain.onestopanalytics.com/analytics')
       },
 
       // ── DW Backend ────────────────────────────────────────────
       '/dw': {
-        target: process.env.VITE_USE_REMOTE === 'true' ? 'https://dwmain.onestopanalytics.com' : 'http://127.0.0.1:8004',
+        target: 'http://127.0.0.1:8004',
         changeOrigin: true,
         secure: false,
         bypass: function (req) {
@@ -57,7 +80,8 @@ export default defineConfig({
             return req.url; // Bypass proxy, let Vite serve index.html
           }
           // All API/fetch requests go to the backend
-        }
+        },
+        router: (req) => getProxyTarget(req, 'http://127.0.0.1:8004', 'https://dwmain.onestopanalytics.com')
       },
     },
   },
