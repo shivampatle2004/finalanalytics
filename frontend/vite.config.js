@@ -40,17 +40,17 @@ export default defineConfig({
     proxy: {
       // ── ETL Backend ───────────────────────────────────────────
       '/etl/api': {
-        target: 'http://127.0.0.1:8111',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
-        router: (req) => getProxyTarget(req, 'http://127.0.0.1:8111', 'https://etlmain.onestopanalytics.com')
+        router: (req) => getProxyTarget(req, 'http://127.0.0.1:8000', 'https://etlmain.onestopanalytics.com')
       },
       '/etl/ws': {
-        target: 'ws://127.0.0.1:8111',
+        target: 'ws://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
         ws: true,
-        router: (req) => getProxyTarget(req, 'ws://127.0.0.1:8111', 'wss://etlmain.onestopanalytics.com')
+        router: (req) => getProxyTarget(req, 'ws://127.0.0.1:8000', 'wss://etlmain.onestopanalytics.com')
       },
 
       // ── Analytics Backend ─────────────────────────────────────
