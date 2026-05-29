@@ -892,8 +892,6 @@ function DetailPanel({ connector, onClose }) {
         exit={{ opacity: 0, scale: 0.95, y: 10, transition: { duration: 0.15 } }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        layoutId={`connector-${connector.engine}`}
-        layout
       >
         {/* ── Header ── */}
         <div className="panel-head">
@@ -1131,7 +1129,6 @@ export function ConnectorHub() {
                 {connectors.length}
               </span>
             </motion.h1>
-            <p>Configure and manage data source integrations for your pipelines.</p>
           </div>
         </motion.header>
 

@@ -1,11 +1,36 @@
 /* DynamicForm — Enterprise-Grade High-Density Layout */
 
 .dynamic-form {
+  --bg-hover: var(--df-input-bg, #f8fafc);
+  --bg-surface: var(--df-surface, #ffffff);
+  --border: var(--df-border, rgba(0, 0, 0, 0.08));
+  --border-subtle: var(--df-input-border, rgba(0, 0, 0, 0.12));
+  --text-primary: var(--df-text, #111111);
+  --text-secondary: var(--df-text-soft, #333333);
+  --text-muted: var(--df-text-muted, #666666);
+  --accent: var(--df-accent, #7A1E3A);
+  --accent-subtle: var(--df-accent-soft, #FDF0F3);
+  --bg-elevated: var(--df-card-bg, #ffffff);
+
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px 16px;
   padding: 8px 4px 4px;
 }
+
+[data-theme="dark"] .dynamic-form {
+  --bg-hover: #16161e;
+  --bg-surface: var(--df-surface, #14141A);
+  --border: var(--df-border, rgba(255, 255, 255, 0.09));
+  --border-subtle: var(--df-input-border, rgba(255, 255, 255, 0.12));
+  --text-primary: var(--df-text, #FFFFFF);
+  --text-secondary: var(--df-text-soft, #E2E2E2);
+  --text-muted: var(--df-text-muted, #A0A0A0);
+  --accent: var(--df-accent, #7A1E3A);
+  --accent-subtle: var(--df-accent-soft, rgba(122, 30, 58, 0.35));
+  --bg-elevated: var(--df-card-bg, #14141A);
+}
+
 
 /* Full-width fields (JSON, Files, Checkboxes) */
 .df-full {

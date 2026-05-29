@@ -3,6 +3,34 @@
    Enterprise Density · Low Visual Noise · Purposeful Hover
    ═══════════════════════════════════════════════════════════ */
 
+:root {
+  --bg-elevated: var(--df-card-bg, #ffffff);
+  --bg-hover: #f8fafc;
+  --bg-surface: var(--df-surface, #ffffff);
+  --border: var(--df-border, rgba(0, 0, 0, 0.07));
+  --border-strong: var(--df-border, rgba(0, 0, 0, 0.12));
+  --border-subtle: var(--df-input-border, rgba(0, 0, 0, 0.12));
+  --text-primary: var(--df-text, #111111);
+  --text-secondary: var(--df-text-soft, #333333);
+  --text-muted: var(--df-text-muted, #555555);
+  --accent: var(--df-accent, #7A1E3A);
+  --accent-subtle: var(--df-accent-soft, #FDF0F3);
+}
+
+[data-theme="dark"] {
+  --bg-elevated: var(--df-card-bg, #14141A);
+  --bg-hover: #16161e;
+  --bg-surface: var(--df-surface, #14141A);
+  --border: var(--df-border, rgba(255, 255, 255, 0.09));
+  --border-strong: var(--df-border, rgba(255, 255, 255, 0.15));
+  --border-subtle: var(--df-input-border, rgba(255, 255, 255, 0.12));
+  --text-primary: var(--df-text, #FFFFFF);
+  --text-secondary: var(--df-text-soft, #E2E2E2);
+  --text-muted: var(--df-text-muted, #A0A0A0);
+  --accent: var(--df-accent, #7A1E3A);
+  --accent-subtle: var(--df-accent-soft, rgba(122, 30, 58, 0.35));
+}
+
 /* ── Page Container ── */
 .connector-hub-page {
   padding: 16px 40px 40px;
@@ -467,6 +495,34 @@
   overflow-y: auto;
   padding: 0 1.25rem 1rem 1.25rem;
 }
+
+/* Custom Sleek Scrollbar for Panel Scroll to prevent default browser styling */
+.panel-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(122, 30, 58, 0.2);
+  border-radius: 4px;
+}
+
+.panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+[data-theme="dark"] .panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 
 .panel-form-inner {
   display: flex;
