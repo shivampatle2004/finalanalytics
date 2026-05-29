@@ -1,0 +1,23 @@
+Region,Country,State,City,Place,Place_Type,Latitude,Longitude,Population
+Asia,India,Maharashtra,Mumbai,Gateway of India,Monument,18.922,72.8347,20411000
+Asia,India,Maharashtra,Mumbai,Marine Drive,Scenic,18.943,72.8238,20411000
+Asia,India,Delhi,New Delhi,India Gate,Monument,28.6129,77.2295,16787941
+Asia,India,Karnataka,Bangalore,Lalbagh Botanical Garden,Park,12.9507,77.5848,8443675
+Asia,Japan,Tokyo,Tokyo,Shibuya Crossing,Landmark,35.6595,139.7005,13929286
+Europe,France,Ile-de-France,Paris,Eiffel Tower,Monument,48.8584,2.2945,11020000
+Europe,UK,England,London,Big Ben,Landmark,51.5007,-0.1246,8982000
+Europe,Italy,Lazio,Rome,Colosseum,Historical,41.8902,12.4922,2873000
+Europe,Spain,Catalonia,Barcelona,Sagrada Familia,Church,41.4036,2.1744,5585000
+Europe,Germany,Bavaria,Munich,Marienplatz,Square,48.1374,11.5755,1472000
+North America,USA,New York,New York City,Statue of Liberty,Monument,40.6892,-74.0445,8419600
+North America,USA,California,San Francisco,Golden Gate Bridge,Bridge,37.8199,-122.4783,883305
+North America,Canada,Ontario,Toronto,CN Tower,Landmark,43.6426,-79.3871,2930000
+North America,Mexico,Mexico City,Mexico City,Zocalo,Square,19.4326,-99.1332,9209944
+South America,Brazil,Rio de Janeiro,Rio de Janeiro,Christ the Redeemer,Monument,-22.9519,-43.2105,6748000
+South America,Argentina,Buenos Aires,Buenos Aires,Plaza de Mayo,Square,-34.6081,-58.3702,3054000
+South America,Chile,Santiago,Santiago,San Cristobal Hill,Park,-33.4172,-70.642,5744000
+Africa,Egypt,Cairo,Cairo,Pyramids of Giza,Historical,29.9792,31.1342,9500000
+Africa,South Africa,Gauteng,Johannesburg,Apartheid Museum,Museum,-26.2041,28.0473,957441
+Africa,Nigeria,Lagos,Lagos,Lekki Conservation Centre,Nature,-6.5244,3.3792,14862000
+Australia,Australia,New South Wales,Sydney,Sydney Opera House,Landmark,-33.8568,151.2153,5312000
+Australia,Australia,Victoria,Melbourne,Federation Square,Square,-37.8179,144.969,5078000

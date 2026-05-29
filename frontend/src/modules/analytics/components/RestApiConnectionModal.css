@@ -1,0 +1,208 @@
+.restapi-overlay {
+  --rest-surface: #ffffff;
+  --rest-border: #e1dfdd;
+  --rest-text: #323130;
+  --rest-muted: #605e5c;
+  --rest-accent: #7a1e3a;
+  --rest-hover: #f3f2f1;
+  position: fixed;
+  inset: 0;
+  background: rgba(32, 33, 36, 0.45);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 16000;
+  padding: 24px;
+}
+
+.restapi-modal {
+  width: min(1080px, 100%);
+  max-height: min(860px, calc(100vh - 28px));
+  overflow: auto;
+  background: var(--rest-surface);
+  border-radius: 8px;
+  border: 1px solid var(--rest-border);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12), 0 24px 48px rgba(0, 0, 0, 0.08);
+  padding: 14px 16px 12px;
+}
+
+.restapi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.restapi-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--rest-text);
+}
+
+.restapi-help {
+  margin: 0 0 10px;
+  font-size: 0.8125rem;
+  color: var(--rest-muted);
+}
+
+.restapi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.restapi-full {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.restapi-modal input,
+.restapi-modal select,
+.restapi-modal textarea {
+  border: 1px solid var(--rest-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 0.875rem;
+  color: var(--rest-text);
+  background: var(--rest-surface);
+}
+
+.restapi-modal input:focus,
+.restapi-modal select:focus,
+.restapi-modal textarea:focus {
+  outline: none;
+  border-color: var(--rest-accent);
+  box-shadow: 0 0 0 1px var(--rest-accent);
+}
+
+.restapi-section {
+  border: 1px solid var(--rest-border);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.restapi-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.restapi-section-header h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--rest-text);
+}
+
+.restapi-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.restapi-kv-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+}
+
+.restapi-mini-btn,
+.restapi-icon-btn,
+.restapi-actions button {
+  border: 1px solid var(--rest-border);
+  border-radius: 4px;
+  background: var(--rest-surface);
+  color: var(--rest-text);
+  padding: 7px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.restapi-mini-btn:hover,
+.restapi-icon-btn:hover,
+.restapi-actions button:hover {
+  background: var(--rest-hover);
+}
+
+.restapi-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+  border-top: 1px solid var(--rest-border);
+  padding-top: 10px;
+}
+
+.restapi-actions .primary {
+  background: var(--rest-accent);
+  color: #fff;
+  border-color: var(--rest-accent);
+}
+
+.restapi-actions .primary:hover {
+  filter: brightness(0.96);
+}
+
+.restapi-error {
+  color: #b91c1c;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.restapi-info {
+  color: #166534;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.restapi-preview-wrap {
+  border: 1px solid var(--rest-border);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.restapi-preview-title {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--rest-border);
+  color: var(--rest-text);
+}
+
+.restapi-preview-scroll {
+  overflow: auto;
+  max-height: 240px;
+}
+
+.restapi-preview-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.restapi-preview-scroll th,
+.restapi-preview-scroll td {
+  border-bottom: 1px solid var(--rest-border);
+  text-align: left;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.dark-theme .restapi-overlay {
+  --rest-surface: var(--bg-elevated);
+  --rest-border: var(--border-primary);
+  --rest-text: var(--text-primary);
+  --rest-muted: var(--text-secondary);
+  --rest-accent: var(--accent-tertiary);
+  --rest-hover: var(--bg-tertiary);
+  background: rgba(0, 0, 0, 0.55);
+}

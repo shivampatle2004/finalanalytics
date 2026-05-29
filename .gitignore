@@ -1,0 +1,59 @@
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.next/
+dist/
+build/
+
+# ── Python (shared) ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
+.env
+!**/.env.example
+*.env.local
+.env.*
+
+# ── Databases & Big Data ──────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+spark-warehouse/
+metastore_db/
+derby.log
+hadoop/
+
+# ── Test / coverage artifacts ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+logs/
+*.tmp
+out*.json
+error_log.txt
+verify_output*.txt
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.gemini/
+
+# ── Archives ──────────────────────────────────────────────────────────────────
+*.zip

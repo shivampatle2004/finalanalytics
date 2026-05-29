@@ -1,0 +1,20 @@
+{
+  "name": "onestop-analytics",
+  "version": "1.0.0",
+  "description": "OneStop Analytics Orchestration",
+  "scripts": {
+    "start": "concurrently \"npm run start:analytics\" \"npm run start:etl\" \"npm run start:dw\" \"npm run start:frontend\"",
+    "start:analytics": "cd Analytics-backend && venv\\Scripts\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8010 --reload",
+    "start:etl": "cd ETL-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8111 --reload",
+    "start:dw": "cd dw-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8004 --reload",
+    "start:frontend": "cd frontend && npm run dev",
+    "setup:analytics": "cd Analytics-backend && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
+    "setup:etl": "cd ETL-backend && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
+    "setup:dw": "cd dw-backend && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
+    "setup:frontend": "cd frontend && npm install",
+    "setup": "npm install && npm run setup:analytics && npm run setup:etl && npm run setup:dw && npm run setup:frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
