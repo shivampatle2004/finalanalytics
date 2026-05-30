@@ -97,3 +97,23 @@ strong,
 th {
   font-weight: 400 !important;
 }
+
+/* ── Unifying ETL module variables with DataForge (DW) variables ── */
+:root {
+  --bg-base: var(--df-bg);
+  --bg-surface: var(--df-surface);
+  --bg-elevated: var(--df-panel);
+  --bg-hover: var(--df-sidebar-hover);
+  --text-primary: var(--df-text);
+  --text-secondary: var(--df-text-soft);
+  --text-muted: var(--df-text-muted);
+  --border: var(--df-border);
+  --border-strong: var(--df-border);
+  --border-subtle: var(--df-border-light);
+  --accent: var(--df-accent);
+  --accent-subtle: var(--df-accent-soft);
+  --accent-medium: var(--df-accent-medium);
+  --accent-glow: var(--df-shadow-glow);
+  --font-sans: 'Inter', sans-serif;
+  --header-height: 64px; /* Matches DW top navbar height */
+}

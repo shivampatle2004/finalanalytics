@@ -1,20 +1,13 @@
 import React, { memo, useState } from 'react';
-import { Handle, Position, useReactFlow } from '@xyflow/react';
-import { Database, Zap, ArrowRightLeft, FileJson, Eye, MessageSquare } from 'lucide-react';
+import { Handle, Position } from '@xyflow/react';
+import { Database, Zap, ArrowRightLeft, FileJson, Eye, MessageSquare, FileText, ChevronDown } from 'lucide-react';
+import { NodeLogPanel } from './NodeLogPanel';
 import './Nodes.css';
 
-// Type → CSS class mapping for color themes
-const TYPE_CLASS = {
-  extract:         'node-extract',
-  transform:       'node-transform',
-  transform_pandas:'node-pandas',
-  load:            'node-load',
-};
-
-// eslint-disable-next-line no-unused-vars
+// NodeWrapper — shared shell for all node types
 const NodeWrapper = ({ id, type, label, icon: Icon, children, status, data }) => {
-  const { updateNodeData } = useReactFlow();
   const [showComment, setShowComment] = useState(!!data?.comment);
+  const [showLogPanel, setShowLogPanel] = useState(false);
 
   const handlePreview = (e) => {
     e.stopPropagation();
@@ -22,49 +15,108 @@ const NodeWrapper = ({ id, type, label, icon: Icon, children, status, data }) =>
   };
 
   const handleCommentChange = (e) => {
-    const newComment = e.target.value;
-    window.dispatchEvent(new CustomEvent('node-data-update', { detail: { id, data: { comment: newComment } } }));
+    window.dispatchEvent(new CustomEvent('node-data-update', {
+      detail: { id, data: { comment: e.target.value } }
+    }));
   };
 
   const handleBlur = () => {
     window.dispatchEvent(new CustomEvent('pipeline-autosave'));
   };
 
-  const typeClass = TYPE_CLASS[type] || '';
+  // Derive border color from status
+  const statusBorderColor =
+    status === 'success' ? 'var(--node-success)' :
+    status === 'failed'  ? 'var(--node-failed)'  :
+    status === 'running' ? 'var(--node-running)'  :
+    'var(--border)';
 
   return (
-    <div className="node-wrapper-container">
-      <div className={`custom-node ${typeClass}`}>
-        {status && <div className={`node-status status-${status}`} />}
-        <div className="node-header">
-          <div className="node-icon">
-            <Icon size={16} />
+    <>
+      <div className="node-wrapper-container">
+        <div
+          className={`custom-node node-type-${type}`}
+          style={{ borderTopColor: statusBorderColor }}
+        >
+          {/* Status glow dot */}
+          {status && <div className={`node-status status-${status}`} />}
+
+          {/* Header */}
+          <div className="node-header">
+            <div className="node-icon">
+              <Icon size={14} />
+            </div>
+            <div className="node-title">{label}</div>
+
+            {/* Log Button */}
+            <button
+              className="node-action-btn"
+              title="View Execution Log"
+              onClick={(e) => { e.stopPropagation(); setShowLogPanel(true); }}
+            >
+              <FileText size={12} />
+            </button>
+
+            {/* Comment Toggle */}
+            <button
+              className={`node-action-btn ${showComment ? 'active' : ''}`}
+              title={showComment ? 'Hide Comment' : 'Show Comment'}
+              onClick={(e) => { e.stopPropagation(); setShowComment(v => !v); }}
+            >
+              <MessageSquare size={12} />
+              <ChevronDown
+                size={9}
+                className="comment-chevron"
+                style={{ transform: showComment ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              />
+            </button>
+
+            {/* Preview Button */}
+            <button
+              className="node-action-btn"
+              title="Preview Data"
+              onClick={handlePreview}
+            >
+              <Eye size={12} />
+            </button>
           </div>
-          <div className="node-title">{label}</div>
-          <button className={`node-preview-btn ${showComment ? 'active' : ''}`} onClick={(e) => { e.stopPropagation(); setShowComment(!showComment); }} title="Toggle Comment">
-            <MessageSquare size={13} />
-          </button>
-          <button className="node-preview-btn" onClick={handlePreview} title="Preview Data">
-            <Eye size={13} />
-          </button>
+
+          {/* Node Body */}
+          <div className="node-body">
+            {children}
+          </div>
         </div>
-        <div className="node-body">
-          {children}
-        </div>
+
+        {/* Comment Section — collapsible */}
+        {showComment && (
+          <div className="node-comment-external">
+            <div className="node-comment-label">
+              <MessageSquare size={10} />
+              <span>Note</span>
+            </div>
+            <textarea
+              className="node-comment-input nodrag"
+              placeholder="Add a note about this node..."
+              value={data?.comment || ''}
+              onChange={handleCommentChange}
+              onBlur={handleBlur}
+              onKeyDown={(e) => e.stopPropagation()}
+              rows={2}
+            />
+          </div>
+        )}
       </div>
-      {showComment && (
-        <div className="node-comment-external">
-          <textarea
-            className="node-comment-input nodrag"
-            placeholder="Add a comment..."
-            value={data?.comment || ''}
-            onChange={handleCommentChange}
-            onBlur={handleBlur}
-            onKeyDown={(e) => e.stopPropagation()}
-          />
-        </div>
+
+      {/* Log Panel Portal — rendered outside node wrapper to avoid clipping */}
+      {showLogPanel && (
+        <NodeLogPanel
+          pipelineId={data?.pipelineId}
+          nodeId={id}
+          nodeLabel={label}
+          onClose={() => setShowLogPanel(false)}
+        />
       )}
-    </div>
+    </>
   );
 };
 
@@ -77,7 +129,7 @@ export const ExtractNode = memo(({ id, data }) => (
     status={data.status}
     data={data}
   >
-    <span>{data.connector_engine || 'Choose source...'}</span>
+    <span>{data.connector_engine || 'Choose source…'}</span>
     <Handle type="source" position={Position.Right} />
   </NodeWrapper>
 ));
@@ -86,12 +138,12 @@ export const TransformNode = memo(({ id, data }) => (
   <NodeWrapper
     id={id}
     type="transform"
-    label={data.label || 'Polars Transform'}
+    label={data.label || 'Transform'}
     icon={ArrowRightLeft}
     status={data.status}
     data={data}
   >
-    <span>{data.transform_type || 'Configure...'}</span>
+    <span>{data.transform_type || 'Configure…'}</span>
     <Handle type="target" position={Position.Left} />
     <Handle type="source" position={Position.Right} />
   </NodeWrapper>
@@ -101,12 +153,12 @@ export const PandasNode = memo(({ id, data }) => (
   <NodeWrapper
     id={id}
     type="transform_pandas"
-    label={data.label || 'Pandas Transform'}
+    label={data.label || 'Python Transform'}
     icon={Zap}
     status={data.status}
     data={data}
   >
-    <span>{data.transform_type || 'Python logic...'}</span>
+    <span>{data.transform_type || 'Python logic…'}</span>
     <Handle type="target" position={Position.Left} />
     <Handle type="source" position={Position.Right} />
   </NodeWrapper>
@@ -121,7 +173,7 @@ export const LoadNode = memo(({ id, data }) => (
     status={data.status}
     data={data}
   >
-    <span>{data.connector_engine || 'Choose destination...'}</span>
+    <span>{data.connector_engine || 'Choose destination…'}</span>
     <Handle type="target" position={Position.Left} />
   </NodeWrapper>
 ));

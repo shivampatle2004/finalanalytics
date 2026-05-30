@@ -651,7 +651,7 @@ export function JobMonitor() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `arithflow_job_${job.id.substring(0, 8)}.log`;
+      a.download = `onestopanalytics_job_${job.id.substring(0, 8)}.log`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
