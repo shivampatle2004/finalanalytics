@@ -20,15 +20,37 @@ logger = get_logger("connectors.excel")
 
 class ExcelConnector(BaseConnector):
 
+    def __init__(self, config: dict[str, Any]):
+        super().__init__(config)
+        raw_path = self.config.get("file_path", "")
+        self.file_path = self._resolve_path(raw_path)
+
+    @staticmethod
+    def _resolve_path(raw_path: str) -> str:
+        """Resolve an uploaded file path using the same three-step lookup as other file connectors."""
+        if not raw_path:
+            return raw_path
+        if os.path.isabs(raw_path) and os.path.exists(raw_path):
+            return raw_path
+        if os.path.exists(raw_path):
+            return raw_path
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        uploads_dir = os.path.join(backend_dir, "uploads")
+        for candidate in [
+            os.path.join(uploads_dir, raw_path),
+            os.path.join(uploads_dir, os.path.basename(raw_path)),
+        ]:
+            if os.path.exists(candidate):
+                return candidate
+        return raw_path
+
     async def test_connection(self) -> bool:
         """Non-blocking file check."""
-        path = self.config.get("file_path", "")
-        mode = self.config.get("mode", "read")
-
         def _check():
+            mode = self.config.get("mode", "read")
             if mode == "read":
-                return os.path.isfile(path) and path.lower().endswith((".xlsx", ".xls"))
-            directory = os.path.dirname(path)
+                return os.path.isfile(self.file_path) and self.file_path.lower().endswith((".xlsx", ".xls"))
+            directory = os.path.dirname(self.file_path)
             return os.path.isdir(directory) if directory else True
 
         loop = asyncio.get_running_loop()
@@ -36,7 +58,9 @@ class ExcelConnector(BaseConnector):
 
     async def extract(self) -> AsyncGenerator[list[dict[str, Any]], None]:
         """Streaming extraction via non-blocking executor."""
-        path = self.config["file_path"]
+        path = self.file_path
+        if not path:
+            raise ValueError("Excel connector requires 'file_path' in config")
         sheet_id = int(self.config.get("sheet_id", 0))
         sheet_name = self.config.get("sheet_name")
         chunk_size = int(self.config.get("chunk_size", 1000))
@@ -78,15 +102,18 @@ class ExcelConnector(BaseConnector):
 
     async def discover(self) -> dict[str, Any]:
         """List all sheet names in the Excel file."""
-        path = self.config.get("file_path", "")
+        # Use the already-resolved self.file_path, not the raw config value
+        path = self.file_path
         if not path or not os.path.exists(path):
             return {"sheets": []}
-            
+
         def _get_sheets():
             import openpyxl
             wb = openpyxl.load_workbook(path, read_only=True, keep_links=False)
-            return wb.sheetnames
-            
+            sheets = wb.sheetnames
+            wb.close()
+            return sheets
+
         loop = asyncio.get_running_loop()
         try:
             sheets = await loop.run_in_executor(None, _get_sheets)

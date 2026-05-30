@@ -84,8 +84,13 @@ class PostgresConnector(BaseConnector):
         if query:
             sql = query
         elif table:
-            # If table doesn't have a schema prefix, use the configured schema
-            full_table = f"{schema}.{table}" if "." not in table and schema else table
+            # Only add schema prefix when table doesn't already have one (avoid double-prefix)
+            if "." not in table and schema and schema != "public":
+                full_table = f"{schema}.{table}"
+            elif "." not in table:
+                full_table = table
+            else:
+                full_table = table  # Already schema-qualified
             sql = f"SELECT * FROM {full_table}"
         else:
             raise ValueError("Extraction requires either a 'table' name or a 'query'.")
@@ -131,6 +136,7 @@ class PostgresConnector(BaseConnector):
         if_exists = self.config.get("if_table_exists", "append")
         uri = self._get_uri(is_async=False)
 
+        # Only add schema prefix when table_name doesn't already have one
         if "." not in table_name and schema_name:
             table_name = f"{schema_name}.{table_name}"
 

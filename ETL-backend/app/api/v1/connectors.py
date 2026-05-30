@@ -531,17 +531,86 @@ async def _extract_all_data(connector: Any, max_rows: int = 100000) -> pl.DataFr
     total_rows = 0
 
     def _coerce_chunk(chunk) -> pl.DataFrame | None:
-        """Ensure a chunk is a proper Polars DataFrame regardless of what the connector yields."""
+        """Ensure a chunk is a proper Polars DataFrame regardless of what the connector yields.
+        
+        Handles the common case where a column has mixed types across rows
+        (e.g., a dict/struct in some rows but a plain string in others) by
+        pre-normalising problematic columns to their string representation.
+        """
+        import json as _json
+
         if isinstance(chunk, pl.DataFrame):
             return chunk
         if isinstance(chunk, pl.LazyFrame):
             return chunk.collect()
-        if isinstance(chunk, list) and chunk:
-            try:
-                return pl.from_dicts(chunk, infer_schema_length=None)
-            except Exception:
-                return pl.DataFrame(chunk, strict=False)
-        return None
+        if not (isinstance(chunk, list) and chunk):
+            return None
+
+        # --- Attempt 1: Fast path — direct conversion scanning all rows ---
+        try:
+            return pl.from_dicts(chunk, infer_schema_length=0)
+        except Exception:
+            pass
+
+        # --- Attempt 2: Normalise mixed-type columns then retry ---
+        try:
+            # Collect all keys seen across every row
+            all_keys = set()
+            for row in chunk:
+                if isinstance(row, dict):
+                    all_keys.update(row.keys())
+
+            # For each key, check if values are consistently typed; if not, stringify
+            def _safe_val(v: Any) -> Any:
+                if isinstance(v, (dict, list)):
+                    try:
+                        return _json.dumps(v)
+                    except Exception:
+                        return str(v)
+                return v
+
+            normalised: list[dict] = []
+            problem_keys: set[str] = set()
+
+            # Detect which keys have mixed types
+            key_types: dict[str, set] = {k: set() for k in all_keys}
+            for row in chunk:
+                if not isinstance(row, dict):
+                    continue
+                for k in all_keys:
+                    v = row.get(k)
+                    if v is not None:
+                        key_types[k].add(type(v).__name__)
+
+            for k, types in key_types.items():
+                # Mixed types or any dict/list values → stringify this column
+                if len(types) > 1 or types & {"dict", "list"}:
+                    problem_keys.add(k)
+
+            for row in chunk:
+                if not isinstance(row, dict):
+                    normalised.append({})
+                    continue
+                new_row = {}
+                for k in all_keys:
+                    v = row.get(k)
+                    new_row[k] = _safe_val(v) if k in problem_keys else v
+                normalised.append(new_row)
+
+            return pl.from_dicts(normalised, infer_schema_length=0)
+        except Exception:
+            pass
+
+        # --- Attempt 3: Last resort — stringify everything ---
+        try:
+            stringified = [
+                {k: (str(v) if not isinstance(v, (int, float, bool, type(None))) else v)
+                 for k, v in (row.items() if isinstance(row, dict) else {}.items())}
+                for row in chunk
+            ]
+            return pl.from_dicts(stringified, infer_schema_length=0)
+        except Exception:
+            return None
 
     if inspect.isasyncgenfunction(connector.extract):
         async for chunk in connector.extract():
