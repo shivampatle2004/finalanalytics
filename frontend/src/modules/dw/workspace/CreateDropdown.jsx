@@ -46,11 +46,11 @@ const CreateDropdown = ({ onCreate }) => {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => { setIsOpen(!isOpen); setShowLangPicker(false); }}
-        className="px-4 py-2 rounded-lg flex items-center space-x-2 transition-transform hover:scale-[1.02] text-[13px] font-medium"
+        className="px-4 py-2 rounded-lg flex items-center space-x-2 transition-transform hover:scale-[1.02] text-[14px] font-semibold"
         style={btnStyle}
       >
         <span>Create</span>
-        <FiPlus />
+        <FiPlus size={16} />
       </button>
       {isOpen && (
         <div className="absolute right-0 mt-2 w-52 rounded-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] z-[60] py-2 animate-fadeIn" 

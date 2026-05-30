@@ -62,8 +62,7 @@ export const WorkspaceProvider = ({ children }) => {
     } catch (err) { console.error('[WorkspaceContext] Create failed:', err); }
   }, [currentFolderId]);
 
-  const handleRename = useCallback(async (item) => {
-    const newName = prompt(`Enter new name for ${item.type}:`, item.name);
+  const handleRename = useCallback(async (item, newName) => {
     if (!newName || newName === item.name) return;
     try {
       const updated = await api.updateItem(item.id, { name: newName });

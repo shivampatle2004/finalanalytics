@@ -27,13 +27,13 @@ const FileItem = ({
   onToggleFavorite, onContextMenu, isTrashView, onRestore, onPermanentDelete
 }) => {
   const getIcon = () => {
-    const iconColor = 'var(--df-accent)';
+    const iconColor = 'var(--df-icon-accent)';
     switch (item.type) {
-      case 'folder': return <TechFolderIcon size={18} color={iconColor} />;
+      case 'folder': return <TechFolderIcon size={20} color={iconColor} />;
       case 'notebook':
-      case 'sql': return <TechNotebookIcon size={18} color={iconColor} />;
-      case 'query': return <FiCode size={18} strokeWidth={2} style={{ color: iconColor }} />;
-      default: return <FiFileText size={18} strokeWidth={1.8} style={{ color: 'var(--df-text-muted)' }} />;
+      case 'sql': return <TechNotebookIcon size={20} color={iconColor} />;
+      case 'query': return <FiCode size={20} strokeWidth={2} style={{ color: iconColor }} />;
+      default: return <FiFileText size={20} strokeWidth={1.8} style={{ color: 'var(--df-text-muted)' }} />;
     }
   };
 
@@ -50,25 +50,25 @@ const FileItem = ({
 
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, item); }}
     >
-      <td className="py-1 px-4 font-medium">
+      <td className="py-1.5 px-4 font-medium">
         <div className="flex items-center gap-3">
           {getIcon()}
-          <span className="text-[13px] font-semibold truncate max-w-[240px]" style={{ color: 'var(--df-text)' }}>
+          <span className="text-[14px] font-semibold truncate max-w-[240px]" style={{ color: 'var(--df-text)' }}>
             {item.name}
           </span>
         </div>
       </td>
 
-      <td className="py-1 px-2">
+      <td className="py-1.5 px-2">
         <div className="flex items-center">
           {item.type === 'folder' ? (
-            <span className="text-[11px] font-medium" style={{ color: 'var(--df-text-muted)' }}>Folder</span>
+            <span className="text-[12px] font-medium" style={{ color: 'var(--df-text-muted)' }}>Folder</span>
           ) : (
             <span
-              className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border"
+              className="px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border"
               style={{
                 backgroundColor: 'var(--df-accent-soft)',
-                color: 'var(--df-text)', // Use main text variable for contrast
+                color: 'var(--df-text)',
                 borderColor: 'var(--df-border-light)'
               }}
             >
@@ -78,16 +78,16 @@ const FileItem = ({
         </div>
       </td>
 
-      <td className="py-1 px-2">
-        <span className="text-[12px] font-medium" style={{ color: 'var(--df-text-soft)' }}>
+      <td className="py-1.5 px-2">
+        <span className="text-[13px] font-medium" style={{ color: 'var(--df-text-soft)' }}>
           {item.ownerName
             ? `${item.ownerName} (${item.owner})`
             : (item.owner || 'admin@arithwise.com')}
         </span>
       </td>
 
-      <td className="py-1 px-2">
-        <span className="text-[12px] font-medium" style={{ color: 'var(--df-text-soft)' }}>
+      <td className="py-1.5 px-2">
+        <span className="text-[13px] font-medium" style={{ color: 'var(--df-text-soft)' }}>
           {new Date(item.createdAt || '2026-04-24T12:49:00Z').toLocaleString(undefined, { 
             month: 'short', 
             day: 'numeric', 
@@ -98,7 +98,7 @@ const FileItem = ({
         </span>
       </td>
 
-      <td className="py-1 px-2 relative text-right">
+      <td className="py-1.5 px-2 relative text-right">
         <div className="flex items-center justify-end gap-1 px-2">
           {!isTrashView && (
             <button
@@ -224,16 +224,16 @@ const FileList = ({
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b" style={{ backgroundColor: 'transparent', borderColor: 'var(--df-border-light)' }}>
-            <th className="py-1.5 px-4 text-[11px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('name')}>
+            <th className="py-2 px-4 text-[11.5px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('name')}>
               <div className="flex items-center gap-2">NAME <SortIcon column="name" /></div>
             </th>
-            <th className="py-1.5 px-2 text-[11px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('type')}>
+            <th className="py-2 px-2 text-[11.5px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('type')}>
               <div className="flex items-center gap-2">TYPE <SortIcon column="type" /></div>
             </th>
-            <th className="py-1.5 px-2 text-[11px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('owner')}>
+            <th className="py-2 px-2 text-[11.5px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('owner')}>
               <div className="flex items-center gap-2">OWNER <SortIcon column="owner" /></div>
             </th>
-            <th className="py-1.5 px-2 text-[11px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('createdAt')}>
+            <th className="py-2 px-2 text-[11.5px] font-extrabold uppercase tracking-widest cursor-pointer hover:bg-black/[0.04]" style={{ color: 'var(--df-text)' }} onClick={() => handleSort('createdAt')}>
               <div className="flex items-center gap-2">CREATED AT <SortIcon column="createdAt" /></div>
             </th>
             <th className="py-1.5 px-4 text-right"></th>

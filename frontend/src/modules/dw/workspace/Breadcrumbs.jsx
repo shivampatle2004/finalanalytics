@@ -9,7 +9,7 @@ const VIRTUAL_LABELS = {
 };
 
 const Breadcrumbs = ({ currentFolderId, items, onNavigate }) => {
-  const breadcrumbColor = '#0078D4'; // Precise professional blue for links
+  const breadcrumbColor = 'var(--df-text-muted)';
 
   // Check for virtual views
   const virtualView = VIRTUAL_LABELS[currentFolderId];
