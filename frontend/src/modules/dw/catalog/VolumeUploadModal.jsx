@@ -1,23 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FiUploadCloud, FiX, FiFile, FiLoader, FiCheck, FiBox, FiDatabase } from 'react-icons/fi';
-import { volumes as volumeApi } from '../../../shared/services/api';
+import { FiUploadCloud, FiX, FiFile, FiLoader, FiCheck, FiDatabase } from 'react-icons/fi';
+import { catalogs as catalogApi } from '../../../shared/services/api';
 import { useData } from '../context/DataContext';
 import { useToast } from '../../../shared/context/ToastContext';
 
 const ACCEPTED_TYPES = ['.csv', '.json', '.tsv', '.txt', '.parquet'];
 
-const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => {
+const VolumeUploadModal = ({ isOpen, onClose, onUploaded }) => {
   const [file, setFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
   
-  const [volumeList, setVolumeList] = useState([]);
-  const [selectedVolumeId, setSelectedVolumeId] = useState('');
-  const [isLoadingVolumes, setIsLoadingVolumes] = useState(false);
-
-  // Convert options
-  const [convertAfterUpload, setConvertAfterUpload] = useState(false);
+  const [selectedCatalog, setSelectedCatalog] = useState('');
   const { catalogs } = useData();
   const catalogNames = Object.keys(catalogs || {});
 
@@ -29,27 +24,9 @@ const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => 
       setFile(null);
       setIsUploading(false);
       setUploadDone(false);
-      setConvertAfterUpload(false);
-      setSelectedVolumeId('');
-      
-      const fetchVolumes = async () => {
-        setIsLoadingVolumes(true);
-        try {
-          const data = await volumeApi.list();
-          setVolumeList(data || []);
-          
-          if (initialVolumeId) {
-            setSelectedVolumeId(initialVolumeId);
-          }
-        } catch (err) {
-          toast.error('Failed to load volumes');
-        } finally {
-          setIsLoadingVolumes(false);
-        }
-      };
-      fetchVolumes();
+      setSelectedCatalog('');
     }
-  }, [isOpen, initialVolumeId]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -79,25 +56,14 @@ const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => 
   };
 
   const handleUpload = async () => {
-    if (!file || !selectedVolumeId) return;
+    if (!file || !selectedCatalog) return;
     setIsUploading(true);
     try {
-      const result = await volumeApi.upload(selectedVolumeId, file);
+      // Directly upload to the selected catalog's bronze schema as a table
+      const result = await catalogApi.uploadTable(selectedCatalog, 'bronze', file);
       
-      // If convert option is selected, convert immediately
-      if (convertAfterUpload && result?.id) {
-        try {
-          // Infer the target catalog automatically from the selected volume
-          const targetCatalog = volumeList.find(v => v.id === selectedVolumeId)?.catalog_name || '';
-          const convertResult = await volumeApi.convert(result.id, targetCatalog);
-          toast.success(`Uploaded & converted to table: ${convertResult.full_path}`);
-        } catch (convErr) {
-          toast.error(`File uploaded, but conversion failed: ${convErr.message}`);
-        }
-      } else {
-        toast.success(`Uploaded ${file.name} to volume successfully`);
-      }
-
+      toast.success(`Successfully uploaded data to ${selectedCatalog}.bronze.${result.table_name || 'table'}`);
+      
       setUploadDone(true);
       setTimeout(() => {
         onUploaded?.(result);
@@ -113,12 +79,11 @@ const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => 
     setFile(null);
     setIsUploading(false);
     setUploadDone(false);
-    setSelectedVolumeId('');
-    setConvertAfterUpload(false);
+    setSelectedCatalog('');
     onClose();
   };
 
-  const canUpload = file && selectedVolumeId && !isUploading && !uploadDone;
+  const canUpload = file && selectedCatalog && !isUploading && !uploadDone;
 
   return (
     <div 
@@ -143,7 +108,7 @@ const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => 
         >
           <div className="flex items-center gap-2">
             <FiUploadCloud size={18} style={{ color: 'var(--df-icon-accent)' }} />
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--df-strong)' }}>Upload to Volume</h3>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--df-strong)' }}>Upload Data to Bronze</h3>
           </div>
           <button 
             onClick={resetAndClose} 
@@ -156,39 +121,25 @@ const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => 
 
         {/* Body - scrollable */}
         <div className="p-6 space-y-4 overflow-y-auto flex-1" style={{ minHeight: 0 }}>
-          {/* Volume Selection (Grouped by Catalog) */}
+          {/* Catalog Selection */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-widest mb-1.5 opacity-50" style={{ color: 'var(--df-text)' }}>
-              Select Destination Volume
+              Select Destination Catalog
             </label>
             <div className="relative">
-              <FiBox className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" size={14} style={{ color: 'var(--df-text)' }} />
+              <FiDatabase className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" size={14} style={{ color: 'var(--df-text)' }} />
               <select
-                value={selectedVolumeId}
-                onChange={(e) => setSelectedVolumeId(e.target.value)}
+                value={selectedCatalog}
+                onChange={(e) => setSelectedCatalog(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 rounded-xl border text-sm outline-none transition-all focus:ring-2 focus:ring-accent/20 appearance-none"
                 style={{ backgroundColor: 'var(--df-panel)', borderColor: 'var(--df-border)', color: 'var(--df-text)' }}
               >
-                <option value="">{isLoadingVolumes ? 'Loading...' : 'Select Volume'}</option>
+                <option value="">Select Catalog</option>
                 {catalogNames.map(cat => (
-                  <optgroup key={cat} label={`Catalog: ${cat}`}>
-                    {volumeList.filter(vol => vol.catalog_name === cat).map(vol => (
-                      <option key={vol.id} value={vol.id}>
-                        {vol.name}
-                      </option>
-                    ))}
-                  </optgroup>
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
                 ))}
-                {/* Fallback for volumes with unknown catalogs */}
-                {volumeList.filter(vol => !catalogNames.includes(vol.catalog_name)).length > 0 && (
-                  <optgroup label="Other Volumes">
-                    {volumeList.filter(vol => !catalogNames.includes(vol.catalog_name)).map(vol => (
-                      <option key={vol.id} value={vol.id}>
-                        {vol.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
               </select>
             </div>
           </div>
@@ -246,33 +197,12 @@ const VolumeUploadModal = ({ isOpen, onClose, onUploaded, initialVolumeId }) => 
               </>
             )}
           </div>
-
-          {/* Convert Option - only show when file is selected and is CSV/JSON */}
-          {file && ['csv', 'json'].includes(file.name.split('.').pop()?.toLowerCase()) && (
-            <div className="rounded-xl p-4 border transition-all" style={{ 
-              borderColor: convertAfterUpload ? 'var(--df-accent)' : 'var(--df-border)', 
-              backgroundColor: convertAfterUpload ? 'var(--df-accent-soft)' : 'var(--df-bg-secondary)' 
-            }}>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={convertAfterUpload}
-                  onChange={(e) => setConvertAfterUpload(e.target.checked)}
-                  className="w-4 h-4 rounded accent-blue-600"
-                />
-                <div>
-                  <span className="text-[13px] font-semibold" style={{ color: 'var(--df-strong)' }}>
-                    Convert to table after upload
-                  </span>
-                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--df-text-muted)' }}>
-                    {selectedVolumeId 
-                      ? `Data will be automatically stored in the bronze schema of the '${volumeList.find(v => v.id === selectedVolumeId)?.catalog_name || 'selected'}' catalog` 
-                      : 'Data will be stored in the bronze schema of the selected catalog'}
-                  </p>
-                </div>
-              </label>
-            </div>
-          )}
+          
+          <div className="text-center">
+            <p className="text-[11px]" style={{ color: 'var(--df-text-muted)' }}>
+              {selectedCatalog ? `File will be automatically stored as a table in ${selectedCatalog}.bronze` : 'File will be automatically stored as a table in the selected catalog\'s bronze schema.'}
+            </p>
+          </div>
         </div>
 
         {/* Footer - always visible */}
