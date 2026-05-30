@@ -60,9 +60,9 @@ async def upload_volume_file(
     }
 
 @router.post("/{file_id}/convert")
-async def convert_volume_file(file_id: str, db: Session = Depends(get_db)):
+async def convert_volume_file(file_id: str, catalog_name: str = None, db: Session = Depends(get_db)):
     try:
-        result = volume_service.convert_file_to_table(db, file_id)
+        result = volume_service.convert_file_to_table(db, file_id, catalog_name)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,5 +79,6 @@ async def list_volumes(db: Session = Depends(get_db)):
 
 @plural_router.get("/{volume_id}/files")
 async def list_volume_files(volume_id: str, db: Session = Depends(get_db)):
-    return volume_service.list_files_in_volume(db, volume_id)
+    files = volume_service.list_files_in_volume(db, volume_id)
+    return [volume_service.format_volume_file(f) for f in files]
 
