@@ -465,142 +465,6 @@ const DEFAULT_GUIDE = {
 };
 
 /* ═══════════════════════════════════════════════════════════
-   VaultSection — Compact icon-bar credential management
-   ═══════════════════════════════════════════════════════════ */
-function VaultSection({ engine, onLoad, currentConfig }) {
-  const [vaultOpen, setVaultOpen] = useState(false);
-  const [saveOpen, setSaveOpen] = useState(false);
-  const [credName, setCredName] = useState('');
-
-  const { data: vaultItems, refetch, isLoading } = useQuery({
-    queryKey: ['vault', engine],
-    queryFn: () => api.getVaultCredentials(engine),
-    enabled: vaultOpen
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: (name) => api.createVaultCredential({
-      name: name || `${engine}_cred_${new Date().getTime()}`,
-      engine: engine,
-      config: currentConfig
-    }),
-    onSuccess: () => {
-      setCredName('');
-      setSaveOpen(false);
-      setVaultOpen(true);
-      refetch();
-    }
-  });
-
-  const loadMutation = useMutation({
-    mutationFn: (id) => api.getVaultCredential(id),
-    onSuccess: (res) => {
-      onLoad(res.config);
-      setVaultOpen(false);
-    }
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id) => api.deleteVaultCredential(id),
-    onSuccess: () => refetch()
-  });
-
-  return (
-    <div className="vault-compact-bar">
-      {/* Icon row */}
-      <div className="vault-icon-row">
-        <button
-          className={`vault-icon-btn ${vaultOpen ? 'active' : ''}`}
-          onClick={() => { setVaultOpen(v => !v); setSaveOpen(false); }}
-          title="Load from Vault"
-        >
-          <Shield size={14} />
-          <span>Load from Vault</span>
-          <ChevronDown size={11} className={vaultOpen ? 'rotated' : ''} />
-        </button>
-
-        <div className="vault-divider" />
-
-        <button
-          className={`vault-icon-btn ${saveOpen ? 'active' : ''}`}
-          onClick={() => { setSaveOpen(s => !s); setVaultOpen(false); }}
-          title="Save credentials"
-        >
-          <Key size={14} />
-          <span>Save credentials</span>
-          <ChevronDown size={11} className={saveOpen ? 'rotated' : ''} />
-        </button>
-      </div>
-
-      {/* Vault dropdown */}
-      <AnimatePresence>
-        {vaultOpen && (
-          <motion.div
-            className="vault-dropdown"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.15 }}
-          >
-            {isLoading ? (
-              <div className="vault-loading">Decrypting...</div>
-            ) : !vaultItems?.length ? (
-              <div className="vault-empty-text">No saved credentials for {engine}</div>
-            ) : (
-              <div className="vault-items-list">
-                {vaultItems.map(item => (
-                  <div key={item.id} className="vault-item-compact" onClick={() => loadMutation.mutate(item.id)}>
-                    <div className="item-meta">
-                      <span className="name">{item.name}</span>
-                      <span className="date">{new Date(item.created_at).toLocaleDateString()}</span>
-                    </div>
-                    <button className="item-del" onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(item.id); }}>
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Save dropdown */}
-      <AnimatePresence>
-        {saveOpen && (
-          <motion.div
-            className="vault-dropdown"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.15 }}
-          >
-            <div className="vault-save-row">
-              <input
-                type="text"
-                className="vault-save-input"
-                placeholder="Credential name (optional)"
-                value={credName}
-                onChange={(e) => setCredName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveMutation.mutate(credName)}
-                autoFocus
-              />
-              <button
-                className="vault-save-confirm"
-                onClick={() => saveMutation.mutate(credName)}
-                disabled={saveMutation.isPending || !Object.keys(currentConfig).length}
-              >
-                {saveMutation.isPending ? <RefreshCw size={13} className="animate-spin" /> : 'Save'}
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════
    GuidePanel — Connector-specific help sidebar
    ═══════════════════════════════════════════════════════════ */
 function GuidePanel({ engine, schema, connector }) {
@@ -712,6 +576,44 @@ function DetailPanel({ connector, onClose }) {
   const [testResult, setTestResult] = useState(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [discoveredMetadata, setDiscoveredMetadata] = useState(null);
+
+  // Vault states
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [credName, setCredName] = useState('');
+
+  const { data: vaultItems, refetch: refetchVault, isLoading: vaultLoading } = useQuery({
+    queryKey: ['vault', connector.engine],
+    queryFn: () => api.getVaultCredentials(connector.engine),
+    enabled: vaultOpen
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (name) => api.createVaultCredential({
+      name: name || `${connector.engine}_cred_${new Date().getTime()}`,
+      engine: connector.engine,
+      config: formData
+    }),
+    onSuccess: () => {
+      setCredName('');
+      setSaveOpen(false);
+      setVaultOpen(true);
+      refetchVault();
+    }
+  });
+
+  const loadMutation = useMutation({
+    mutationFn: (id) => api.getVaultCredential(id),
+    onSuccess: (res) => {
+      setFormData(prev => ({ ...prev, ...res.config }));
+      setVaultOpen(false);
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.deleteVaultCredential(id),
+    onSuccess: () => refetchVault()
+  });
 
   const { data: configData, isLoading: loading } = useQuery({
     queryKey: ['connector_config', connector.engine],
@@ -874,6 +776,15 @@ function DetailPanel({ connector, onClose }) {
     return foundKey;
   }, [connector.engine, schema]);
 
+  const vaultTargetKey = useMemo(() => {
+    if (!schema?.properties) return null;
+    const possibleKeys = ['api_key', 'apikey', 'token', 'access_token', 'password', 'service_account', 'credentials_json'];
+    for (const key of possibleKeys) {
+      if (schema.properties[key]) return key;
+    }
+    return Object.keys(schema.properties)[0];
+  }, [schema]);
+
   const Icon = LOGO_MAP[connector.engine] || Settings2;
 
   return createPortal(
@@ -893,7 +804,6 @@ function DetailPanel({ connector, onClose }) {
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ── Header ── */}
         <div className="panel-head">
           <div className="panel-head-icon">
             <Icon />
@@ -903,16 +813,18 @@ function DetailPanel({ connector, onClose }) {
             <span>READY TO SYNC</span>
           </div>
 
-          {/* Guide toggle button */}
-          <button
-            className={`guide-toggle-btn ${guideOpen ? 'active' : ''}`}
-            onClick={() => setGuideOpen(g => !g)}
-            title={guideOpen ? 'Close guide' : 'Open setup guide'}
-            aria-label="Toggle setup guide"
-          >
-            <HelpCircle size={16} />
-            <span>{guideOpen ? 'Close' : 'Guide'}</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative', marginLeft: 'auto' }}>
+            {/* Guide toggle button */}
+            <button
+              className={`guide-toggle-btn ${guideOpen ? 'active' : ''}`}
+              onClick={() => { setGuideOpen(g => !g); }}
+              title={guideOpen ? 'Close guide' : 'Open setup guide'}
+              aria-label="Toggle setup guide"
+            >
+              <HelpCircle size={16} />
+              <span>{guideOpen ? 'Close' : 'Guide'}</span>
+            </button>
+          </div>
 
           <button className="panel-close" onClick={onClose} aria-label="Close panel">
             <X size={18} strokeWidth={2} />
@@ -930,12 +842,51 @@ function DetailPanel({ connector, onClose }) {
                   <span>Parsing connection model...</span>
                 </div>
               ) : (
-                <div className="panel-form-inner">
-                  <VaultSection
-                    engine={connector.engine}
-                    onLoad={(decryptedConfig) => setFormData(prev => ({ ...prev, ...decryptedConfig }))}
-                    currentConfig={formData}
-                  />
+                  <div className="panel-form-inner" style={{ position: 'relative' }}>
+                    
+                    <AnimatePresence>
+                      {vaultOpen && (
+                        <motion.div
+                          className="vault-dropdown"
+                          initial={{ opacity: 0, y: -6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          transition={{ duration: 0.15 }}
+                          style={{ marginBottom: '16px', zIndex: 100 }}
+                        >
+                          <div className="vault-dropdown-header">
+                            <Shield size={12} />
+                            Saved Credentials
+                          </div>
+                          {vaultLoading ? (
+                            <div className="vault-loading">
+                              <Spinner size={18} />
+                              <span>Decrypting…</span>
+                            </div>
+                          ) : !vaultItems?.length ? (
+                            <div className="vault-empty-text">
+                              <div className="vault-empty-icon"><Shield size={16} /></div>
+                              <span>No saved credentials for <strong>{connector.engine}</strong></span>
+                            </div>
+                          ) : (
+                            <div className="vault-items-list">
+                              {vaultItems.map(item => (
+                                <div key={item.id} className="vault-item-compact" onClick={() => loadMutation.mutate(item.id)}>
+                                  <div className="vault-item-icon"><Key size={14} /></div>
+                                  <div className="item-meta">
+                                    <span className="name">{item.name}</span>
+                                    <span className="date">{new Date(item.created_at).toLocaleDateString()}</span>
+                                  </div>
+                                  <button className="item-del" onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(item.id); }} title="Remove credential">
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
                   {dynamicSchema && dynamicSchema.properties ? (
                     <DynamicForm
@@ -943,13 +894,22 @@ function DetailPanel({ connector, onClose }) {
                       data={formData}
                       onChange={setFormData}
                       uploadedFiles={uploadedFiles}
-                      fieldActions={googleTargetKey ? {
-                        [googleTargetKey]: {
-                          label: 'Auto-load JSON',
-                          onClick: handleLoadGoogleCredentials,
-                          icon: <Zap size={12} />
-                        }
-                      } : null}
+                      fieldActions={{
+                        ...(googleTargetKey ? {
+                          [googleTargetKey]: {
+                            label: 'Auto-load JSON',
+                            onClick: handleLoadGoogleCredentials,
+                            icon: <Zap size={12} />
+                          }
+                        } : {}),
+                        ...(vaultTargetKey ? {
+                          [vaultTargetKey]: {
+                            label: 'Load Vault',
+                            onClick: () => { setVaultOpen(v => !v); setSaveOpen(false); },
+                            icon: <Shield size={12} />
+                          }
+                        } : {})
+                      }}
                     />
                   ) : (
                     <div className="panel-empty-state text-center py-10 opacity-60">
@@ -1108,12 +1068,20 @@ export function ConnectorHub() {
     <LayoutGroup>
       <div className="connector-hub-page">
         <motion.header
-          className="page-header"
           layout
+          style={{ margin: 0, padding: 0 }}
         >
           <div>
             <motion.h1
-              style={{ display: 'flex', alignItems: 'center', gap: '12px' }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                margin: 0,
+                fontSize: '1.2rem',
+                fontWeight: '700',
+                color: 'var(--text-primary)'
+              }}
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             >
               Connectors
@@ -1123,7 +1091,7 @@ export function ConnectorHub() {
                 color: 'var(--accent)',
                 padding: '4px 10px',
                 borderRadius: '20px',
-                fontWeight: '700',
+                fontWeight: '500',
                 lineHeight: '1'
               }}>
                 {connectors.length}
@@ -1132,7 +1100,7 @@ export function ConnectorHub() {
           </div>
         </motion.header>
 
-        <div className="hub-primary-tabs" style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+        <div className="hub-primary-tabs" style={{ display: 'flex', gap: '10px', marginTop: '-2px', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
           <button
             className={`hub-filter-btn ${activeTab === 'new_setup' ? 'active' : ''}`}
             onClick={() => setActiveTab('new_setup')}

@@ -46,7 +46,7 @@ apiClient.interceptors.response.use(
 
 export const api = {
   // Pipelines
-  getPipelines: () => apiClient.get('/pipelines').then(r => r.data),
+  getPipelines: (params) => apiClient.get('/pipelines', { params }).then(r => r.data),
   getPipeline: (id) => apiClient.get(`/pipelines/${id}`).then(r => r.data),
   getPipelineVersions: (id) => apiClient.get(`/pipelines/${id}/versions`).then(r => r.data),
   createPipeline: (data) => apiClient.post('/pipelines', data).then(r => r.data),

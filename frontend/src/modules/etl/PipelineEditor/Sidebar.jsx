@@ -11,8 +11,9 @@ const NODE_GROUPS = [
         type: 'extract',
         label: 'Extract Data',
         icon: Database,
-        accent: '#3b82f6',
-        bg: 'rgba(59,130,246,0.12)',
+        accent: 'var(--border-strong)',
+        bg: 'var(--accent-subtle)',
+        iconColor: 'var(--accent)',
         hint: 'Databases, APIs, files',
       },
     ],
@@ -25,16 +26,18 @@ const NODE_GROUPS = [
         type: 'transform',
         label: 'Polars Transform',
         icon: ArrowRightLeft,
-        accent: '#f59e0b',
-        bg: 'rgba(245,158,11,0.12)',
+        accent: 'var(--border-strong)',
+        bg: 'var(--accent-subtle)',
+        iconColor: 'var(--accent)',
         hint: 'Fast, lazy evaluation',
       },
       {
         type: 'transform_pandas',
         label: 'Pandas Transform',
         icon: Zap,
-        accent: '#8b5cf6',
-        bg: 'rgba(139,92,246,0.12)',
+        accent: 'var(--border-strong)',
+        bg: 'var(--accent-subtle)',
+        iconColor: 'var(--accent)',
         hint: 'Python-style transforms',
       },
     ],
@@ -47,8 +50,9 @@ const NODE_GROUPS = [
         type: 'load',
         label: 'Load Data',
         icon: FileJson,
-        accent: '#10b981',
-        bg: 'rgba(16,185,129,0.12)',
+        accent: 'var(--border-strong)',
+        bg: 'var(--accent-subtle)',
+        iconColor: 'var(--accent)',
         hint: 'DB tables, CSV, Parquet',
       },
     ],
@@ -92,7 +96,7 @@ const Sidebar = ({ onCollapse }) => {
                 <div
                   key={node.type}
                   className="dnd-node"
-                  style={{ '--node-accent': node.accent, '--node-bg': node.bg }}
+                  style={{ '--node-accent': node.accent, '--node-bg': node.bg, '--node-icon-color': node.iconColor }}
                   onDragStart={(e) => onDragStart(e, node.type, node.label)}
                   draggable
                 >

@@ -79,29 +79,44 @@ function VaultSection({ engine, onLoad, currentConfig }) {
         className={`vault-text-btn ${vaultOpen ? 'active' : ''}`}
         onClick={() => setVaultOpen(v => !v)}
       >
-        <Shield size={14} />
+        <Shield size={13} />
         <span>Load from Vault</span>
-        <ChevronDown size={10} className={vaultOpen ? 'rotated' : ''} style={{ marginLeft: '4px' }} />
+        <ChevronDown size={10} className={vaultOpen ? 'rotated' : ''} style={{ marginLeft: '2px', transition: 'transform 0.2s', transform: vaultOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
       </button>
 
       <AnimatePresence>
         {vaultOpen && (
           <motion.div
             className="vault-dropdown inline-dropdown"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
+            initial={{ opacity: 0, y: 4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.97 }}
+            transition={{ duration: 0.15 }}
           >
+            <div className="vault-dropdown-header">
+              <Shield size={11} />
+              Saved Credentials
+            </div>
             {isLoading ? (
-              <div className="vault-loading">Loading...</div>
+              <div className="vault-loading">
+                <div className="vault-empty-icon"><Key size={14} /></div>
+                <span>Decrypting…</span>
+              </div>
             ) : !vaultItems?.length ? (
-              <div className="vault-empty-text">No saved configs for {engine}</div>
+              <div className="vault-empty-text">
+                <div className="vault-empty-icon"><Shield size={14} /></div>
+                <span>No saved configs for <strong>{engine}</strong></span>
+              </div>
             ) : (
               <div className="vault-items-list">
                 {vaultItems.map(item => (
                   <div key={item.id} className="vault-item-compact" onClick={() => loadMutation.mutate(item.id)}>
-                    <span className="name">{item.name}</span>
-                    <button className="item-del" onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(item.id); }}>
+                    <div className="vault-item-icon"><Key size={12} /></div>
+                    <div className="item-meta">
+                      <span className="name">{item.name}</span>
+                      <span className="date">{new Date(item.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <button className="item-del" onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(item.id); }} title="Remove credential">
                       <X size={10} />
                     </button>
                   </div>
@@ -927,7 +942,7 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
                     Failure Resilience
                   </div>
                   <div style={{ color: 'var(--text-secondary)' }}>
-                    ArithFlow manages sync state atomically at the destination. If a run fails midway, the checkpoint is not committed. The next run resumes from the last successful checkpoint to guarantee zero data loss.
+                    OneStopAnalytics manages sync state atomically at the destination. If a run fails midway, the checkpoint is not committed. The next run resumes from the last successful checkpoint to guarantee zero data loss.
                   </div>
                 </div>
               )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FiPlay, FiCheckCircle, FiXCircle, FiClock, FiGitBranch, FiTrash2 } from 'react-icons/fi';
+import { FiPlay, FiCheckCircle, FiXCircle, FiClock, FiGitBranch, FiTrash2, FiLayers } from 'react-icons/fi';
 
 const STATUS_CONFIG = {
     Pending: { color: 'var(--df-text-muted)', bg: 'rgba(128,128,128,0.12)', icon: FiClock },
@@ -11,6 +11,7 @@ const STATUS_CONFIG = {
 const TYPE_ICONS = {
     'Job': FiPlay,
     'Pipeline': FiGitBranch,
+    'ETL': FiLayers,
 };
 
 const formatDate = (isoStr) => {
@@ -46,7 +47,13 @@ export const JobsTableRow = ({ job, navigate, handleDelete }) => {
     }
 
     return (
-        <tr className="cursor-pointer group" onClick={() => navigate(`/dw/jobs/${job.id}`)}>
+        <tr className="cursor-pointer group" onClick={() => {
+            if (job.type === 'ETL') {
+                navigate(`/etl/pipelines/editor/${job.id}`);
+            } else {
+                navigate(`/dw/jobs/${job.id}`);
+            }
+        }}>
             <td>
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors group-hover:bg-[var(--df-accent)]" style={{ backgroundColor: 'var(--df-accent-soft)' }}>
@@ -60,7 +67,7 @@ export const JobsTableRow = ({ job, navigate, handleDelete }) => {
             <td><span className="text-[13px]" style={{ color: 'var(--df-text-soft)' }}>{scheduleText}</span></td>
             <td><span className="text-[13px]" style={{ color: 'var(--df-text-muted)' }}>{formatDate(job.lastRun)}</span></td>
             <td><span className="text-[13px]" style={{ color: 'var(--df-text-soft)' }}>{job.owner}</span></td>
-            <td><span className="text-[12px] font-medium px-2 py-1 rounded-md" style={{ backgroundColor: 'var(--df-panel)', color: 'var(--df-text-soft)' }}>{job.tasks?.length || 0} tasks</span></td>
+            <td><span className="text-[12px] font-medium px-2 py-1 rounded-md" style={{ backgroundColor: 'var(--df-panel)', color: 'var(--df-text-soft)' }}>{job.tasks?.length || 0} {job.type === 'ETL' ? 'nodes' : 'tasks'}</span></td>
             <td style={{ textAlign: 'right', paddingRight: '12px' }}>
                 <button onClick={(e) => handleDelete(e, job.id, job.name)} className="p-2 rounded-lg transition-colors hover:bg-[var(--df-danger-soft)] text-[var(--df-text-muted)] hover:text-[var(--df-danger)]" title="Delete">
                     <FiTrash2 size={16} />

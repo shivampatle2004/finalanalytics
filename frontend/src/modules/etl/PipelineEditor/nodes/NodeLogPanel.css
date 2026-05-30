@@ -1,0 +1,259 @@
+/* ── NodeLogPanel Styles ─────────────────────────────── */
+
+.nlp-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  z-index: 9999;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.nlp-panel {
+  width: 520px;
+  max-width: 96vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface, #ffffff);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 32px rgba(0,0,0,0.15);
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.nlp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated, var(--bg-surface));
+  flex-shrink: 0;
+}
+
+.nlp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nlp-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.nlp-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.nlp-subtitle {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.nlp-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  transition: all 0.15s;
+}
+.nlp-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Body ── */
+.nlp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Section ── */
+.nlp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nlp-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* ── Stats Grid ── */
+.nlp-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.nlp-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.nlp-stat span {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.nlp-stat strong {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.nlp-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ── Error block ── */
+.nlp-error-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.25);
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #ef4444;
+  font-size: 0.72rem;
+}
+.nlp-error-block pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Empty states ── */
+.nlp-loading,
+.nlp-error,
+.nlp-empty-run,
+.nlp-empty-logs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  padding: 32px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.nlp-error { color: #ef4444; }
+
+.nlp-spin {
+  animation: nlp-spin 1s linear infinite;
+}
+@keyframes nlp-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Log Terminal ── */
+.nlp-log-count {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  padding: 2px 7px;
+  border-radius: 100px;
+}
+
+.nlp-terminal {
+  background: var(--bg-elevated, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 0.68rem;
+  line-height: 1.7;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nlp-log-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.nlp-log-line:hover {
+  background: var(--bg-hover);
+}
+
+.nlp-ts {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 0.63rem;
+}
+
+.nlp-level {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 0.63rem;
+}
+
+.nlp-level-info  .nlp-level { color: #3b82f6; }
+.nlp-level-warn  .nlp-level { color: #f59e0b; }
+.nlp-level-error .nlp-level { color: #ef4444; }
+.nlp-level-debug .nlp-level { color: #8b5cf6; }
+
+.nlp-node-tag {
+  color: var(--accent);
+  flex-shrink: 0;
+  font-size: 0.63rem;
+}
+
+.nlp-msg {
+  color: var(--text-primary);
+  word-break: break-word;
+  flex: 1;
+}
+
+.nlp-level-error .nlp-msg { color: #ef4444; }
+.nlp-level-warn  .nlp-msg { color: #f59e0b; }

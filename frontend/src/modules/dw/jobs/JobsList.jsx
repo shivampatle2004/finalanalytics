@@ -21,7 +21,7 @@ const JobsList = () => {
   const tabs = ['All', 'Jobs', 'Pipelines', 'Runs'];
 
   const filtered = jobs.filter(job => {
-    const matchesTab = activeTab === 'All' || (activeTab === 'Jobs' && job.type === 'Job') || (activeTab === 'Pipelines' && job.type === 'Pipeline');
+    const matchesTab = activeTab === 'All' || (activeTab === 'Jobs' && job.type === 'Job') || (activeTab === 'Pipelines' && (job.type === 'Pipeline' || job.type === 'ETL'));
     const matchesSearch = job.name.toLowerCase().includes(search.toLowerCase());
     return matchesTab && matchesSearch;
   });
@@ -57,9 +57,13 @@ const JobsList = () => {
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--df-accent-soft)' }}><FiCode size={14} style={{ color: 'var(--df-icon-accent)' }} /></div>
                 <div><div style={{ color: 'var(--df-strong)' }}>Job</div><div className="text-[10px]" style={{ color: 'var(--df-text-muted)' }}>Single SQL task execution</div></div>
               </button>
-              <button onClick={() => { setCreateOpen(false); navigate('/dw/jobs/create'); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-[var(--df-sidebar-hover)] text-left" style={{ color: 'var(--df-text)' }}>
+              <button onClick={() => { setCreateOpen(false); navigate('/dw/jobs/create'); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-[var(--df-sidebar-hover)] text-left" style={{ color: 'var(--df-text)', borderBottom: '1px solid var(--df-border)' }}>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--df-accent-soft)' }}><FiGitBranch size={14} style={{ color: 'var(--df-icon-accent)' }} /></div>
                 <div><div style={{ color: 'var(--df-strong)' }}>Pipeline</div><div className="text-[10px]" style={{ color: 'var(--df-text-muted)' }}>Multi-task DAG with dependencies</div></div>
+              </button>
+              <button onClick={() => { setCreateOpen(false); navigate('/etl/pipelines/editor'); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors hover:bg-[var(--df-sidebar-hover)] text-left" style={{ color: 'var(--df-text)' }}>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--df-accent-soft)' }}><FiLayers size={14} style={{ color: 'var(--df-icon-accent)' }} /></div>
+                <div><div style={{ color: 'var(--df-strong)' }}>ETL Pipeline</div><div className="text-[10px]" style={{ color: 'var(--df-text-muted)' }}>Visual data flow with connectors</div></div>
               </button>
             </div>
           )}
@@ -74,7 +78,7 @@ const JobsList = () => {
                 {tab}
                 {tab !== 'Runs' && (
                 <span className="ml-2 text-[11px] font-medium px-1.5 py-0.5 rounded-full" style={{ backgroundColor: activeTab === tab ? 'var(--df-accent-medium)' : 'var(--df-panel)', color: activeTab === tab ? 'var(--df-icon-accent)' : 'var(--df-text-muted)' }}>
-                  {tab === 'All' ? jobs?.length || 0 : tab === 'Jobs' ? (jobs || []).filter(j => j.type === 'Job').length : (jobs || []).filter(j => j.type === 'Pipeline').length}
+                  {tab === 'All' ? jobs?.length || 0 : tab === 'Jobs' ? (jobs || []).filter(j => j.type === 'Job').length : (jobs || []).filter(j => j.type === 'Pipeline' || j.type === 'ETL').length}
                 </span>
                 )}
               </button>

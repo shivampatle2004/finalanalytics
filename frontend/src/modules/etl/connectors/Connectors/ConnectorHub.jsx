@@ -11,7 +11,7 @@ import {
   BarChart3, Megaphone, FolderOpen, Headphones, GitBranch,
   LifeBuoy, Warehouse, Github,
   HelpCircle, Key, Lightbulb, BookMarked, Info, AlertCircle,
-  Briefcase, CheckSquare, Mail, Send, MessageCircle, Video, Target, 
+  Briefcase, CheckSquare, Mail, Send, MessageCircle, Video, Target,
   BarChart2, Activity, DollarSign, Users, GitMerge, ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
@@ -736,24 +736,24 @@ function DetailPanel({ connector, onClose }) {
       delete cleanConfig.save_to_vault;
       delete cleanConfig.vault_credential_name;
       delete cleanConfig.output_file_name;
-      
-      return api.testConnector({ 
-        engine: connector.engine, 
-        config: cleanConfig, 
+
+      return api.testConnector({
+        engine: connector.engine,
+        config: cleanConfig,
         save_profile: formData.save_to_vault,
         profile_name: formData.vault_credential_name
       });
     },
     onSuccess: (res) => {
       setTestResult(res);
-      
+
       // Auto-save to Vault if connection is successful and save_to_vault is checked
       if (res.success && formData.save_to_vault) {
         const cleanConfig = { ...formData };
         delete cleanConfig.save_to_vault;
         delete cleanConfig.vault_credential_name;
         delete cleanConfig.output_file_name;
-        
+
         api.createVaultCredential({
           name: formData.vault_credential_name || `${connector.name} Credentials`,
           engine: connector.engine,
@@ -764,7 +764,7 @@ function DetailPanel({ connector, onClose }) {
           console.error("Failed to save to Vault:", err);
         });
       }
-      
+
       // Auto-discover if connection is successful
       if (res.success) {
         discoverMutation.mutate();
@@ -793,9 +793,9 @@ function DetailPanel({ connector, onClose }) {
   // Dynamic schema that updates with discovered metadata
   const dynamicSchema = useMemo(() => {
     if (!schema) return schema;
-    
+
     const newSchema = JSON.parse(JSON.stringify(schema));
-    
+
     if (discoveredMetadata) {
       if (discoveredMetadata.tables) {
         if (newSchema.properties.table_name) newSchema.properties.table_name.enum = discoveredMetadata.tables;
@@ -810,7 +810,7 @@ function DetailPanel({ connector, onClose }) {
         if (newSchema.properties.stream) newSchema.properties.stream.enum = discoveredMetadata.streams;
       }
     }
-    
+
     // Dynamically inject Save configuration options into the schema
     if (newSchema.properties) {
       newSchema.properties.save_to_vault = {
@@ -824,7 +824,7 @@ function DetailPanel({ connector, onClose }) {
         description: "Specify a custom name to save these credentials in your vault & connections list (optional)."
       };
     }
-    
+
     return newSchema;
   }, [schema, discoveredMetadata]);
 
@@ -834,25 +834,25 @@ function DetailPanel({ connector, onClose }) {
       delete cleanConfig.save_to_vault;
       delete cleanConfig.vault_credential_name;
       delete cleanConfig.output_file_name;
-      
-      return api.quickExtractConnector({ 
-        engine: connector.engine, 
-        config: cleanConfig, 
-        output_file_name: formData.output_file_name, 
+
+      return api.quickExtractConnector({
+        engine: connector.engine,
+        config: cleanConfig,
+        output_file_name: formData.output_file_name,
         save_profile: formData.save_to_vault,
         profile_name: formData.vault_credential_name
       });
     },
     onSuccess: (res) => {
       setTestResult(res);
-      
+
       // Auto-save to Vault if extraction is successful and save_to_vault is checked
       if (res.success && formData.save_to_vault) {
         const cleanConfig = { ...formData };
         delete cleanConfig.save_to_vault;
         delete cleanConfig.vault_credential_name;
         delete cleanConfig.output_file_name;
-        
+
         api.createVaultCredential({
           name: formData.vault_credential_name || `${connector.name} Credentials`,
           engine: connector.engine,
@@ -863,7 +863,7 @@ function DetailPanel({ connector, onClose }) {
           console.error("Failed to save to Vault:", err);
         });
       }
-      
+
       if (res.success && res.table_name) {
         setTimeout(() => { window.location.hash = 'tables'; }, 1500);
       }
@@ -881,7 +881,7 @@ function DetailPanel({ connector, onClose }) {
 
         // Common keys for service account JSON in Google connectors
         const possibleKeys = ['service_account', 'credentials', 'credentials_json', 'json_key'];
-        
+
         for (const key of possibleKeys) {
           if (properties[key]) {
             targetKey = key;
@@ -891,17 +891,17 @@ function DetailPanel({ connector, onClose }) {
 
         // Fallback: search for "credentials" or "service account" in title if no exact match
         if (!targetKey) {
-          targetKey = Object.entries(properties).find(([key, prop]) => 
-            prop.title?.toLowerCase().includes('credential') || 
+          targetKey = Object.entries(properties).find(([key, prop]) =>
+            prop.title?.toLowerCase().includes('credential') ||
             prop.title?.toLowerCase().includes('service account')
           )?.[0];
         }
 
         if (targetKey) {
-          const credValue = typeof res.credentials === 'object' 
-            ? JSON.stringify(res.credentials, null, 2) 
+          const credValue = typeof res.credentials === 'object'
+            ? JSON.stringify(res.credentials, null, 2)
             : res.credentials;
-            
+
           setFormData(prev => ({ ...prev, [targetKey]: credValue }));
           setTestResult({ success: true, message: "Credentials loaded from global settings." });
         } else {
@@ -921,8 +921,8 @@ function DetailPanel({ connector, onClose }) {
     const possibleKeys = ['service_account', 'credentials', 'credentials_json', 'json_key'];
     let foundKey = possibleKeys.find(key => properties[key]);
     if (!foundKey) {
-      foundKey = Object.entries(properties).find(([key, prop]) => 
-        prop.title?.toLowerCase().includes('credential') || 
+      foundKey = Object.entries(properties).find(([key, prop]) =>
+        prop.title?.toLowerCase().includes('credential') ||
         prop.title?.toLowerCase().includes('service account')
       )?.[0];
     }
@@ -1039,27 +1039,27 @@ function DetailPanel({ connector, onClose }) {
                 </div>
               )}
             </div>
-            
+
             <div className="panel-foot">
-              <button 
-                className="panel-btn-secondary" 
+              <button
+                className="panel-btn-secondary"
                 onClick={() => {
                   setTestResult(null);
                   testMutation.mutate();
-                }} 
+                }}
                 disabled={testMutation.isPending || loading || extractMutation.isPending}
               >
                 {testMutation.isPending ? <Spinner size={16} /> : <Zap size={16} />}
                 Test Connection
               </button>
-              <button 
-                className="panel-btn-primary" 
+              <button
+                className="panel-btn-primary"
                 onClick={() => {
                   setTestResult(null);
                   if (validateForm()) {
                     extractMutation.mutate();
                   }
-                }} 
+                }}
                 disabled={extractMutation.isPending || loading || testMutation.isPending}
               >
                 {extractMutation.isPending ? <Spinner size={16} /> : <Play size={16} fill="currentColor" />}
@@ -1144,11 +1144,11 @@ export function ConnectorHub() {
 
   return (
     <LayoutGroup>
-      <div className="connector-hub-page" style={{ padding: '12px 24px 24px' }}>
+      <div className="connector-hub-page">
         <motion.header
-          className="page-header"
+          className="connector-page-header"
           layout
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', paddingBottom: '10px', borderBottom: '1px solid var(--border-subtle)' }}
+          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', margin: '0', padding: '0', gap: '4px', borderBottom: 'none' }}
         >
           <div>
             <motion.h1
@@ -1168,22 +1168,22 @@ export function ConnectorHub() {
                 {connectors.length}
               </span>
             </motion.h1>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0' }}>
               Configure and manage data source integrations for your pipelines.
             </p>
           </div>
 
           {/* Sleek Segmented Control (Tabs) */}
           <div style={{ display: 'flex', background: 'var(--surface-container-low)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <button 
+            <button
               className={`btn-tab ${activeTab === 'new_setup' ? 'active' : ''}`}
               onClick={() => setActiveTab('new_setup')}
-              style={{ 
-                padding: '5px 12px', 
-                borderRadius: '6px', 
-                background: activeTab === 'new_setup' ? 'var(--bg-elevated)' : 'transparent', 
-                color: activeTab === 'new_setup' ? 'var(--text-primary)' : 'var(--text-muted)', 
-                cursor: 'pointer', 
+              style={{
+                padding: '5px 12px',
+                borderRadius: '6px',
+                background: activeTab === 'new_setup' ? 'var(--bg-elevated)' : 'transparent',
+                color: activeTab === 'new_setup' ? 'var(--text-primary)' : 'var(--text-muted)',
+                cursor: 'pointer',
                 fontWeight: 600,
                 fontSize: '0.75rem',
                 boxShadow: activeTab === 'new_setup' ? 'var(--shadow-sm)' : 'none',
@@ -1192,15 +1192,15 @@ export function ConnectorHub() {
             >
               New Setup
             </button>
-            <button 
+            <button
               className={`btn-tab ${activeTab === 'saved' ? 'active' : ''}`}
               onClick={() => setActiveTab('saved')}
-              style={{ 
-                padding: '5px 12px', 
-                borderRadius: '6px', 
-                background: activeTab === 'saved' ? 'var(--bg-elevated)' : 'transparent', 
-                color: activeTab === 'saved' ? 'var(--text-primary)' : 'var(--text-muted)', 
-                cursor: 'pointer', 
+              style={{
+                padding: '5px 12px',
+                borderRadius: '6px',
+                background: activeTab === 'saved' ? 'var(--bg-elevated)' : 'transparent',
+                color: activeTab === 'saved' ? 'var(--text-primary)' : 'var(--text-muted)',
+                cursor: 'pointer',
                 fontWeight: 600,
                 fontSize: '0.75rem',
                 boxShadow: activeTab === 'saved' ? 'var(--shadow-sm)' : 'none',
@@ -1237,111 +1237,111 @@ export function ConnectorHub() {
               </div>
             </motion.div>
 
-        <div className="hub-body">
-          <motion.section
-            className="hub-list-area"
-            layout
-            transition={{ type: 'spring', damping: 30, stiffness: 350 }}
-          >
-            {/* List Table Header */}
-            {!loading && filteredConnectors.length > 0 && (
-              <div className="list-header">
-                <div></div>
-                <div>Integration</div>
-                <div className="list-h-cat">Category</div>
-                <div className="list-h-type">Type</div>
-                <div></div>
-              </div>
-            )}
+            <div className="hub-body">
+              <motion.section
+                className="hub-list-area"
+                layout
+                transition={{ type: 'spring', damping: 30, stiffness: 350 }}
+              >
+                {/* List Table Header */}
+                {!loading && filteredConnectors.length > 0 && (
+                  <div className="list-header">
+                    <div></div>
+                    <div>Integration</div>
+                    <div className="list-h-cat">Category</div>
+                    <div className="list-h-type">Type</div>
+                    <div></div>
+                  </div>
+                )}
 
-            <div className="hub-list">
-              {loading ? (
-                <div className="connector-skeleton-list">
-                  {[1, 2, 3, 4, 5].map(i => (
-                    <div key={i} className="skeleton-row">
-                      {/* Icon */}
-                      <div className="skeleton-icon"></div>
-                      {/* Name + description */}
-                      <div className="skeleton-text">
-                        <div className="skeleton-line w-32"></div>
-                        <div className="skeleton-line w-48 thin"></div>
-                      </div>
-                      {/* Category */}
-                      <div className="skeleton-cat"></div>
-                      {/* Type badge */}
-                      <div className="skeleton-badge"></div>
-                      {/* Chevron placeholder */}
-                      <div></div>
+                <div className="hub-list">
+                  {loading ? (
+                    <div className="connector-skeleton-list">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <div key={i} className="skeleton-row">
+                          {/* Icon */}
+                          <div className="skeleton-icon"></div>
+                          {/* Name + description */}
+                          <div className="skeleton-text">
+                            <div className="skeleton-line w-32"></div>
+                            <div className="skeleton-line w-48 thin"></div>
+                          </div>
+                          {/* Category */}
+                          <div className="skeleton-cat"></div>
+                          {/* Type badge */}
+                          <div className="skeleton-badge"></div>
+                          {/* Chevron placeholder */}
+                          <div></div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : filteredConnectors.length === 0 ? (
+                    /* Empty State */
+                    <div className="hub-empty">
+                      <Box size={40} strokeWidth={1.5} className="opacity-40" />
+                      <h3>No integrations found for "{search}"</h3>
+                    </div>
+                  ) : (
+                    /* List Rows */
+                    <AnimatePresence initial={false}>
+                      {filteredConnectors.map(c => {
+                        const Icon = LOGO_MAP[c.engine] || Settings2;
+                        const isActive = selectedConnector?.engine === c.engine;
+                        const category = getCategory(c.engine);
+
+                        return (
+                          <motion.div
+                            key={c.engine}
+                            layout
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.2 }}
+                            className={`c-list-row ${isActive ? 'active' : ''}`}
+                            onClick={() => setSelectedConnector(isActive ? null : c)}
+                          >
+                            <div className="c-list-icon">
+                              <Icon />
+                            </div>
+
+                            <div className="c-list-title">
+                              <h3 className="c-list-name">{c.name}</h3>
+                              <p className="c-list-desc">
+                                {c.description || `Optimized direct connection to ${c.name}.`}
+                              </p>
+                            </div>
+
+                            <div className="c-list-category">
+                              {category}
+                            </div>
+
+                            <div>
+                              <span className="c-list-badge">
+                                {c.connector_type}
+                              </span>
+                            </div>
+
+                            <div className="c-list-action">
+                              {isActive ? <Check size={18} /> : <ChevronRight size={18} />}
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  )}
                 </div>
-              ) : filteredConnectors.length === 0 ? (
-                /* Empty State */
-                <div className="hub-empty">
-                  <Box size={40} strokeWidth={1.5} className="opacity-40" />
-                  <h3>No integrations found for "{search}"</h3>
-                </div>
-              ) : (
-                /* List Rows */
-                <AnimatePresence initial={false}>
-                  {filteredConnectors.map(c => {
-                    const Icon = LOGO_MAP[c.engine] || Settings2;
-                    const isActive = selectedConnector?.engine === c.engine;
-                    const category = getCategory(c.engine);
+              </motion.section>
 
-                    return (
-                      <motion.div
-                        key={c.engine}
-                        layout
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.98 }}
-                        transition={{ duration: 0.2 }}
-                        className={`c-list-row ${isActive ? 'active' : ''}`}
-                        onClick={() => setSelectedConnector(isActive ? null : c)}
-                      >
-                        <div className="c-list-icon">
-                          <Icon />
-                        </div>
-
-                        <div className="c-list-title">
-                          <h3 className="c-list-name">{c.name}</h3>
-                          <p className="c-list-desc">
-                            {c.description || `Optimized direct connection to ${c.name}.`}
-                          </p>
-                        </div>
-
-                        <div className="c-list-category">
-                          {category}
-                        </div>
-
-                        <div>
-                          <span className="c-list-badge">
-                            {c.connector_type}
-                          </span>
-                        </div>
-
-                        <div className="c-list-action">
-                          {isActive ? <Check size={18} /> : <ChevronRight size={18} />}
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              )}
+              <AnimatePresence>
+                {selectedConnector && (
+                  <DetailPanel
+                    key={selectedConnector.engine}
+                    connector={selectedConnector}
+                    onClose={() => setSelectedConnector(null)}
+                  />
+                )}
+              </AnimatePresence>
             </div>
-          </motion.section>
-
-          <AnimatePresence>
-            {selectedConnector && (
-              <DetailPanel
-                key={selectedConnector.engine}
-                connector={selectedConnector}
-                onClose={() => setSelectedConnector(null)}
-              />
-            )}
-          </AnimatePresence>
-        </div>
           </>
         ) : (
           <SavedConnectionsTab />

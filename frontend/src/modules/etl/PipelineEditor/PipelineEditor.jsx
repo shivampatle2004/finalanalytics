@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ReactFlow,
@@ -21,7 +22,7 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { DataPreview } from './DataPreview';
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { SmartValidator } from './SmartValidator';
-import { Play, Save, Check, Loader2, Maximize2, X, Activity, ShieldCheck, Trash2, Undo2, Redo2, Copy, Scissors, Wand2, LayoutGrid, PanelLeft, Settings, Clock } from 'lucide-react';
+import { Play, Save, Check, Loader2, Maximize2, X, Activity, ShieldCheck, Trash2, Undo2, Redo2, Copy, Scissors, Wand2, LayoutGrid, PanelLeft, Settings, Clock, ArrowLeft } from 'lucide-react';
 import { api } from '../services/etlService';
 import { wsManager } from '../services/websocket';
 import { useUndoRedo } from './hooks/useUndoRedo';
@@ -77,6 +78,9 @@ const getId = () => `node_${Date.now()}_${idCounter++}`;
 
 export function PipelineEditor({ pipelineId, onNavigate }) {
   const reactFlowWrapper = useRef(null);
+  const routeParams = useParams();
+  const routerNavigate = useNavigate();
+  const activePipelineId = pipelineId || routeParams.id;
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const { undo, redo, takeSnapshot, canUndo, canRedo } = useUndoRedo(setNodes, setEdges);
@@ -145,7 +149,8 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
         const loadedNodes = (data.dag_definition.nodes || []).map(node => ({
           ...node,
           width: node.width || 220,
-          height: node.height || 80
+          height: node.height || 80,
+          data: { ...node.data, pipelineId: id }
         }));
         setNodes(loadedNodes);
         setEdges(data.dag_definition.edges || []);
@@ -158,8 +163,8 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
   // Load pipeline if an ID is passed and it's not "new"
   useEffect(() => {
     const init = async () => {
-      if (pipelineId && pipelineId !== 'new') {
-        await loadPipeline(pipelineId);
+      if (activePipelineId && activePipelineId !== 'new') {
+        await loadPipeline(activePipelineId);
         setIsNew(false);
       } else {
         setPipelineName('Untitled Pipeline');
@@ -167,7 +172,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
       }
     };
     init();
-  }, [pipelineId, loadPipeline]);
+  }, [activePipelineId, loadPipeline]);
 
   const onConnect = useCallback((params) => {
     takeSnapshot(nodes, edges);
@@ -224,7 +229,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
       position,
       width: 220,
       height: 80,
-      data: { label: `New ${type.charAt(0).toUpperCase() + type.slice(1)}` },
+      data: { label: `New ${type.charAt(0).toUpperCase() + type.slice(1)}`, pipelineId: activePipelineId },
     };
 
     setNodes((nds) => nds.concat(newNode));
@@ -295,7 +300,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
         if (onNavigate) {
           onNavigate('editor', result.id);
         } else {
-          window.location.hash = `#/pipeline/${result.id}`;
+          routerNavigate(`/etl/pipelines/editor/${result.id}`);
         }
       } catch (err) {
         addToast("Failed to copy pipeline: " + (err.response?.data?.detail || err.message), "error");
@@ -309,7 +314,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
     };
     localStorage.setItem('pipeline_clipboard', JSON.stringify(clipboardData));
     addToast(`${selectedNodes.length} node(s) copied to clipboard.`, "success");
-  }, [reactFlowInstance, nodes, edges, pipelineName, pipelineComment, isNew, onNavigate, addToast]);
+  }, [reactFlowInstance, nodes, edges, pipelineName, pipelineComment, isNew, onNavigate, addToast, routerNavigate]);
 
   const handlePaste = useCallback(() => {
     const clipboardStr = localStorage.getItem('pipeline_clipboard');
@@ -386,7 +391,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
   }, [reactFlowInstance, takeSnapshot, nodes, edges]);
 
   const handleOpenPreview = useCallback(async (nodeId) => {
-    if (!pipelineId || isNew) {
+    if (!activePipelineId || isNew) {
       addToast("Please save the pipeline first before previewing data.", "info");
       return;
     }
@@ -396,12 +401,12 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
         nodes: nodes.map(n => ({ id: n.id, type: n.type, data: n.data, position: n.position })),
         edges: edges.map(e => ({ source: e.source, target: e.target, id: e.id }))
       };
-      await api.updatePipeline(pipelineId, { dag_definition, name: pipelineName, description: pipelineComment });
+      await api.updatePipeline(activePipelineId, { dag_definition, name: pipelineName, description: pipelineComment });
       setPreviewNodeId(nodeId);
     } catch (err) {
       addToast("Auto-save failed: " + (err.response?.data?.detail || err.message), "error");
     }
-  }, [pipelineId, isNew, nodes, edges, pipelineName, addToast]);
+  }, [activePipelineId, isNew, nodes, edges, pipelineName, addToast]);
 
   useEffect(() => {
     const handleNodePreviewEvent = (e) => {
@@ -432,7 +437,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
           nodes: currentNodes.map(n => ({ id: n.id, type: n.type, data: n.data, position: n.position })),
           edges: currentEdges.map(e => ({ source: e.source, target: e.target, id: e.id }))
         };
-        await api.updatePipeline(pipelineId, { 
+        await api.updatePipeline(activePipelineId, { 
           dag_definition, 
           name: pipelineName, 
           description: pipelineComment,
@@ -452,13 +457,13 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
       window.removeEventListener('node-data-update', handleNodeDataUpdate);
       window.removeEventListener('pipeline-autosave', handlePipelineAutosave);
     };
-  }, [handleOpenPreview, setNodes, pipelineId, isNew, pipelineName, pipelineComment, scheduleCron, reactFlowInstance]);
+  }, [handleOpenPreview, setNodes, activePipelineId, isNew, pipelineName, pipelineComment, scheduleCron, reactFlowInstance]);
 
   // WebSocket Live Updates
   useEffect(() => {
-    if (!pipelineId || isNew) return;
+    if (!activePipelineId || isNew) return;
 
-    wsManager.connect(pipelineId);
+    wsManager.connect(activePipelineId);
     const wsUnsubscribe = wsManager.subscribe((msg) => {
       if (msg.type === 'job_update') {
         if (msg.status === 'success' || msg.status === 'failed') {
@@ -497,7 +502,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
       wsUnsubscribe();
       wsManager.disconnect();
     };
-  }, [pipelineId, isNew, setNodes, setEdges]);
+  }, [activePipelineId, isNew, setNodes, setEdges]);
 
   const handlePreRunValidate = () => {
     if (isNew) {
@@ -529,8 +534,8 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
         edges: edges.map(e => ({ source: e.source, target: e.target, id: e.id }))
       };
 
-      await api.updatePipeline(pipelineId, { dag_definition, name: pipelineName, description: pipelineComment });
-      await api.executePipeline(pipelineId);
+      await api.updatePipeline(activePipelineId, { dag_definition, name: pipelineName, description: pipelineComment });
+      await api.executePipeline(activePipelineId);
 
     } catch (err) {
       console.error('Execution Failed', err);
@@ -540,7 +545,6 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
   };
 
   const handleSave = async () => {
-    if (isNew) return;
     try {
       const currentNodes = reactFlowInstance ? reactFlowInstance.getNodes() : nodes;
       const currentEdges = reactFlowInstance ? reactFlowInstance.getEdges() : edges;
@@ -549,16 +553,30 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
         nodes: currentNodes.map(n => ({ id: n.id, type: n.type, data: n.data, position: n.position })),
         edges: currentEdges.map(e => ({ source: e.source, target: e.target, id: e.id }))
       };
-      await api.updatePipeline(pipelineId, { 
-        dag_definition, 
+      
+      const payload = {
         name: pipelineName, 
         description: pipelineComment,
+        dag_definition,
         schedule_cron: scheduleCron 
-      });
-      addToast("Pipeline saved successfully!", "success");
+      };
+
+      if (isNew) {
+        const result = await api.createPipeline(payload);
+        addToast("Pipeline created successfully!", "success");
+        setIsNew(false);
+        if (onNavigate) {
+          onNavigate('editor', result.id);
+        } else {
+          routerNavigate(`/etl/pipelines/editor/${result.id}`, { replace: true });
+        }
+      } else {
+        await api.updatePipeline(activePipelineId, payload);
+        addToast("Pipeline saved successfully!", "success");
+      }
     } catch (err) {
       console.error("Save failed", err);
-      addToast("Failed to save pipeline.", "error");
+      addToast(`Failed to save pipeline: ${err.response?.data?.detail || err.message}`, "error");
     }
   };
 
@@ -582,6 +600,14 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
       {/* ── Navbar ── */}
       <header className="pe-navbar glass">
         <div className="pe-nav-left">
+          <button
+            className="pe-btn-icon"
+            style={{ marginRight: '4px' }}
+            onClick={() => routerNavigate('/dw/jobs')}
+            title="Back to Jobs & Pipelines"
+          >
+            <ArrowLeft size={14} />
+          </button>
           <button 
             className="pe-btn-icon" 
             style={{ marginRight: '6px' }}
@@ -595,7 +621,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
             value={pipelineName}
             onChange={(e) => setPipelineName(e.target.value)}
           />
-          {!isNew && pipelineId && <div className="pe-pid-badge">ID: {pipelineId.substring(0, 8)}</div>}
+          {!isNew && activePipelineId && <div className="pe-pid-badge">ID: {activePipelineId.substring(0, 8)}</div>}
           <input
             className="pe-comment-input"
             placeholder="Add pipeline comment..."
@@ -754,9 +780,9 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
                       node={selectedNode}
                       onUpdateNode={onUpdateNode}
                       onPreview={() => handleOpenPreview(selectedNode.id)}
-                      onFetchPreview={() => api.previewData(pipelineId, selectedNode.id)}
+                      onFetchPreview={() => api.previewData(activePipelineId, selectedNode.id)}
                       parentSchema={getSchemaForNode(selectedNode.id)}
-                      pipelineId={pipelineId}
+                      pipelineId={activePipelineId}
                     />
                   </div>
                 </div>
@@ -856,7 +882,7 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
       {/* ── Modals / Drawers ── */}
       {previewNodeId && (
         <DataPreview
-          pipelineId={pipelineId}
+          pipelineId={activePipelineId}
           nodeId={previewNodeId}
           onClose={() => setPreviewNodeId(null)}
         />
