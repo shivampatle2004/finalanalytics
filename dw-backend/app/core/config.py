@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from urllib.parse import quote_plus
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 # ── Locate .env using absolute path ──────────────────────────────────────────
 # config.py is at: backend/app/core/config.py
@@ -27,6 +27,11 @@ COLLECTION_NAME = "workspace_items"
 class Settings:
     @property
     def DATABASE_URL_DIRECT(self) -> str:
+        if ENV_PATH.exists():
+            env_dict = dotenv_values(ENV_PATH)
+            if "DATABASE_URL" in env_dict:
+                return env_dict["DATABASE_URL"] or ""
+            return ""
         return os.getenv("DATABASE_URL", "")
 
     @property

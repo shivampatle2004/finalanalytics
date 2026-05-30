@@ -319,8 +319,8 @@ def run_single_task(job_id: UUID = Path(...), task_id: UUID = Path(...), backgro
     db.commit()
 
     # Use orchestrator to run just this one via BackgroundTasks
-    from app.modules.jobs.services.orchestrator import execute_job_run_sync
-    background_tasks.add_task(execute_job_run_sync, str(job_id), str(job_run.id))
+    from app.modules.jobs.services.orchestrator import _run_orchestrator_async
+    background_tasks.add_task(_run_orchestrator_async, str(job_id), str(job_run.id))
 
     return {
         "status": "triggered",

@@ -3,13 +3,25 @@
  * All API calls should flow through this module.
  */
 
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_URL || '';
+const PRIMARY_BASE = API_BASE;
+const FALLBACK_BASE = 'http://localhost:8004';
+
 
 async function request(url, options = {}) {
-  const res = await fetch(`${API_BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(`${PRIMARY_BASE}${url}`, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options,
+    });
+  } catch (err) {
+    console.warn("Primary DW API failed, falling back to localhost...");
+    res = await fetch(`${FALLBACK_BASE}${url}`, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options,
+    });
+  }
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
