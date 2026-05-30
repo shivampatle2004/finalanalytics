@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FiFileText, FiTrash2, FiRotateCcw, FiMoreVertical, FiStar, FiUsers } from 'react-icons/fi';
+import { FiFileText, FiTrash2, FiRotateCcw, FiStar, FiUsers } from 'react-icons/fi';
 import Breadcrumbs from './Breadcrumbs';
 import CreateDropdown from './CreateDropdown';
 import FileList from './FileList';
@@ -96,9 +96,10 @@ const WorkspacePage = () => {
   // Virtual view helpers
   const isTrashView = currentFolderId === '__trash__';
   const isFavoritesView = currentFolderId === '__favorites__';
-  const isSharedView = currentFolderId === '__shared__';
+  const isSharedView = currentFolderId === '__shared__' || currentFolderId === '__ws_shared__';
   const isUsersView = currentFolderId === '__users__';
-  const isVirtualView = isTrashView || isFavoritesView || isSharedView || isUsersView;
+  const isReposView = currentFolderId === '__repos__';
+  const isVirtualView = isTrashView || isFavoritesView || isSharedView || isUsersView || isReposView;
 
   const handleContextMenu = (e, item) => {
     e.preventDefault();
@@ -163,18 +164,12 @@ const WorkspacePage = () => {
                 </div>
 
                 <div className="flex items-center gap-4 relative" ref={headerRef}>
-                  <button className="p-1 px-1.5 rounded-lg hover:bg-[rgba(0,0,0,0.03)] transition-all opacity-70 hover:opacity-100" style={{ color: 'var(--df-text-soft)' }}>
-                    <FiMoreVertical size={14} />
-                  </button>
-
-                  <div className="h-4 w-[1px]" style={{ backgroundColor: 'var(--df-border)' }} />
-
                   <div className="flex items-center gap-2 relative">
                     {(!isVirtualView || isUsersView || isSharedView) && (
                       <>
                         <button
                           onClick={() => setShowShareModal(true)}
-                          className="px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-all border"
+                          className="px-4 py-2 rounded-lg text-[14px] font-semibold transition-all border"
                           style={{
                             backgroundColor: 'transparent',
                             borderColor: 'var(--df-border)',
@@ -197,12 +192,13 @@ const WorkspacePage = () => {
 
               {/* ROW 2: Large Title + Favorite Star */}
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--df-text)' }}>
+                <h1 className="text-[30px] font-bold tracking-tight" style={{ color: 'var(--df-text)' }}>
                   {isTrashView ? 'Trash'
                     : isFavoritesView ? 'Favorites'
                       : isSharedView ? 'Shared with me'
-                        : isUsersView ? 'My Notebooks'
-                          : 'Home'
+                        : isUsersView ? 'Users'
+                          : isReposView ? 'Repos'
+                            : 'Home'
                   }
                 </h1>
                 {!isVirtualView && (currentFolderId !== null) && (
@@ -282,7 +278,7 @@ const WorkspacePage = () => {
                 items={getSearchItems()}
                 currentFolderId={(searchScope === 'workspace' && searchQuery) ? null : currentFolderId}
                 onOpen={handleOpen}
-                onRename={handleRename}
+                onRename={(item) => triggerAction('rename', item)}
                 onDelete={handleDelete}
                 onToggleFavorite={handleToggleFavorite}
                 onContextMenu={handleContextMenu}

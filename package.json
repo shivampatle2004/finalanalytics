@@ -3,16 +3,12 @@
   "version": "1.0.0",
   "description": "OneStop Analytics Orchestration",
   "scripts": {
-    "start": "concurrently \"npm run start:analytics\" \"npm run start:etl\" \"npm run start:dw\" \"npm run start:frontend\"",
-    "start:analytics": "cd Analytics-backend && venv\\Scripts\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8010 --reload",
-    "start:etl": "cd ETL-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
-    "start:dw": "cd dw-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8004 --reload",
-    "start:frontend": "cd frontend && npm run dev",
-    "setup:analytics": "cd Analytics-backend && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
-    "setup:etl": "cd ETL-backend && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
-    "setup:dw": "cd dw-backend && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt",
-    "setup:frontend": "cd frontend && npm install",
-    "setup": "npm install && npm run setup:analytics && npm run setup:etl && npm run setup:dw && npm run setup:frontend"
+    "frontend": "cd frontend && npm run dev",
+    "etl": "cd ETL-backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload --port 8000",
+    "dw": "cd dw-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --port 8004",
+    "analytics": "cd Analytics-backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload --port 8010",
+
+    "start": "concurrently \"npm run frontend\" \"npm run etl\" \"npm run dw\" \"npm run analytics\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

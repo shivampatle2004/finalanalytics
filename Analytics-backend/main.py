@@ -24,9 +24,9 @@ API_PREFIX = "/analytics"
 
 app = FastAPI(
     title="OneStopAnalytics API",
-    openapi_url=f"{API_PREFIX}/openapi.json",
-    docs_url=f"{API_PREFIX}/docs",
-    redoc_url=f"{API_PREFIX}/redoc"
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # CORS is not needed anymore since frontend and backend are on the same port

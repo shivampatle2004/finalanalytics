@@ -1,148 +1,257 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FiUsers, FiStar, FiTrash2, FiShare2, FiHome, FiFolder, FiChevronRight, FiChevronDown
+import {
+  FiUsers, FiStar, FiTrash2, FiShare2, FiHome,
+  FiChevronRight, FiChevronDown
 } from 'react-icons/fi';
 
-const SidebarItem = ({ icon: Icon, label, isActive, onClick, hasChildren, isExpanded, onToggle, depth = 0, iconColor }) => {
+/*
+  Icon colour strategy:
+  - Burgundy icons  → var(--df-icon-accent)
+      Light mode: #7A1E3A  (dark burgundy — visible on white)
+      Dark mode:  #B8385D  (bright rose   — visible on dark bg)
+  - Cyan icons      → #38BDF8  (always bright, works on both)
+  - Neutral (Trash) → var(--df-text-muted)
+      Light: #555555   Dark: #A0A0A0
+*/
+const C_ICON_ACCENT = 'var(--df-icon-accent)';
+const C_CYAN        = '#38BDF8';
+const C_NEUTRAL     = 'var(--df-text-muted)';
+
+/* ─────────────────────────────────────────
+   Single nav row
+───────────────────────────────────────── */
+const NavItem = ({
+  icon: Icon,
+  label,
+  isActive,
+  onClick,
+  depth = 0,
+  iconColor,
+  hasChevron = false,
+  isExpanded = false,
+  onChevronClick,
+}) => {
+  const [hovered, setHovered] = useState(false);
+
+  const paddingLeft = depth === 0 ? 16 : 36;
+
   return (
     <div
-      className="flex items-center group cursor-pointer transition-all relative py-[7px] my-[1px] rounded-md mx-2 hover:bg-black/5 dark:hover:bg-white/5"
-      style={{
-        backgroundColor: isActive ? 'var(--df-accent-medium)' : '',
-      }}
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        paddingLeft,
+        paddingRight: 12,
+        paddingTop: 9,
+        paddingBottom: 9,
+        cursor: 'pointer',
+        /* Use theme-aware active/hover backgrounds */
+        backgroundColor: isActive
+          ? 'var(--df-sidebar-active)'
+          : hovered
+          ? 'var(--df-sidebar-hover)'
+          : 'transparent',
+        userSelect: 'none',
+        transition: 'background-color 0.15s ease',
+      }}
     >
-      {/* Active Indicator Bar */}
+      {/* Left accent bar */}
       {isActive && (
-        <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r-md" style={{ backgroundColor: 'var(--df-accent)' }} />
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            borderRadius: '0 2px 2px 0',
+            backgroundColor: 'var(--df-icon-accent)',
+          }}
+        />
       )}
 
-      <div 
-        className="flex items-center gap-2.5 flex-1 min-w-0"
-        style={{ paddingLeft: `${depth * 18 + 12}px` }}
+      {/* Chevron slot — fixed 20px so icons stay aligned */}
+      <div
+        style={{
+          width: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          marginRight: 6,
+        }}
       >
-        <div className="flex items-center justify-center w-4 h-4">
-          {hasChildren && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggle(); }}
-              className="p-0.5 rounded transition-colors hover:bg-black/10 dark:hover:bg-white/10"
-              style={{ color: 'var(--df-text-muted)' }}
-            >
-              {isExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-            </button>
-          )}
-        </div>
-
-        {Icon && (
-          <div className="flex-shrink-0 flex items-center justify-center">
-            <Icon 
-              size={17} 
-              strokeWidth={2}
-              style={{ 
-                color: iconColor || (isActive ? 'var(--df-accent)' : 'var(--df-text-muted)')
-              }} 
-            />
-          </div>
+        {hasChevron && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onChevronClick?.(); }}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              color: 'var(--df-text-muted)',
+            }}
+          >
+            {isExpanded
+              ? <FiChevronDown size={14} strokeWidth={2.5} />
+              : <FiChevronRight size={14} strokeWidth={2.5} />}
+          </button>
         )}
-
-        <span
-          className={`text-[13px] truncate ${isActive ? 'font-medium' : ''}`}
-          style={{ color: 'var(--df-strong)' }}
-        >
-          {label}
-        </span>
       </div>
+
+      {/* Icon */}
+      {Icon && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', marginRight: 10 }}>
+          <Icon
+            size={20}
+            strokeWidth={1.75}
+            style={{ color: iconColor || C_ICON_ACCENT }}
+          />
+        </div>
+      )}
+
+      {/* Label */}
+      <span
+        style={{
+          fontSize: 15,
+          fontWeight: isActive ? 600 : 400,
+          color: 'var(--df-text)',
+          fontFamily: 'var(--font-sans)',
+          lineHeight: 1.4,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
     </div>
   );
 };
 
+/* ─────────────────────────────────────────
+   Sidebar
+───────────────────────────────────────── */
 const WorkspaceSidebar = ({ activeSection, onNavigate, items = [] }) => {
-  const [sidebarWidth, setSidebarWidth] = useState(240);
-  const [isDragging, setIsDragging] = useState(false);
+  const [sidebarWidth, setSidebarWidth]   = useState(240);
+  const [isDragging, setIsDragging]       = useState(false);
 
-  const handleMouseDown = (e) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
+  /* Drag-to-resize */
+  const handleMouseDown = (e) => { e.preventDefault(); setIsDragging(true); };
 
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const onMove = (e) => {
       if (!isDragging) return;
-      const newWidth = Math.min(Math.max(e.clientX, 180), 500);
-      setSidebarWidth(newWidth);
+      setSidebarWidth(Math.min(Math.max(e.clientX, 180), 500));
     };
-    const handleMouseUp = () => setIsDragging(false);
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    const onUp = () => setIsDragging(false);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
     };
   }, [isDragging]);
 
+  const isHome = activeSection === null || activeSection === undefined;
+
   return (
     <div
-      className="flex-shrink-0 h-screen sticky top-0 flex flex-col df-scrollbar overflow-y-auto relative border-r"
       style={{
-        width: `${sidebarWidth}px`,
+        width: sidebarWidth,
+        flexShrink: 0,
+        height: '100vh',
+        position: 'sticky',
+        top: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflowY: 'auto',
+        overflowX: 'hidden',
         backgroundColor: 'var(--df-sidebar-bg)',
-        borderColor: 'var(--df-border-light)'
+        borderRight: '1px solid var(--df-border-light)',
+        fontFamily: 'var(--font-sans)',
       }}
+      className="df-scrollbar"
     >
-      {/* Drag Handle */}
-      <div 
-        className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 hover:bg-blue-500/20"
+      {/* Drag handle */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          width: 4,
+          height: '100%',
+          cursor: 'col-resize',
+          zIndex: 10,
+        }}
         onMouseDown={handleMouseDown}
       />
 
-      <div className="pt-6 pb-4 px-6 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'var(--df-accent-soft)' }}>
-            <FiFolder size={16} style={{ color: 'var(--df-accent)' }} />
-        </div>
-        <h1 className="text-[17px] font-bold tracking-tight" style={{ color: 'var(--df-strong)' }}>
+      {/* ── "Workspace" title ── */}
+      <div style={{ padding: '22px 20px 14px 20px' }}>
+        <span
+          style={{
+            fontSize: 24,
+            fontWeight: 700,
+            fontFamily: 'var(--font-heading)',
+            color: 'var(--df-strong)',
+            letterSpacing: '-0.02em',
+            lineHeight: 1.2,
+          }}
+        >
           Workspace
-        </h1>
+        </span>
       </div>
 
-      <nav className="flex flex-col select-none mt-2">
-        {/* Users */}
-        <SidebarItem
-          icon={FiUsers}
-          label="Users"
-          isActive={activeSection === '__users__'}
-          onClick={() => onNavigate('__users__')}
-          depth={0}
-          iconColor="#4285F4" // Blue
+      {/* ── Nav ── */}
+      <nav style={{ display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
+
+        {/* Home */}
+        <NavItem
+          icon={FiHome}
+          label="Home"
+          isActive={isHome}
+          onClick={() => onNavigate(null)}
+          iconColor={C_ICON_ACCENT}
         />
 
-        {/* Shared */}
-        <SidebarItem
+        {/* Shared with me */}
+        <NavItem
           icon={FiShare2}
-          label="Shared"
+          label="Shared with me"
           isActive={activeSection === '__shared__'}
           onClick={() => onNavigate('__shared__')}
-          depth={0}
-          iconColor="#34A853" // Green
+          iconColor={C_ICON_ACCENT}
         />
 
+        {/* Gap before Favorites / Trash */}
+        <div style={{ height: 6 }} />
+
         {/* Favorites */}
-        <SidebarItem
+        <NavItem
           icon={FiStar}
           label="Favorites"
           isActive={activeSection === '__favorites__'}
           onClick={() => onNavigate('__favorites__')}
-          depth={0}
-          iconColor="#FBBC05" // Yellow
+          iconColor={C_ICON_ACCENT}
         />
 
         {/* Trash */}
-        <SidebarItem
+        <NavItem
           icon={FiTrash2}
           label="Trash"
           isActive={activeSection === '__trash__'}
           onClick={() => onNavigate('__trash__')}
-          depth={0}
-          iconColor="#EA4335" // Red
+          iconColor={C_NEUTRAL}
         />
       </nav>
     </div>

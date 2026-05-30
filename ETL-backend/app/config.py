@@ -82,10 +82,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str | None = None
 
     model_config = {
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": True,
-    }
+    "env_file": ".env",
+    "env_file_encoding": "utf-8",
+    "case_sensitive": True,
+    "extra": "ignore"
+}
 
 
 settings = Settings()

@@ -8,10 +8,10 @@ import {
 
 const MenuItem = ({ icon: Icon, label, onClick, danger, hasSubmenu, subMenuOpen }) => {
   return (
-    <div className="px-1 py-[1.5px]">
+    <div className="px-2 py-[2px]">
       <button
         onClick={(e) => { e.stopPropagation(); onClick(); }}
-        className="w-full text-left px-3 py-1.2 flex items-center justify-between text-[12.5px] rounded-md transition-all duration-150 group"
+        className="w-full text-left px-3 py-1.5 flex items-center justify-between text-[14px] rounded-lg transition-all duration-150 group"
         style={{ color: danger ? '#f87171' : 'var(--df-text)' }}
         onMouseEnter={(e) => {
           e.currentTarget.style.backgroundColor = danger ? 'rgba(248, 113, 113, 0.1)' : 'var(--df-accent-medium)';
@@ -22,11 +22,11 @@ const MenuItem = ({ icon: Icon, label, onClick, danger, hasSubmenu, subMenuOpen 
           e.currentTarget.style.color = danger ? '#f87171' : 'var(--df-text)';
         }}
       >
-        <div className="flex items-center gap-2.5">
-          <Icon size={13} className={`flex-shrink-0 ${danger ? 'text-red-400' : 'opacity-60 group-hover:opacity-100'}`} />
+        <div className="flex items-center gap-3">
+          <Icon size={16} className={`flex-shrink-0 ${danger ? 'text-red-400' : 'opacity-55 group-hover:opacity-100'}`} />
           <span className="truncate font-medium">{label}</span>
         </div>
-        {hasSubmenu && <FiChevronRight size={12} className={`opacity-40 group-hover:opacity-100 transition-transform ${subMenuOpen ? 'rotate-90' : ''}`} />}
+        {hasSubmenu && <FiChevronRight size={13} className={`opacity-40 group-hover:opacity-100 transition-transform ${subMenuOpen ? 'rotate-90' : ''}`} />}
       </button>
     </div>
   );
@@ -230,7 +230,7 @@ const ContextMenu = ({
     });
   };
 
-  const Divider = () => <div className="h-[1px] my-1 mx-2 opacity-30" style={{ backgroundColor: 'var(--df-border)' }} />;
+  const Divider = () => <div className="h-[1px] my-1.5 mx-3 opacity-40" style={{ backgroundColor: 'var(--df-border)' }} />;
 
   const SubMenuContainer = ({ children, visible }) => (
     visible ? (
@@ -250,13 +250,14 @@ const ContextMenu = ({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 rounded-xl shadow-lg py-2 w-[205px] animate-fadeIn"
+      className="fixed z-50 rounded-2xl shadow-xl py-2.5 w-[230px] animate-fadeIn"
       style={{
         top: pos.y,
         left: pos.x,
         maxHeight: `${maxH}px`,
         backgroundColor: 'var(--df-panel)',
         border: '1px solid var(--df-border)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
       }}
     >
       {isTrashView ? (

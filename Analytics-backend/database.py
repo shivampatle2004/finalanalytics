@@ -12,7 +12,7 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "Sarvesh10")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "onestopanalytics")
+DB_NAME = os.getenv("DB_NAME_PG", "onestopanalytics")
 
 # Construct the URL if individual components are provided
 DATABASE_URL = os.getenv("DATABASE_URL")
