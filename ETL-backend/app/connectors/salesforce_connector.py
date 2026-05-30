@@ -30,33 +30,57 @@ class SalesforceConnector(BaseConnector):
     """
 
     async def _get_access_token(self) -> str:
-        """Exchange refresh_token for a fresh access_token via Salesforce OAuth2."""
+        """Exchange credentials for an access_token via Salesforce OAuth2.
+        
+        Supports two grant types:
+        - refresh_token (preferred): needs client_id, client_secret, refresh_token
+        - password (fallback): needs client_id, client_secret, username, password
+        """
         instance_url = self.config.get("instance_url", "").rstrip("/")
         if not instance_url:
             raise ValueError("Salesforce instance_url is required.")
-            
-        token_url = f"{instance_url}/services/oauth2/token"
 
-        data = {
-            "grant_type": "refresh_token",
-            "client_id": self.config.get("client_id", ""),
-            "client_secret": self.config.get("client_secret", ""),
-            "refresh_token": self.config.get("refresh_token", ""),
-        }
+        token_url = f"{instance_url}/services/oauth2/token"
+        refresh_token = self.config.get("refresh_token", "").strip()
+
+        if refresh_token:
+            data = {
+                "grant_type": "refresh_token",
+                "client_id": self.config.get("client_id", ""),
+                "client_secret": self.config.get("client_secret", ""),
+                "refresh_token": refresh_token,
+            }
+        else:
+            # Fallback: resource owner password credentials flow
+            username = self.config.get("username", "").strip()
+            password = self.config.get("password", "").strip()
+            security_token = self.config.get("security_token", "").strip()
+            if not username or not password:
+                raise ValueError(
+                    "Salesforce requires either 'refresh_token' or 'username' + 'password' in config."
+                )
+            data = {
+                "grant_type": "password",
+                "client_id": self.config.get("client_id", ""),
+                "client_secret": self.config.get("client_secret", ""),
+                "username": username,
+                # Salesforce requires appending the security token to the password
+                "password": password + security_token,
+            }
 
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(token_url, data=data)
             if resp.status_code != 200:
                 logger.error(f"Salesforce token refresh failed status={resp.status_code}: {resp.text}")
                 resp.raise_for_status()
-            
+
             token_data = resp.json()
 
         if "access_token" not in token_data:
             error_msg = token_data.get("error_description", "Unknown error")
-            raise ValueError(f"Salesforce token refresh failed: {error_msg}")
+            raise ValueError(f"Salesforce authentication failed: {error_msg}")
 
-        logger.info("Salesforce access token refreshed successfully.")
+        logger.info("Salesforce access token obtained successfully.")
         return token_data["access_token"]
 
     async def test_connection(self) -> bool:
@@ -149,11 +173,28 @@ class SalesforceConnector(BaseConnector):
                     "type": "string",
                     "title": "Consumer Secret (Client Secret)",
                     "description": "From Connected App settings",
+                    "format": "password",
                 },
                 "refresh_token": {
                     "type": "string",
-                    "title": "Refresh Token",
-                    "description": "OAuth2 Refresh Token",
+                    "title": "Refresh Token (OAuth2 — preferred)",
+                    "description": "OAuth2 Refresh Token. Preferred over username/password.",
+                },
+                "username": {
+                    "type": "string",
+                    "title": "Username (password auth fallback)",
+                    "description": "Your Salesforce login email. Used when no refresh_token is available.",
+                },
+                "password": {
+                    "type": "string",
+                    "title": "Password (password auth fallback)",
+                    "format": "password",
+                },
+                "security_token": {
+                    "type": "string",
+                    "title": "Security Token (password auth)",
+                    "description": "Append to password for IP-restricted orgs. Leave blank if not required.",
+                    "format": "password",
                 },
                 "api_version": {
                     "type": "string",
@@ -168,11 +209,16 @@ class SalesforceConnector(BaseConnector):
                 },
                 "output_file_name": {
                     "type": "string",
-                    "title": "Output File Name",
-                    "description": "Specify the name for the generated output file (e.g., sf_data.parquet).",
+                    "title": "Output File Name / Result Name",
+                    "description": "Unique name for the raw data buffer (e.g., sf_raw).",
+                },
+                "save_to_vault": {
+                    "type": "boolean",
+                    "title": "Save configurations for quick extraction",
+                    "default": False,
                 },
             },
-            "required": ["instance_url", "client_id", "client_secret", "refresh_token", "query", "output_file_name"],
+            "required": ["instance_url", "client_id", "client_secret", "query", "output_file_name"],
         }
 
     @staticmethod

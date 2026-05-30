@@ -14,7 +14,7 @@ import {
   Briefcase, CheckSquare, Mail, Send, MessageCircle, Video, Target,
   BarChart2, Activity, DollarSign, Users, GitMerge, ShieldAlert
 } from 'lucide-react';
-import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Spinner } from '../components/ui/Spinner';
 import { api } from '../services/etlService';
 import DynamicForm from '../components/Form/DynamicForm';
@@ -927,7 +927,7 @@ function DetailPanel({ connector, onClose }) {
                     </div>
                   )}
 
-                  <div className="save-profile-toggle" style={{ marginTop: '20px', padding: '12px', background: 'var(--bg-primary)', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="save-profile-toggle" style={{ marginTop: '20px', padding: '12px', background: 'var(--bg-elevated)', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <input
                         type="checkbox"
@@ -1096,9 +1096,9 @@ export function ConnectorHub() {
               }}>
                 {connectors.length}
               </span>
-            </motion.h1>
+            </h1>
           </div>
-        </motion.header>
+        </div>
 
         <div className="hub-primary-tabs" style={{ display: 'flex', gap: '10px', marginTop: '-2px', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
           <button
@@ -1117,7 +1117,7 @@ export function ConnectorHub() {
 
         {activeTab === 'new_setup' ? (
           <>
-            <motion.div className="hub-toolbar" layout>
+            <div className="hub-toolbar">
               <div className="hub-search-box">
                 <Search size={16} className="search-icon" />
                 <input
@@ -1138,13 +1138,11 @@ export function ConnectorHub() {
                   </button>
                 ))}
               </div>
-            </motion.div>
+          </div>
 
             <div className="hub-body">
-              <motion.section
+              <section
                 className="hub-list-area"
-                layout
-                transition={{ type: 'spring', damping: 30, stiffness: 350 }}
               >
                 {/* List Table Header */}
                 {!loading && filteredConnectors.length > 0 && (
@@ -1195,7 +1193,6 @@ export function ConnectorHub() {
                         return (
                           <motion.div
                             key={c.engine}
-                            layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.98 }}
@@ -1233,7 +1230,7 @@ export function ConnectorHub() {
                     </AnimatePresence>
                   )}
                 </div>
-              </motion.section>
+              </section>
 
               <AnimatePresence>
                 {selectedConnector && (
@@ -1249,8 +1246,7 @@ export function ConnectorHub() {
         ) : (
           <SavedConnectionsTab />
         )}
-      </div>
-    </LayoutGroup>
+    </div>
   );
 }
 

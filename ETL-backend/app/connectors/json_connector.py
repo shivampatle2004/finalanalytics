@@ -44,6 +44,11 @@ class JSONConnector(BaseConnector):
     async def extract(self) -> AsyncGenerator[list[dict[str, Any]], None]:
         """Streaming extraction via non-blocking executor."""
         path = self.file_path
+        if not path:
+            raise ValueError("JSON connector requires 'file_path' in config")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"JSON file not found: {path!r}")
+
         json_format = self.config.get("format", "jsonlines")
         chunk_size = int(self.config.get("chunk_size", 1000))
 

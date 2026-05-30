@@ -3,13 +3,33 @@
  * All API calls should flow through this module.
  */
 
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_URL || '';
+const PRIMARY_BASE = API_BASE;
+const FALLBACK_BASE = 'http://localhost:8004';
+const FALLBACK_BASE_ALT = 'http://localhost:8000';
 
 async function request(url, options = {}) {
-  const res = await fetch(`${API_BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(`${PRIMARY_BASE}${url}`, {
+      headers: { 'Content-Type': 'application/json', ...options.headers },
+      ...options,
+    });
+  } catch (err) {
+    console.warn("Primary DW API failed, trying fallback 8004...");
+    try {
+      res = await fetch(`${FALLBACK_BASE}${url}`, {
+        headers: { 'Content-Type': 'application/json', ...options.headers },
+        ...options,
+      });
+    } catch (err2) {
+      console.warn("Fallback 8004 failed, trying fallback 8000...");
+      res = await fetch(`${FALLBACK_BASE_ALT}${url}`, {
+        headers: { 'Content-Type': 'application/json', ...options.headers },
+        ...options,
+      });
+    }
+  }
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
@@ -29,18 +49,36 @@ export const catalogs = {
   createSchema: (name, catalog_name) => request('/dw/catalog/schema/create', { method: 'POST', body: JSON.stringify({ name, catalog_name }) }),
   dropTable: (schema, tableName) => request(`/dw/catalog/tables/${schema}/${tableName}`, { method: 'DELETE' }),
   resolveSchema: (catalogName, schemaName) => request(`/dw/catalog/resolve-schema?catalog_name=${catalogName}&schema_name=${schemaName}`),
-  uploadTable: (catalog, schema, file) => {
+  uploadTable: async (catalog, schema, file) => {
     const formData = new FormData();
     formData.append('catalog', catalog);
     formData.append('schema', schema);
     formData.append('file', file);
-    return fetch(`${API_BASE}/dw/catalog/upload-table`, {
-      method: 'POST',
-      body: formData,
-    }).then(r => {
+    
+    try {
+      const r = await fetch(`${PRIMARY_BASE}/dw/catalog/upload-table`, {
+        method: 'POST',
+        body: formData,
+      });
       if (!r.ok) throw new Error('Upload failed');
-      return r.json();
-    });
+      return await r.json();
+    } catch (err) {
+      try {
+        const r = await fetch(`${FALLBACK_BASE}/dw/catalog/upload-table`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!r.ok) throw new Error('Upload failed');
+        return await r.json();
+      } catch (err2) {
+        const r = await fetch(`${FALLBACK_BASE_ALT}/dw/catalog/upload-table`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!r.ok) throw new Error('Upload failed');
+        return await r.json();
+      }
+    }
   },
 };
 
@@ -116,17 +154,38 @@ export const volumes = {
   list: () => request('/dw/volumes'),
   listFiles: (volumeId) => request(`/dw/volumes/${volumeId}/files`),
   create: (data) => request('/dw/volume/create', { method: 'POST', body: JSON.stringify(data) }),
-  upload: (volumeId, file) => {
+  upload: async (volumeId, file) => {
     const formData = new FormData();
     formData.append('volume_id', volumeId);
     formData.append('file', file);
-    return fetch(`${API_BASE}/dw/volume/upload`, {
-      method: 'POST',
-      body: formData,
-    }).then(r => r.json());
+    
+    try {
+      const r = await fetch(`${PRIMARY_BASE}/dw/volume/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!r.ok) throw new Error('Upload failed');
+      return await r.json();
+    } catch (err) {
+      try {
+        const r = await fetch(`${FALLBACK_BASE}/dw/volume/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!r.ok) throw new Error('Upload failed');
+        return await r.json();
+      } catch (err2) {
+        const r = await fetch(`${FALLBACK_BASE_ALT}/dw/volume/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!r.ok) throw new Error('Upload failed');
+        return await r.json();
+      }
+    }
   },
-  convert: (fileId) =>
-    request(`/dw/volume/${fileId}/convert`, { method: 'POST' }),
+  convert: (fileId, catalogName = '') =>
+    request(`/dw/volume/${fileId}/convert${catalogName ? `?catalog_name=${catalogName}` : ''}`, { method: 'POST' }),
   remove: (id) =>
     request(`/dw/volume/${id}`, { method: 'DELETE' }),
   downloadUrl: (id) => `${API_BASE}/dw/volume/${id}/download`,

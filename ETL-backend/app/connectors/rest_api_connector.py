@@ -9,9 +9,11 @@ Supports cursor-based pagination in addition to page-number pagination.
 from __future__ import annotations
 
 import base64
+import json
 from typing import Any, AsyncGenerator
 
 import httpx
+import polars as pl
 
 from app.connectors.base import BaseConnector, LoadResult
 from app.utils.logger import get_logger
@@ -21,10 +23,29 @@ logger = get_logger("connectors.rest_api")
 
 class RestAPIConnector(BaseConnector):
 
+    @staticmethod
+    def _parse_json_or_dict(value: Any, default: Any) -> Any:
+        """Parse a value that may be a JSON string or already a dict/list."""
+        if value is None:
+            return default
+        if isinstance(value, (dict, list)):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return default
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return default
+        return default
+
     def _build_auth_headers(self) -> dict[str, str]:
         """Build authentication headers based on auth_type config."""
         auth_type = self.config.get("auth_type", "none").lower()
-        headers = dict(self.config.get("headers", {}))
+        # headers may arrive as a JSON string from the textarea in DynamicForm
+        raw_headers = self.config.get("headers", {})
+        headers = dict(self._parse_json_or_dict(raw_headers, {}))
 
         if auth_type == "bearer":
             token = self.config.get("api_key") or self.config.get("token", "")
@@ -54,31 +75,44 @@ class RestAPIConnector(BaseConnector):
 
     async def test_connection(self) -> bool:
         url = self.config.get("url", "")
+        if not url:
+            return False
         headers = self._build_auth_headers()
+        method = self.config.get("method", "GET").upper()
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(url, headers=headers)
+                if method == "POST":
+                    body = self._parse_json_or_dict(self.config.get("body", {}), {})
+                    resp = await client.post(url, headers=headers, json=body)
+                else:
+                    resp = await client.get(url, headers=headers)
                 return resp.status_code < 400
         except Exception as e:
             logger.error(f"REST API test failed: {e}")
             return False
 
     async def extract(self) -> AsyncGenerator[list[dict[str, Any]], None]:
-        url = self.config["url"]
+        url = self.config.get("url", "")
+        if not url:
+            raise ValueError("REST API connector requires a 'url' configuration.")
         headers = self._build_auth_headers()
         method = self.config.get("method", "GET").upper()
         data_path = self.config.get("data_path", "")
-        params = dict(self.config.get("params", {}))
+        # params may arrive as JSON string from the form
+        params = dict(self._parse_json_or_dict(self.config.get("params", {}), {}))
 
-        # Pagination configuration
-        pagination = self.config.get("pagination", {})
-        pagination_type = pagination.get("type", "page")  # "page" | "cursor" | "offset" | "none"
-        page_param = pagination.get("page_param", "page")
-        per_page_param = pagination.get("per_page_param", "per_page")
-        per_page = pagination.get("per_page", 100)
-        max_pages = pagination.get("max_pages", 50)
-        cursor_path = pagination.get("cursor_path", "next_cursor")  # Path to next cursor in response
-        next_url_path = pagination.get("next_url_path", "")  # Path to next page URL in response
+        # Pagination configuration — may arrive as a JSON string from DynamicForm object field
+        raw_pagination = self.config.get("pagination", {})
+        pagination = self._parse_json_or_dict(raw_pagination, {})
+        if not isinstance(pagination, dict):
+            pagination = {}
+        pagination_type = pagination.get("type") or self.config.get("pagination_type", "page")
+        page_param = pagination.get("page_param") or self.config.get("page_param", "page")
+        per_page_param = pagination.get("per_page_param") or self.config.get("per_page_param", "per_page")
+        per_page = pagination.get("per_page") or int(self.config.get("per_page", 100))
+        max_pages = pagination.get("max_pages") or int(self.config.get("max_pages", 50))
+        cursor_path = pagination.get("cursor_path") or self.config.get("cursor_path", "next_cursor")
+        next_url_path = pagination.get("next_url_path") or self.config.get("next_url_path", "")
 
         logger.info(f"REST API extraction from: {url} ({method}, pagination: {pagination_type})")
 
@@ -162,7 +196,8 @@ class RestAPIConnector(BaseConnector):
         if method == "GET":
             resp = await client.get(url, headers=headers, params=params)
         elif method == "POST":
-            body = self.config.get("body", {})
+            # body may arrive as JSON string from the form textarea
+            body = self._parse_json_or_dict(self.config.get("body", {}), {})
             resp = await client.post(url, headers=headers, json=body, params=params)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
@@ -248,51 +283,51 @@ class RestAPIConnector(BaseConnector):
                 "password": {
                     "type": "string",
                     "title": "Password (Basic Auth)",
+                    "format": "password",
                 },
                 "headers": {
                     "type": "object",
-                    "title": "Extra Headers",
-                    "description": "Additional request headers (key:value)",
-                    "additionalProperties": {"type": "string"},
+                    "title": "Extra Headers (JSON)",
+                    "description": 'Additional request headers as JSON object, e.g. {"X-Tenant": "acme"}',
+                    "format": "json",
                 },
                 "params": {
                     "type": "object",
-                    "title": "Query Parameters",
-                    "description": "Static query parameters for every request",
+                    "title": "Query Parameters (JSON)",
+                    "description": 'Static query parameters as JSON object, e.g. {"limit": 100}',
+                    "format": "json",
                 },
                 "body": {
                     "type": "object",
-                    "title": "Request Body (POST only)",
+                    "title": "Request Body / POST JSON",
                     "description": "JSON body for POST requests",
+                    "format": "json",
                 },
                 "data_path": {
                     "type": "string",
                     "title": "Data Path",
                     "description": "Dot-separated path to records array in response (e.g. data.results)",
                 },
-                "pagination": {
-                    "type": "object",
-                    "title": "Pagination Config",
-                    "description": "Pagination settings",
-                    "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": ["page", "cursor", "none"],
-                            "default": "page",
-                        },
-                        "page_param": {"type": "string", "default": "page"},
-                        "per_page_param": {"type": "string", "default": "per_page"},
-                        "per_page": {"type": "integer", "default": 100},
-                        "max_pages": {"type": "integer", "default": 50},
-                        "cursor_path": {
-                            "type": "string",
-                            "description": "Dot-path to cursor value in response (cursor mode)",
-                        },
-                        "next_url_path": {
-                            "type": "string",
-                            "description": "Dot-path to next page URL in response body",
-                        },
-                    },
+                # Flattened pagination fields — avoids DynamicForm nested-object rendering issues
+                "pagination_type": {
+                    "type": "string",
+                    "title": "Pagination Type",
+                    "enum": ["page", "cursor", "none"],
+                    "default": "page",
+                },
+                "page_param": {"type": "string", "title": "Page Parameter Name", "default": "page"},
+                "per_page_param": {"type": "string", "title": "Per-Page Parameter Name", "default": "per_page"},
+                "per_page": {"type": "integer", "title": "Records Per Page", "default": 100},
+                "max_pages": {"type": "integer", "title": "Max Pages to Fetch", "default": 50},
+                "cursor_path": {
+                    "type": "string",
+                    "title": "Cursor Path (cursor pagination)",
+                    "description": "Dot-path to cursor value in response body",
+                },
+                "next_url_path": {
+                    "type": "string",
+                    "title": "Next URL Path (link pagination)",
+                    "description": "Dot-path to the next-page URL in response body",
                 },
                 "output_file_name": {
                     "type": "string",

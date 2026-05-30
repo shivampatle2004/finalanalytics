@@ -27,6 +27,7 @@ class S3Connector(BaseConnector):
         key = self.config.get("access_key") or settings.S3_ACCESS_KEY or None
         secret = self.config.get("secret_key") or settings.S3_SECRET_KEY or None
         endpoint = self.config.get("endpoint_url") or settings.S3_ENDPOINT_URL or None
+        region = self.config.get("region_name") or None
 
         options: dict[str, Any] = {
             "key": key,
@@ -34,6 +35,9 @@ class S3Connector(BaseConnector):
         }
         if endpoint:
             options["client_kwargs"] = {"endpoint_url": endpoint}
+        if region:
+            options.setdefault("client_kwargs", {})
+            options["client_kwargs"]["region_name"] = region
         return options
 
     def _get_client(self):
@@ -42,12 +46,14 @@ class S3Connector(BaseConnector):
         endpoint = self.config.get("endpoint_url") or settings.S3_ENDPOINT_URL or None
         key = self.config.get("access_key") or settings.S3_ACCESS_KEY or None
         secret = self.config.get("secret_key") or settings.S3_SECRET_KEY or None
-        
+        region = self.config.get("region_name") or None
+
         return boto3.client(
             "s3",
             endpoint_url=endpoint,
             aws_access_key_id=key,
             aws_secret_access_key=secret,
+            region_name=region,
         )
 
     async def test_connection(self) -> bool:
@@ -88,10 +94,14 @@ class S3Connector(BaseConnector):
                 return pl.read_csv(s3_url, storage_options=storage_options)
             elif file_format == "parquet":
                 return pl.read_parquet(s3_url, storage_options=storage_options)
-            elif file_format == "json":
-                return pl.read_json(s3_url, storage_options=storage_options)
-            elif file_format == "ndjson":
-                return pl.read_ndjson(s3_url, storage_options=storage_options)
+            elif file_format in ["json", "ndjson"]:
+                client = self._get_client()
+                response = client.get_object(Bucket=bucket, Key=key)
+                body = response["Body"].read()
+                if file_format == "json":
+                    return pl.read_json(body)
+                else:
+                    return pl.read_ndjson(body)
             else:
                 raise ValueError(f"Unsupported S3 file format: {file_format}")
 

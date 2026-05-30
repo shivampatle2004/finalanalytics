@@ -1,14 +1,21 @@
 import axios from "axios";
 
-const API_BASE = "";
+const PRIMARY_BASE = import.meta.env.VITE_API_URL || '';
+const FALLBACK_BASE = 'http://localhost:8004';
 
 const API = axios.create({
-  baseURL: API_BASE
+  baseURL: PRIMARY_BASE
 });
 
 API.interceptors.response.use(
   response => response,
   async error => {
+    if (!error.response && error.config && !error.config._retry) {
+      error.config._retry = true;
+      error.config.baseURL = FALLBACK_BASE;
+      console.warn("Primary DW API failed, falling back to localhost...");
+      return axios.request(error.config);
+    }
     return Promise.reject(error);
   }
 );
