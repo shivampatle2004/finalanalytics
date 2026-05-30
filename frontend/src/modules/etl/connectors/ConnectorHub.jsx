@@ -14,7 +14,7 @@ import {
   Briefcase, CheckSquare, Mail, Send, MessageCircle, Video, Target,
   BarChart2, Activity, DollarSign, Users, GitMerge, ShieldAlert
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { Spinner } from '../components/ui/Spinner';
 import { api } from '../services/etlService';
 import DynamicForm from '../components/Form/DynamicForm';
@@ -1096,9 +1096,9 @@ export function ConnectorHub() {
               }}>
                 {connectors.length}
               </span>
-            </h1>
+              </motion.h1>
           </div>
-        </div>
+        </motion.header>
 
         <div className="hub-primary-tabs" style={{ display: 'flex', gap: '10px', marginTop: '-2px', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
           <button
@@ -1247,6 +1247,7 @@ export function ConnectorHub() {
           <SavedConnectionsTab />
         )}
     </div>
+    </LayoutGroup>
   );
 }
 

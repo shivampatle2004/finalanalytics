@@ -400,6 +400,65 @@ async def preview_pipeline_node(
 
         # Helper to get the first chunk of data from any connector
         async def get_first_chunk(engine, config):
+            def _coerce_chunk(chunk) -> pl.DataFrame:
+                import json as _json
+                if isinstance(chunk, pl.DataFrame):
+                    return chunk
+                if isinstance(chunk, pl.LazyFrame):
+                    return chunk.collect()
+                if not (isinstance(chunk, list) and chunk):
+                    return pl.DataFrame()
+                try:
+                    return pl.from_dicts(chunk, infer_schema_length=None)
+                except Exception:
+                    pass
+                try:
+                    all_keys = set()
+                    for row in chunk:
+                        if isinstance(row, dict):
+                            all_keys.update(row.keys())
+                    def _safe_val(v: Any) -> Any:
+                        if isinstance(v, (dict, list)):
+                            try:
+                                return _json.dumps(v)
+                            except Exception:
+                                return str(v)
+                        return v
+                    key_types = {k: set() for k in all_keys}
+                    for row in chunk:
+                        if not isinstance(row, dict):
+                            continue
+                        for k in all_keys:
+                            v = row.get(k)
+                            if v is not None:
+                                key_types[k].add(type(v).__name__)
+                    problem_keys = set()
+                    for k, types in key_types.items():
+                        if len(types) > 1 or types & {"dict", "list"}:
+                            problem_keys.add(k)
+                    normalised = []
+                    for row in chunk:
+                        if not isinstance(row, dict):
+                            normalised.append({k: None for k in all_keys})
+                            continue
+                        new_row = {}
+                        for k in all_keys:
+                            v = row.get(k)
+                            new_row[k] = _safe_val(v) if k in problem_keys else v
+                        normalised.append(new_row)
+                    return pl.from_dicts(normalised, infer_schema_length=None)
+                except Exception:
+                    pass
+                try:
+                    stringified = [
+                        {k: (str(v) if not isinstance(v, (int, float, bool, type(None))) else v)
+                         for k, v in (row.items() if isinstance(row, dict) else {}.items())}
+                        for row in chunk
+                    ]
+                    return pl.from_dicts(stringified, infer_schema_length=None)
+                except Exception:
+                    return pl.DataFrame()
+
             connector_cls = get_connector_class(engine)
             if not connector_cls:
                 raise ValueError(f"Unknown engine: {engine}")
@@ -411,7 +470,7 @@ async def preview_pipeline_node(
                 gen = connector.extract()
                 try:
                     df_chunk = await gen.__anext__() # Get the first chunk
-                    df = pl.DataFrame(df_chunk)
+                    df = _coerce_chunk(df_chunk)
                 except StopAsyncIteration:
                     pass # No data
             # Check if extract is a synchronous generator
@@ -419,7 +478,7 @@ async def preview_pipeline_node(
                 gen = connector.extract()
                 try:
                     df_chunk = next(gen) # Get the first chunk
-                    df = pl.DataFrame(df_chunk)
+                    df = _coerce_chunk(df_chunk)
                 except StopIteration:
                     pass # No data
             else:
@@ -436,7 +495,7 @@ async def preview_pipeline_node(
                     df = result
                 elif result is not None:
                     # If it's a list of dicts or similar, convert to DataFrame
-                    df = pl.DataFrame(result)
+                    df = _coerce_chunk(result)
             
             return df
 

@@ -159,6 +159,6 @@ export const api = {
 
   // Additional Pipeline Editor Methods
   previewSourceSample: (engine, config, limit = 50) => apiClient.post('/connectors/preview-sample', { engine, config, limit }).then(r => r.data),
-  loadSourceToTank: (engine, config) => apiClient.post('/connectors/load-to-tank', { engine, config }).then(r => r.data),
-  resetPipelineWatermark: (pipelineId, nodeId) => apiClient.post(`/pipelines/${pipelineId}/reset-watermark/${nodeId}`).then(r => r.data),
+  loadSourceToTank: (engine, config) => apiClient.post('/connectors/load-source-to-tank', { engine, config }).then(r => r.data),
+  resetPipelineWatermark: (pipelineId, nodeId) => apiClient.post(`/pipelines/${pipelineId}/reset-watermark`, null, { params: nodeId ? { node_id: nodeId } : {} }).then(r => r.data),
 };
