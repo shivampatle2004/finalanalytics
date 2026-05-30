@@ -9,32 +9,142 @@ const ENGINE_OPTIONS = [
 ];
 
 const NotebookEditor = ({ notebook: notebookData, onBack, onSave }) => {
-  const [cells, setCells] = useState(() => {
+  const notebookId = notebookData.id || notebookData._id;
+
+  // Helper to load initial values checking localStorage draft first
+  const getInitialCells = () => {
+    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.cells && parsed.cells.length > 0) return parsed.cells;
+      } catch (e) {
+        console.error('Failed to parse notebook cells draft', e);
+      }
+    }
     if (notebookData.cells && notebookData.cells.length > 0) return notebookData.cells;
     return [{ id: `cell-${Date.now()}`, language: notebookData.language || 'sql', content: notebookData.content || '', output: null }];
-  });
-  const [isSaving, setIsSaving] = useState(false);
-  const [defaultLanguage, setDefaultLanguage] = useState(notebookData.language || 'sql');
-  const [engine, setEngine] = useState(notebookData.engine || 'postgres');
-  const [runningCells, setRunningCells] = useState(new Set());
+  };
 
+  const getInitialEngine = () => {
+    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.engine) return parsed.engine;
+      } catch (e) {}
+    }
+    return notebookData.engine || 'postgres';
+  };
+
+  const getInitialLanguage = () => {
+    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.language) return parsed.language;
+      } catch (e) {}
+    }
+    return notebookData.language || 'sql';
+  };
+
+  const [cells, setCells] = useState(getInitialCells);
+  const [isSaving, setIsSaving] = useState(false);
+  const [defaultLanguage, setDefaultLanguage] = useState(getInitialLanguage);
+  const [engine, setEngine] = useState(getInitialEngine);
+  const [runningCells, setRunningCells] = useState(new Set());
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', 'unsaved'
+
+  // Update editor state when transitioning to another notebook
   useEffect(() => {
+    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.cells) setCells(parsed.cells);
+        if (parsed.engine) setEngine(parsed.engine);
+        if (parsed.language) setDefaultLanguage(parsed.language);
+        setSaveStatus('unsaved');
+        return;
+      } catch (e) {}
+    }
+
     if (notebookData.cells && notebookData.cells.length > 0) setCells(notebookData.cells);
     else setCells([{ id: `cell-${Date.now()}`, language: notebookData.language || 'sql', content: notebookData.content || '', output: null }]);
     setDefaultLanguage(notebookData.language || 'sql');
     setEngine(notebookData.engine || 'postgres');
-  }, [notebookData.id]);
+    setSaveStatus('saved');
+  }, [notebookId, notebookData]);
 
-  const handleSave = () => {
-    setIsSaving(true);
-    if (notebookData.type === 'sql') {
-      // SQL query items store content as a plain string, not cells
-      const sqlContent = cells.map(c => c.content).join('\n\n');
-      onSave(notebookData.id, { content: sqlContent });
-    } else {
-      onSave(notebookData.id, { cells, language: defaultLanguage, engine });
+  // Instantly preserve local draft whenever code, cells, language, or engine changes
+  useEffect(() => {
+    if (!notebookId) return;
+    const draftData = {
+      cells,
+      engine,
+      language: defaultLanguage,
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(`osa_notebook_draft_${notebookId}`, JSON.stringify(draftData));
+  }, [cells, engine, defaultLanguage, notebookId]);
+
+  // Debounced auto-save directly to backend
+  useEffect(() => {
+    const isFirstLoad = !cells || (
+      cells.length === 1 && 
+      cells[0].content === '' && 
+      (!notebookData.cells || notebookData.cells.length === 0)
+    );
+
+    const isDifferent = JSON.stringify(cells) !== JSON.stringify(notebookData.cells) || 
+                        engine !== notebookData.engine || 
+                        defaultLanguage !== notebookData.language;
+
+    if (isFirstLoad || !isDifferent) {
+      setSaveStatus('saved');
+      return;
     }
-    setTimeout(() => setIsSaving(false), 600);
+
+    setSaveStatus('unsaved');
+
+    const timer = setTimeout(async () => {
+      setSaveStatus('saving');
+      try {
+        if (notebookData.type === 'sql') {
+          const sqlContent = cells.map(c => c.content).join('\n\n');
+          await onSave(notebookId, { content: sqlContent });
+        } else {
+          await onSave(notebookId, { cells, language: defaultLanguage, engine });
+        }
+        setSaveStatus('saved');
+        localStorage.removeItem(`osa_notebook_draft_${notebookId}`);
+      } catch (err) {
+        console.error('Auto-save failed:', err);
+        setSaveStatus('unsaved');
+      }
+    }, 2000); // 2 seconds debounce
+
+    return () => clearTimeout(timer);
+  }, [cells, engine, defaultLanguage, notebookId, onSave, notebookData]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveStatus('saving');
+    try {
+      if (notebookData.type === 'sql') {
+        const sqlContent = cells.map(c => c.content).join('\n\n');
+        await onSave(notebookId, { content: sqlContent });
+      } else {
+        await onSave(notebookId, { cells, language: defaultLanguage, engine });
+      }
+      setSaveStatus('saved');
+      localStorage.removeItem(`osa_notebook_draft_${notebookId}`);
+    } catch (err) {
+      console.error('Save failed:', err);
+      setSaveStatus('unsaved');
+    } finally {
+      setTimeout(() => setIsSaving(false), 600);
+    }
   };
 
   const handleUpdateCell = useCallback((cellId, updates) => {
@@ -202,6 +312,34 @@ const NotebookEditor = ({ notebook: notebookData, onBack, onSave }) => {
           </div>
 
           <span className="text-[10px] font-medium" style={{ color: 'var(--df-text-muted)' }}>{cells.length} cell{cells.length !== 1 ? 's' : ''}</span>
+          
+          {/* Auto-save Status Indicator */}
+          <div className="flex items-center gap-1 py-1 px-2.5 rounded-lg border text-[10px] font-semibold flex-shrink-0 transition-all select-none" 
+            style={{ 
+              backgroundColor: 'var(--df-surface)', 
+              borderColor: 'var(--df-border)', 
+              color: 'var(--df-text-soft)' 
+            }}>
+            {saveStatus === 'saving' && (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span>Saving...</span>
+              </>
+            )}
+            {saveStatus === 'saved' && (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>Saved</span>
+              </>
+            )}
+            {saveStatus === 'unsaved' && (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span>Unsaved Draft</span>
+              </>
+            )}
+          </div>
+
           <button onClick={handleSave} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all border"
             style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border)', color: 'var(--df-strong)' }}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-sidebar-hover)'; }}
