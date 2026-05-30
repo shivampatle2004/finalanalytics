@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-    FiBox, FiChevronRight, FiMoreVertical, FiShare2, FiUploadCloud, FiSearch, FiFile, FiFolder, FiTrash2, FiUsers, FiClock
+    FiBox, FiChevronRight, FiMoreVertical, FiShare2, FiUploadCloud, FiSearch, FiFile, FiFolder, FiTrash2, FiUsers, FiClock, FiRefreshCw, FiCheck
 } from 'react-icons/fi';
 import { useToast } from '../../../shared/context/ToastContext';
 import { volumes as volumeApi } from '../../../shared/services/api';
 import VolumeUploadModal from './VolumeUploadModal';
+import ConvertVolumeFileModal from './ConvertVolumeFileModal';
 
 const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
     const toast = useToast();
@@ -14,6 +15,8 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [showShareModal, setShowShareModal] = useState(false);
     const [showUploadModal, setShowUploadModal] = useState(false);
+    const [selectedFileForConvert, setSelectedFileForConvert] = useState(null);
+    const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
 
     const mainTabs = ['Overview', 'Files', 'Details', 'Permissions'];
 
@@ -39,7 +42,7 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
     }, [activeMainTab, volume]);
 
     const filteredFiles = files.filter(f => 
-        (f.name || '').toLowerCase().includes(searchQuery.toLowerCase())
+        (f.filename || f.name || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     return (
@@ -144,9 +147,10 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
                                 <table className="w-full text-left">
                                     <thead className="bg-[var(--df-surface)]">
                                         <tr className="border-b" style={{ borderColor: 'var(--df-border-light)' }}>
-                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[50%]">Name</th>
-                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[20%]">Size</th>
-                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[30%]">Last modified</th>
+                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[40%]">Name</th>
+                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[15%]">Size</th>
+                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[25%]">Last modified</th>
+                                            <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[20%] text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -155,15 +159,31 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
                                                 <tr key={file.id} className="border-b hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--df-border-light)' }}>
                                                     <td className="py-2.5 px-4 flex items-center gap-2">
                                                         {file.is_directory ? <FiFolder className="text-blue-500" /> : <FiFile className="text-gray-400" />}
-                                                        <span className="text-[13px] font-medium">{file.name}</span>
+                                                        <span className="text-[13px] font-medium">{file.filename || file.name}</span>
                                                     </td>
                                                     <td className="py-2.5 px-4 text-[12px] text-gray-500">{file.size_formatted || '0 B'}</td>
                                                     <td className="py-2.5 px-4 text-[12px] text-gray-500">{file.updated_at || 'Never'}</td>
+                                                    <td className="py-2.5 px-4 text-right">
+                                                        {file.status === 'uploaded' && ['CSV', 'JSON'].includes(file.file_type?.toUpperCase()) && (
+                                                            <button
+                                                                onClick={() => { setSelectedFileForConvert(file); setIsConvertModalOpen(true); }}
+                                                                className="mr-2 inline-flex items-center gap-1 px-3 py-1 rounded bg-[var(--df-accent-soft)] text-[var(--df-accent)] text-[10px] font-bold hover:bg-[var(--df-accent)] hover:text-white transition-all"
+                                                            >
+                                                                <FiRefreshCw size={10} />
+                                                                Convert
+                                                            </button>
+                                                        )}
+                                                        {file.status === 'converted' && (
+                                                            <span className="mr-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold text-green-600 bg-green-50">
+                                                                <FiCheck size={10} /> Managed
+                                                            </span>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             ))
                                         ) : (
                                             <tr>
-                                                <td colSpan="3" className="py-20 text-center">
+                                                <td colSpan="4" className="py-20 text-center">
                                                     <div className="flex flex-col items-center gap-3">
                                                         <div className="w-10 h-1 rounded-full bg-gray-200" />
                                                         <div className="w-10 h-1 rounded-full bg-gray-200" />
@@ -188,10 +208,10 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
                             <table className="w-full text-left">
                                 <thead className="bg-gray-50">
                                     <tr className="border-b" style={{ borderColor: 'var(--df-border-light)' }}>
-                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider">Name</th>
-                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider">Size</th>
-                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider">Type</th>
-                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider text-right">Actions</th>
+                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[40%]">Name</th>
+                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[15%]">Size</th>
+                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[15%]">Type</th>
+                                        <th className="py-2 px-4 text-[11px] font-extrabold uppercase tracking-wider w-[30%] text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -200,7 +220,7 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
                                             <tr key={file.id} className="border-b hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--df-border-light)' }}>
                                                 <td className="py-2 px-4 flex items-center gap-2">
                                                     {file.is_directory ? <FiFolder size={14} className="text-blue-500" /> : <FiFile size={14} className="text-gray-400" />}
-                                                    <span className="text-[13px] font-medium">{file.name}</span>
+                                                    <span className="text-[13px] font-medium">{file.filename || file.name}</span>
                                                 </td>
                                                 <td className="py-2 px-4 text-[12px] text-gray-500">{file.size_formatted || '0 B'}</td>
                                                 <td className="py-2 px-4">
@@ -209,6 +229,20 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
                                                     </span>
                                                 </td>
                                                 <td className="py-2 px-4 text-right">
+                                                    {file.status === 'uploaded' && ['CSV', 'JSON'].includes(file.file_type?.toUpperCase()) && (
+                                                        <button
+                                                            onClick={() => { setSelectedFileForConvert(file); setIsConvertModalOpen(true); }}
+                                                            className="mr-2 inline-flex items-center gap-1 px-3 py-1 rounded bg-[var(--df-accent-soft)] text-[var(--df-accent)] text-[10px] font-bold hover:bg-[var(--df-accent)] hover:text-white transition-all"
+                                                        >
+                                                            <FiRefreshCw size={10} />
+                                                            Convert to Table
+                                                        </button>
+                                                    )}
+                                                    {file.status === 'converted' && (
+                                                        <span className="mr-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold text-green-600 bg-green-50">
+                                                            <FiCheck size={10} /> Managed Table
+                                                        </span>
+                                                    )}
                                                     <button className="p-1.5 hover:bg-black/5 rounded text-gray-400 hover:text-red-500 transition-colors">
                                                         <FiTrash2 size={14} />
                                                     </button>
@@ -310,6 +344,14 @@ const VolumeDetailsView = ({ volume, onBack, onRefresh }) => {
                 isOpen={showUploadModal} 
                 onClose={() => setShowUploadModal(false)} 
                 onUploaded={() => { fetchFiles(); onRefresh?.(); }}
+                initialVolumeId={volume?.id?.toString().replace('vol-', '')}
+            />
+
+            <ConvertVolumeFileModal 
+                isOpen={isConvertModalOpen}
+                onClose={() => { setIsConvertModalOpen(false); setSelectedFileForConvert(null); }}
+                file={selectedFileForConvert}
+                onConverted={() => { fetchFiles(); onRefresh?.(); }}
             />
         </div>
     );

@@ -3,6 +3,7 @@ import { FiFile, FiDownload, FiRefreshCw, FiTrash2, FiLoader, FiCheck, FiBox, Fi
 import { volumes as volumeApi } from '../../../shared/services/api';
 import { useToast } from '../../../shared/context/ToastContext';
 import LoadingSkeleton from '../../../shared/ui/LoadingSkeleton';
+import ConvertVolumeFileModal from './ConvertVolumeFileModal';
 
 const VolumePanel = ({ onConvertDone, onSelectVolume }) => {
   const [volumeContainers, setVolumeContainers] = useState([]);
@@ -11,6 +12,8 @@ const VolumePanel = ({ onConvertDone, onSelectVolume }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingFiles, setLoadingFiles] = useState({}); // { volumeId: boolean }
   const [converting, setConverting] = useState(null); // file ID being converted
+  const [selectedFileForConvert, setSelectedFileForConvert] = useState(null);
+  const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
   const toast = useToast();
 
   const fetchVolumes = async () => {
@@ -51,18 +54,16 @@ const VolumePanel = ({ onConvertDone, onSelectVolume }) => {
     }
   };
 
-  const handleConvert = async (file) => {
-    setConverting(file.id);
-    try {
-      const result = await volumeApi.convert(file.id);
-      toast.success(`Created table ${result.full_path}`);
-      fetchFiles(file.volume_id);
-      onConvertDone?.();
-    } catch (err) {
-      toast.error(`Conversion failed: ${err.message || 'Unknown error'}`);
-    } finally {
-      setConverting(null);
+  const handleOpenConvertModal = (file) => {
+    setSelectedFileForConvert(file);
+    setIsConvertModalOpen(true);
+  };
+
+  const handleConvertSuccess = () => {
+    if (selectedFileForConvert) {
+      fetchFiles(selectedFileForConvert.volume_id);
     }
+    onConvertDone?.();
   };
 
   const handleDeleteVolume = async (volumeId) => {
@@ -168,11 +169,10 @@ const VolumePanel = ({ onConvertDone, onSelectVolume }) => {
                       <div className="flex items-center gap-1">
                         {file.status === 'uploaded' && ['CSV', 'JSON'].includes(file.file_type?.toUpperCase()) && (
                           <button
-                            onClick={() => handleConvert(file)}
-                            disabled={converting === file.id}
+                            onClick={() => handleOpenConvertModal(file)}
                             className="flex items-center gap-1 px-3 py-1 rounded-lg text-[10px] font-bold transition-all bg-[var(--df-accent-soft)] text-[var(--df-accent)] hover:bg-[var(--df-accent)] hover:text-white"
                           >
-                            {converting === file.id ? <FiLoader size={10} className="animate-spin" /> : <FiRefreshCw size={10} />}
+                            <FiRefreshCw size={10} />
                             Convert to Table
                           </button>
                         )}
@@ -190,6 +190,13 @@ const VolumePanel = ({ onConvertDone, onSelectVolume }) => {
           )}
         </div>
       ))}
+      
+      <ConvertVolumeFileModal
+        isOpen={isConvertModalOpen}
+        onClose={() => { setIsConvertModalOpen(false); setSelectedFileForConvert(null); }}
+        file={selectedFileForConvert}
+        onConverted={handleConvertSuccess}
+      />
     </div>
   );
 };
