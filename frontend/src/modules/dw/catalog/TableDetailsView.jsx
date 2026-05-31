@@ -5,7 +5,7 @@ import {
 } from 'react-icons/fi';
 import TagBadge from '../../../shared/ui/TagBadge';
 import LoadingSkeleton from '../../../shared/ui/LoadingSkeleton';
-import { ColumnsTab, SampleTab, LineageTab, VersionsTab } from './TableTabContent';
+import { ColumnsTab, SampleTab, LineageTab, VersionsTab, StatisticsTab } from './TableTabContent';
 import api from '../../../shared/services/api';
 import { getLineageForTable } from '../mock/lineageData';
 import { getVersionsForTable } from '../mock/tableVersions';
@@ -47,13 +47,14 @@ const TableDetailsView = ({ table, schema, catalog, onBack }) => {
         if (!table) return;
         setActiveTab('overview');
         setIsLoadingTags(true);
-        api.tags.list(schema?.name || 'public', table.name)
+        const actualSchema = table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
+        api.tags.list(actualSchema, table.name)
             .then(data => setTableTags(data || []))
             .catch(() => setTableTags([]))
             .finally(() => setIsLoadingTags(false));
 
         setIsLoadingColumns(true);
-        api.tables.schema(table.name, schema?.name || 'public')
+        api.tables.schema(table.name, actualSchema)
             .then(data => setColumns(data.columns || []))
             .catch(() => setColumns([]))
             .finally(() => setIsLoadingColumns(false));
@@ -62,7 +63,8 @@ const TableDetailsView = ({ table, schema, catalog, onBack }) => {
     useEffect(() => {
         if (activeTab === 'sample' && previewData.length === 0) {
             setIsLoadingPreview(true);
-            api.tables.preview(table.name, schema?.name || 'public', 20)
+            const actualSchema = table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
+            api.tables.preview(table.name, actualSchema, 20)
                 .then(response => { setPreviewData(response.rows || []); setPreviewColumns(response.columns || []); })
                 .catch(() => { setPreviewData([]); setPreviewColumns([]); })
                 .finally(() => setIsLoadingPreview(false));
@@ -81,6 +83,7 @@ const TableDetailsView = ({ table, schema, catalog, onBack }) => {
     const tabs = [
         { id: 'overview', label: 'Columns', icon: FiLayers },
         { id: 'sample', label: 'Sample Data', icon: FiTable },
+        { id: 'statistics', label: 'Statistics', icon: FiActivity },
         { id: 'lineage', label: 'Lineage', icon: FiLayout },
         { id: 'versions', label: 'Versions', icon: FiClock }
     ];
@@ -220,6 +223,7 @@ const TableDetailsView = ({ table, schema, catalog, onBack }) => {
                     </div>
                 )}
                 {activeTab === 'sample' && <SampleTab isLoading={isLoadingPreview} previewData={previewData} previewColumns={previewColumns} />}
+                {activeTab === 'statistics' && <StatisticsTab table={table} schema={schema} />}
                 {activeTab === 'lineage' && <LineageTab lineage={lineage} table={table} />}
                 {activeTab === 'versions' && <VersionsTab versions={versions} />}
             </div>

@@ -1,13 +1,11 @@
 import React, { memo, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Database, Zap, ArrowRightLeft, FileJson, Eye, MessageSquare, FileText, ChevronDown } from 'lucide-react';
-import { NodeLogPanel } from './NodeLogPanel';
+import { Database, Zap, ArrowRightLeft, FileJson, Eye, MessageSquare, ChevronDown } from 'lucide-react';
 import './Nodes.css';
 
 // NodeWrapper — shared shell for all node types
 const NodeWrapper = ({ id, type, label, icon: Icon, children, status, data }) => {
   const [showComment, setShowComment] = useState(!!data?.comment);
-  const [showLogPanel, setShowLogPanel] = useState(false);
 
   const handlePreview = (e) => {
     e.stopPropagation();
@@ -47,15 +45,6 @@ const NodeWrapper = ({ id, type, label, icon: Icon, children, status, data }) =>
               <Icon size={14} />
             </div>
             <div className="node-title">{label}</div>
-
-            {/* Log Button */}
-            <button
-              className="node-action-btn"
-              title="View Execution Log"
-              onClick={(e) => { e.stopPropagation(); setShowLogPanel(true); }}
-            >
-              <FileText size={12} />
-            </button>
 
             {/* Comment Toggle */}
             <button
@@ -106,16 +95,6 @@ const NodeWrapper = ({ id, type, label, icon: Icon, children, status, data }) =>
           </div>
         )}
       </div>
-
-      {/* Log Panel Portal — rendered outside node wrapper to avoid clipping */}
-      {showLogPanel && (
-        <NodeLogPanel
-          pipelineId={data?.pipelineId}
-          nodeId={id}
-          nodeLabel={label}
-          onClose={() => setShowLogPanel(false)}
-        />
-      )}
     </>
   );
 };
