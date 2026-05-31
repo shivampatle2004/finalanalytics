@@ -18,7 +18,7 @@ import { FiDatabase, FiCommand, FiSave, FiSidebar, FiShare2, FiMoreVertical, FiC
 
 const SqlLab = () => {
   const { tabs, activeTabId, setActiveTabId, addTab, removeTab, updateTabContent, updateTabResults, renameTab, setTabWorkspaceId } = useQueryTabs();
-  const { fetchItems, addItem, handleSaveContent, items, loading } = useWorkspace();
+  const { fetchItems, addItem, handleSaveContent, items, loading, handleRename: wsRename, handleDelete: wsDelete } = useWorkspace();
   const toast = useToast();
   const { executeQuery, saveQuery, sharedQuery, setSharedQuery, catalogs, savedQueries, queryHistory } = useData();
   const { addJob } = useJobs();
@@ -40,6 +40,8 @@ const SqlLab = () => {
   }, [catalogs, selectedContext.catalog]);
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [editorHeightPercent, setEditorHeightPercent] = useState(50);
@@ -402,54 +404,97 @@ const SqlLab = () => {
                   {isMoreMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-20" onClick={() => setIsMoreMenuOpen(false)}></div>
-                      <div className="absolute right-0 top-full mt-1 w-56 rounded-xl bg-[var(--df-card-bg)] border border-[var(--df-border)] shadow-2xl z-30 py-1 flex flex-col">
-                        <button onClick={handleShare} className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }}>
-                          <FiShare2 size={13} className="opacity-70" /> Share...
-                        </button>
-                        <button onClick={() => { handleRunAsJob(activeTab?.content); setIsMoreMenuOpen(false); }} className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }}>
+                      <div className="absolute right-0 top-full mt-1 w-48 rounded-xl bg-[var(--df-card-bg)] border border-[var(--df-border)] shadow-2xl z-30 py-1 flex flex-col">
+                        {/* Schedule */}
+                        <button
+                          onClick={() => { handleRunAsJob(activeTab?.content); setIsMoreMenuOpen(false); }}
+                          className="w-full px-4 py-2 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors"
+                          style={{ color: 'var(--df-text)' }}
+                        >
                           <FiClock size={13} className="opacity-70" /> Schedule...
                         </button>
 
-                        <div className="h-px bg-[var(--df-border)] my-1 border-opacity-50"></div>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
+                        <div className="h-px bg-[var(--df-border)] mx-2 my-1"></div>
+
+                        {/* Rename */}
+                        <button
+                          onClick={() => {
+                            setRenameValue(activeTab?.name || '');
+                            setIsRenaming(true);
+                            setIsMoreMenuOpen(false);
+                          }}
+                          className="w-full px-4 py-2 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors"
+                          style={{ color: 'var(--df-text)' }}
+                        >
                           <FiEdit2 size={13} className="opacity-70" /> Rename...
                         </button>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <FiMove size={13} className="opacity-70" /> Move...
-                        </button>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-red-500/10 text-red-400 flex items-center gap-2.5 transition-colors" onClick={() => setIsMoreMenuOpen(false)}>
+
+                        <div className="h-px bg-[var(--df-border)] mx-2 my-1"></div>
+
+                        {/* Move to trash */}
+                        <button
+                          onClick={async () => {
+                            setIsMoreMenuOpen(false);
+                            if (!activeTab?.workspaceItemId || activeTab.workspaceItemId === 'undefined') {
+                              // Not saved to workspace — just close the tab
+                              removeTab({ stopPropagation: () => {} }, activeTabId);
+                              return;
+                            }
+                            const item = items.find(i => i.id === activeTab.workspaceItemId);
+                            if (item) await wsDelete(item);
+                          }}
+                          className="w-full px-4 py-2 text-left text-[12px] font-medium hover:bg-red-500/10 flex items-center gap-2.5 transition-colors"
+                          style={{ color: 'var(--df-danger)' }}
+                        >
                           <FiTrash2 size={13} className="opacity-70" /> Move to trash
-                        </button>
-
-                        <div className="h-px bg-[var(--df-border)] my-1 border-opacity-50"></div>
-
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <FiRefreshCcw size={13} className="opacity-70" /> Revert changes
-                        </button>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <FiLink size={13} className="opacity-70" /> Copy legacy query ID
-                        </button>
-
-                        <div className="h-px bg-[var(--df-border)] my-1 border-opacity-50"></div>
-
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <FiTable size={13} className="opacity-70" /> Create or modify table...
-                        </button>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center justify-between transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <span className="flex items-center gap-2.5"><FiPlusSquare size={13} className="opacity-70" /> Add data</span>
-                          <FiShare2 size={12} className="opacity-50" />
-                        </button>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <FiPieChart size={13} className="opacity-70" /> Add to dashboard
-                        </button>
-                        <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center justify-between transition-colors mb-1" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                          <span className="flex items-center gap-2.5"><FiBell size={13} className="opacity-70" /> Create alert</span>
-                          <span className="text-[9px] px-1.5 rounded bg-gray-500/20 opacity-70">Preview</span>
                         </button>
                       </div>
                     </>
                   )}
                 </div>
+
+                {/* Inline rename overlay */}
+                {isRenaming && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setIsRenaming(false)}>
+                    <div className="rounded-2xl p-6 w-80 shadow-2xl flex flex-col gap-4" style={{ backgroundColor: 'var(--df-card-bg)', border: '1px solid var(--df-border)' }} onClick={e => e.stopPropagation()}>
+                      <p className="text-[14px] font-semibold" style={{ color: 'var(--df-text)' }}>Rename</p>
+                      <input
+                        autoFocus
+                        className="rounded-lg px-3 py-2 text-[13px] outline-none w-full"
+                        style={{ backgroundColor: 'var(--df-input-bg)', border: '1.5px solid var(--df-input-border)', color: 'var(--df-text)' }}
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && renameValue.trim()) {
+                            renameTab(activeTabId, renameValue.trim());
+                            if (activeTab?.workspaceItemId && activeTab.workspaceItemId !== 'undefined') {
+                              const item = items.find(i => i.id === activeTab.workspaceItemId);
+                              if (item) await wsRename(item, renameValue.trim());
+                            }
+                            setIsRenaming(false);
+                          }
+                          if (e.key === 'Escape') setIsRenaming(false);
+                        }}
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => setIsRenaming(false)} className="px-4 py-1.5 rounded-lg text-[12px]" style={{ color: 'var(--df-text-muted)', backgroundColor: 'var(--df-bg-secondary)' }}>Cancel</button>
+                        <button
+                          onClick={async () => {
+                            if (!renameValue.trim()) return;
+                            renameTab(activeTabId, renameValue.trim());
+                            if (activeTab?.workspaceItemId && activeTab.workspaceItemId !== 'undefined') {
+                              const item = items.find(i => i.id === activeTab.workspaceItemId);
+                              if (item) await wsRename(item, renameValue.trim());
+                            }
+                            setIsRenaming(false);
+                          }}
+                          className="px-4 py-1.5 rounded-lg text-[12px] font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg, var(--df-accent), color-mix(in srgb, var(--df-accent) 80%, #000))' }}
+                        >Rename</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
