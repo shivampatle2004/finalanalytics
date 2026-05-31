@@ -21,9 +21,9 @@ from app.modules.sql.models.pagination_models import (
 )
 from app.modules.sql.services.query_parser import (
     clean_query,
-    has_order_by,
-    has_limit,
     is_aggregate_query,
+    rewrite_three_level_names,
+    validate_sql_structure,
     wrap_with_pagination,
     wrap_with_cursor,
     build_count_query,
@@ -98,20 +98,12 @@ def run_paginated_query(
     if not cleaned_sql:
         return _error_response("Query is empty after cleaning.")
 
-    # ── Unity Catalog Style Rewriting ──
-    import re
-    table_pattern = r"(?:FROM|JOIN)\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){2})"
-    matches = re.findall(table_pattern, cleaned_sql, re.IGNORECASE)
-    for full_path in set(matches):
-        parts = full_path.split(".")
-        # Map catalog.schema to physical schema catalog_schema
-        physical_name = f"{parts[0]}_{parts[1]}.{parts[2]}"
-        cleaned_sql = re.sub(
-            r"\b" + re.escape(full_path) + r"\b",
-            physical_name,
-            cleaned_sql,
-            flags=re.IGNORECASE
-        )
+    struct_ok, struct_err = validate_sql_structure(cleaned_sql)
+    if not struct_ok:
+        return _error_response(struct_err)
+
+    # ── Unity Catalog: catalog.schema.table → catalog_schema.table ──
+    cleaned_sql = rewrite_three_level_names(cleaned_sql)
 
     # Cap page_size
     page_size = min(page_size, MAX_PAGE_SIZE)

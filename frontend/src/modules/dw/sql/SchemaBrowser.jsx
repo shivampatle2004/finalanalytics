@@ -85,12 +85,13 @@ const SchemaBrowser = ({ onTablePreview }) => {
                               name={tableName}
                               columns={tableData.columns}
                               onPreview={() => {
-                                // Use physical schema name for the SQL preview query
-                                const physicalSchema = tableData.physicalSchema || schemaName;
-                                if (onTablePreview) onTablePreview(`"${physicalSchema}".${tableName}`);
+                                const catalogPart = (catalogName || '').toLowerCase();
+                                const schemaPart = (schemaName || '').toLowerCase();
+                                if (onTablePreview) onTablePreview(`${catalogPart}.${schemaPart}.${tableName}`);
                               }}
                               schemaName={schemaName}
                               physicalSchema={tableData.physicalSchema || schemaName}
+                              catalogName={catalogName}
                             />
                           ))}
                       </div>
@@ -106,12 +107,13 @@ const SchemaBrowser = ({ onTablePreview }) => {
   );
 };
 
-const TableItem = ({ name, columns, onPreview, schemaName, physicalSchema }) => {
+const TableItem = ({ name, columns, onPreview, schemaName, physicalSchema, catalogName }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleDragStart = (e) => {
-    // Use the physical schema name so the query runs against the real DB schema
-    const tableRef = `${physicalSchema}.${name}`;
+    const catalogPart = (catalogName || '').toLowerCase();
+    const schemaPart = (schemaName || '').toLowerCase();
+    const tableRef = `${catalogPart}.${schemaPart}.${name}`;
     e.dataTransfer.setData('application/sql-table', tableRef);
     e.dataTransfer.setData('text/plain', tableRef);
     e.dataTransfer.effectAllowed = 'copy';

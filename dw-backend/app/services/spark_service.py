@@ -319,62 +319,54 @@ class SparkService:
           - schema.table         -> physical schema.table
           - catalog.schema.table -> maps catalog.schema to physical schema (e.g. catalog_schema.table)
         """
+        from app.modules.sql.services.query_parser import (
+            iter_table_paths,
+            rewrite_spark_table_names,
+            to_pg_physical_table_name,
+        )
+
         if not query:
             return query
 
-        # 1. Extract potential PostgreSQL tables using FROM/JOIN pattern
-        # Supports: 
-        #   - schema.table         (1 dot)
-        #   - catalog.schema.table (2 dots)
-        table_pattern = r"(?:FROM|JOIN)\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,2})"
-        matches = re.findall(table_pattern, query, re.IGNORECASE)
-
-        if not matches:
+        table_paths = [
+            path for path in iter_table_paths(query) if "." in path
+        ]
+        if not table_paths:
             return query
 
-        # Ensure session registry exists for this session
         if session_id and session_id not in self._session_registry:
             self._session_registry[session_id] = set()
 
-        processed_query = query
-        for full_table_name in set(matches):
-            # Check if already registered in this session
-            is_registered = session_id and full_table_name in self._session_registry.get(session_id, set())
-
-            # Spark view name will be a flattened version (dots replaced by underscores)
-            # test.bronze.table -> test_bronze_table
+        for full_table_name in table_paths:
+            is_registered = (
+                session_id
+                and full_table_name in self._session_registry.get(session_id, set())
+            )
             alias_name = full_table_name.replace(".", "_")
 
             if not is_registered:
-                # Resolve physical name for PostgreSQL
-                parts = full_table_name.split(".")
-                pg_table_name = full_table_name
-                
-                if len(parts) == 3:
-                    # 3-level naming (catalog.schema.table)
-                    # Resolves to physical schema: catalog_schema.table
-                    # This allows users to use 'test.bronze.table' which maps to physical 'test_bronze.table'
-                    pg_table_name = f"{parts[0]}_{parts[1]}.{parts[2]}"
-                    logger.info("Resolving 3-level name '%s' to physical PG table '%s'", full_table_name, pg_table_name)
+                pg_table_name = to_pg_physical_table_name(full_table_name)
+                if full_table_name != pg_table_name:
+                    logger.info(
+                        "Resolving 3-level name '%s' to physical PG table '%s'",
+                        full_table_name,
+                        pg_table_name,
+                    )
 
                 try:
-                    # Register the table from PG to Spark
                     self.register_pg_table(pg_table_name, alias_name)
                     if session_id:
                         self._session_registry[session_id].add(full_table_name)
                 except Exception as e:
-                    # Log but continue; Spark will throw the final error if it's truly missing
-                    logger.warning("Auto-registration failed for %s (mapped to %s): %s", full_table_name, pg_table_name, e)
+                    logger.warning(
+                        "Auto-registration failed for %s (mapped to %s): %s",
+                        full_table_name,
+                        pg_table_name,
+                        e,
+                    )
                     continue
 
-            # 2. Rewrite query: replace "catalog.schema.table" with "catalog_schema_table"
-            # Uses word boundaries \b to ensure we don't break complex names
-            processed_query = re.sub(
-                r"\b" + re.escape(full_table_name) + r"\b",
-                alias_name,
-                processed_query,
-                flags=re.IGNORECASE
-            )
+        processed_query = rewrite_spark_table_names(query)
 
         if processed_query != query:
             logger.debug("Rewritten Spark query: %s", processed_query)
