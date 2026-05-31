@@ -167,26 +167,6 @@ const GlobalRunsPage = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  const handleDateChange = (setter) => (e) => {
-    let val = e.target.value.replace(/[^\d]/g, '');
-    if (val.length > 12) val = val.substring(0, 12);
-    
-    let formatted = val;
-    if (val.length > 4) {
-      formatted = val.substring(0, 4) + '-' + val.substring(4);
-    }
-    if (val.length > 6) {
-      formatted = formatted.substring(0, 7) + '-' + val.substring(6);
-    }
-    if (val.length > 8) {
-      formatted = formatted.substring(0, 10) + ' ' + val.substring(8);
-    }
-    if (val.length > 10) {
-      formatted = formatted.substring(0, 13) + ':' + val.substring(10);
-    }
-    setter(formatted);
-  };
-
   const fetchRuns = useCallback(async () => {
     setLoading(true);
     try {
@@ -283,11 +263,10 @@ const GlobalRunsPage = () => {
         <div className="flex items-center text-[12px] border rounded-[4px] px-3 py-1 gap-2 focus-within:ring-1" style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}>
           <span className="text-[var(--df-text-muted)]">Start:</span>
           <input 
-            type="text" 
-            placeholder="YYYY-MM-DD HH:MM"
+            type="datetime-local" 
             value={startDate} 
-            onChange={handleDateChange(setStartDate)} 
-            className="font-medium text-[var(--df-strong)] bg-transparent focus:outline-none w-32" 
+            onChange={(e) => setStartDate(e.target.value)} 
+            className="font-medium text-[var(--df-strong)] bg-transparent focus:outline-none" 
           />
           {startDate && <button onClick={() => setStartDate('')} className="text-[var(--df-text-muted)] hover:text-[var(--df-text)]"><FiXCircle size={10} /></button>}
           
@@ -295,11 +274,10 @@ const GlobalRunsPage = () => {
           
           <span className="text-[var(--df-text-muted)]">End:</span>
           <input 
-            type="text" 
-            placeholder="YYYY-MM-DD HH:MM"
+            type="datetime-local" 
             value={endDate} 
-            onChange={handleDateChange(setEndDate)} 
-            className="font-medium text-[var(--df-strong)] bg-transparent focus:outline-none w-32" 
+            onChange={(e) => setEndDate(e.target.value)} 
+            className="font-medium text-[var(--df-strong)] bg-transparent focus:outline-none" 
           />
           {endDate && <button onClick={() => setEndDate('')} className="text-[var(--df-text-muted)] hover:text-[var(--df-text)]"><FiXCircle size={10} /></button>}
         </div>
@@ -354,7 +332,9 @@ const GlobalRunsPage = () => {
                       {run.job_name || 'Untitled'}
                     </td>
                     <td className="py-2 px-2 text-[11px] text-[var(--df-text-soft)]">
-                      <span className="flex items-center gap-1.5"><FiCpu size={12} /> Pipeline</span>
+                      <span className="flex items-center gap-1.5">
+                        <FiCpu size={12} /> {run.job_type === 'Job' ? 'Job' : 'Pipeline'}
+                      </span>
                     </td>
                     <td className="py-2 px-2 text-[11px] text-[var(--df-text-soft)]">
                       {run.job_name?.toLowerCase().includes('ingest') ? 'Ingestion' : 'MV/ST pipeline'}

@@ -65,10 +65,11 @@ def serialize_job_run(run: JobRun) -> dict:
         "task_runs": [serialize_task_run(tr) for tr in (run.task_runs or [])],
     }
 
-def serialize_global_run(run: JobRun, job_name: str = "") -> dict:
-    """Serializer for the global runs view — includes job_name and extracted error code."""
+def serialize_global_run(run: JobRun, job_name: str = "", job_type: str = "Pipeline") -> dict:
+    """Serializer for the global runs view — includes job_name, job_type and extracted error code."""
     base = serialize_job_run(run)
     base["job_name"] = job_name
+    base["job_type"] = job_type
     
     # Extract error message to simulate an error code
     error_code = ""

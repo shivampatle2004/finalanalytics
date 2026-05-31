@@ -41,18 +41,22 @@ const Catalog = () => {
   const [createVolumeOpen, setCreateVolumeOpen] = useState(false);
   const [uploadTableOpen, setUploadTableOpen] = useState(false);
   const [volumeRefreshKey, setVolumeRefreshKey] = useState(0);
+  const [hasInitiallyExpanded, setHasInitiallyExpanded] = useState(false);
 
   useEffect(() => {
-    if (catalogs && expandedItems.length === 0) {
+    if (catalogs && !hasInitiallyExpanded) {
       const dbNames = Object.keys(catalogs);
-      const initialExpand = [];
-      dbNames.forEach(db => {
-        initialExpand.push(db);
-        if (catalogs[db] && catalogs[db]['public']) initialExpand.push(`${db}-public`);
-      });
-      if (initialExpand.length > 0) setExpandedItems(initialExpand);
+      if (dbNames.length > 0) {
+        const initialExpand = [];
+        dbNames.forEach(db => {
+          initialExpand.push(db);
+          if (catalogs[db] && catalogs[db]['public']) initialExpand.push(`${db}-public`);
+        });
+        setExpandedItems(initialExpand);
+        setHasInitiallyExpanded(true);
+      }
     }
-  }, [catalogs, expandedItems.length]);
+  }, [catalogs, hasInitiallyExpanded]);
 
   const toggleExpand = (id) => setExpandedItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   const toggleFavorite = (tableId, e) => {
@@ -376,6 +380,13 @@ const Catalog = () => {
                         }}>
                         Type
                       </th>
+                      <th className="py-1.5 px-4"
+                        style={{
+                          borderBottom: '1px solid var(--df-border-light)',
+                          backgroundColor: 'var(--df-bg)',
+                          position: 'sticky', top: 0, zIndex: 5, width: '40px'
+                        }}>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -439,6 +450,23 @@ const Catalog = () => {
                                 {item.type.toUpperCase()}
                               </span>
                             </div>
+                          </td>
+
+                          {/* Actions Cell */}
+                          <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => toggleFavorite(item.id, e)}
+                              className="p-1.5 rounded-md transition-colors hover:bg-[var(--df-panel)]"
+                              title={favorites.includes(item.id) ? "Remove from favorites" : "Add to favorites"}
+                            >
+                              <FiStar 
+                                size={14} 
+                                style={{ 
+                                  color: favorites.includes(item.id) ? '#eab308' : 'var(--df-text-muted)',
+                                  fill: favorites.includes(item.id) ? '#eab308' : 'none'
+                                }} 
+                              />
+                            </button>
                           </td>
                         </tr>
                       ))}

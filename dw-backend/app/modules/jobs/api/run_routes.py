@@ -31,7 +31,7 @@ def list_all_runs(
     db: Session = Depends(get_jobs_db),
 ):
     """List all runs across all jobs with optional filters."""
-    query = db.query(JobRun, Job.name).join(Job, JobRun.job_id == Job.id)
+    query = db.query(JobRun, Job.name, Job.type).join(Job, JobRun.job_id == Job.id)
 
     if status:
         try:
@@ -47,7 +47,7 @@ def list_all_runs(
         if type == "Jobs":
             query = query.filter(Job.type == "Job")
         elif type == "Pipelines":
-            query = query.filter(Job.type == "Pipeline")
+            query = query.filter(Job.type == "Pipeline", ~Job.name.ilike("%ingest%"))
         elif type == "ETL Pipelines":
             query = query.filter(Job.type == "Pipeline", Job.name.ilike("%ingest%"))
 
@@ -79,7 +79,7 @@ def list_all_runs(
     )
 
     return {
-        "runs": [serialize_global_run(run, jname) for run, jname in rows],
+        "runs": [serialize_global_run(run, jname, jtype.value if jtype else "Pipeline") for run, jname, jtype in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -133,7 +133,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_jobs_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     job = db.query(Job).filter(Job.id == run.job_id).first()
-    return serialize_global_run(run, job.name if job else "")
+    return serialize_global_run(run, job.name if job else "", job.type.value if job and job.type else "Pipeline")
 
 
 @router.get("/{run_id}/tasks")
