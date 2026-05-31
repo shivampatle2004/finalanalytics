@@ -405,7 +405,8 @@ setTimeout(() => {
 }, 15000); // 15s warm-up delay
 
 // Graceful supervisor shutdown
-process.on('SIGINT', () => {
+function handleShutdown() {
+  if (isShuttingDown) return;
   isShuttingDown = true;
   log('Supervisor', '[INFO] Shutting down supervisor. Terminating child processes...', colors.bright + colors.red);
 
@@ -425,4 +426,7 @@ process.on('SIGINT', () => {
     log('Supervisor', '[SUCCESS] All child processes terminated safely. Goodbye.', colors.green);
     process.exit(0);
   });
-});
+}
+
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
