@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiFileText, FiTrash2, FiRotateCcw, FiStar, FiUsers } from 'react-icons/fi';
+import { useParams, useNavigate } from 'react-router-dom';
 import Breadcrumbs from './Breadcrumbs';
 import CreateDropdown from './CreateDropdown';
 import FileList from './FileList';
@@ -51,6 +52,9 @@ const FilePreview = ({ file, onBack }) => (
 );
 
 const WorkspacePage = () => {
+  const { itemId } = useParams();
+  const navigate = useNavigate();
+
   const {
     items,
     currentFolderId,
@@ -92,6 +96,30 @@ const WorkspacePage = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  /* ── URL ↔ activeItem sync ── */
+  // Restore active item from URL on initial load only
+  const restoredFromUrl = useRef(false);
+  useEffect(() => {
+    if (restoredFromUrl.current) return;
+    if (!itemId || items.length === 0 || loading) return;
+    const found = items.find(i => i.id === itemId && !i.isDeleted);
+    if (found) {
+      setActiveItem(found);
+      restoredFromUrl.current = true;
+    }
+  }, [itemId, items, loading]);
+
+  // When activeItem changes, update the URL
+  useEffect(() => {
+    const current = window.location.pathname;
+    if (activeItem) {
+      const target = `/dw/workspace/${activeItem.id}`;
+      if (current !== target) navigate(target, { replace: true });
+    } else {
+      if (current !== '/dw/workspace') navigate('/dw/workspace', { replace: true });
+    }
+  }, [activeItem?.id]);
 
   // Virtual view helpers
   const isTrashView = currentFolderId === '__trash__';
@@ -192,7 +220,7 @@ const WorkspacePage = () => {
 
               {/* ROW 2: Large Title + Favorite Star */}
               <div className="flex items-center gap-3">
-                <h1 className="text-[30px] font-bold tracking-tight" style={{ color: 'var(--df-text)' }}>
+                <h1 className="text-[28px] font-bold tracking-tight" style={{ color: 'var(--df-text)' }}>
                   {isTrashView ? 'Trash'
                     : isFavoritesView ? 'Favorites'
                       : isSharedView ? 'Shared with me'
@@ -260,9 +288,9 @@ const WorkspacePage = () => {
             </div>
           )}
         </div>
-        {/* Main content area - Scrolling */}
-        <div className="flex-1 overflow-y-auto df-scrollbar px-2 pb-4 min-h-0">
-          <div className="min-h-0">
+        {/* Main content area */}
+        <div className={`flex-1 min-h-0 ${activeItem ? 'overflow-hidden flex flex-col px-2 pb-2' : 'overflow-y-auto df-scrollbar px-2 pb-4'}`}>
+          <div className={activeItem ? 'flex flex-col flex-1 min-h-0 h-full' : 'min-h-0'}>
             {activeItem ? (
               activeItem.type === 'file' ? (
                 <FilePreview file={activeItem} onBack={() => setActiveItem(null)} />

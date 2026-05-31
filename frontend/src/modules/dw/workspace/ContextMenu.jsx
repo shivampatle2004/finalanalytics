@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import JSZip from 'jszip';
 import { 
   FiEdit2, FiTrash2, FiStar, FiRotateCcw, FiXCircle, FiArrowUpRight, 
@@ -48,18 +49,19 @@ const ContextMenu = ({
       const winW = document.documentElement.clientWidth;
       const winH = window.innerHeight;
       
-      // Default: Anchor right edge of menu to the right edge of button (x)
-      // but shift left by 32px to ensure it doesn't overlap/cut
-      let newX = x - rect.width - 32; 
+      // Standard dynamic context menu positioning
+      let newX = x; 
       let newY = y;
       
-      // Right edge protection
-      if (newX + rect.width > winW - 20) {
-        newX = winW - rect.width - 20;
+      // If it would overflow the right edge, flip it to the left
+      if (newX + 230 > winW - 10) {
+        // If it was triggered by a button click (x is the button's right edge), 
+        // we might want to offset it a bit more, but x - 230 works well as it aligns the right edge.
+        newX = x - 230 - 8; 
       }
       
       // Left edge protection
-      if (newX < 16) newX = 16;
+      if (newX < 10) newX = 10;
       
       // VERTICAL LOGIC: Open Up or Down
       const spaceBelow = winH - y;
@@ -247,13 +249,14 @@ const ContextMenu = ({
     ) : null
   );
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-50 rounded-2xl shadow-xl py-2.5 w-[230px] animate-fadeIn"
+      className="fixed z-50 rounded-2xl shadow-xl py-2.5 animate-fadeIn"
       style={{
         top: pos.y,
         left: pos.x,
+        width: '230px',
         maxHeight: `${maxH}px`,
         backgroundColor: 'var(--df-panel)',
         border: '1px solid var(--df-border)',
@@ -283,7 +286,8 @@ const ContextMenu = ({
           <MenuItem icon={FiTrash2} label={`Move to Trash`} onClick={() => handleAction(() => onDelete(item))} danger />
         </>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 

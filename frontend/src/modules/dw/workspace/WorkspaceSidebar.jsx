@@ -200,7 +200,7 @@ const WorkspaceSidebar = ({ activeSection, onNavigate, items = [] }) => {
       <div style={{ padding: '22px 20px 14px 20px' }}>
         <span
           style={{
-            fontSize: 24,
+            fontSize: 22,
             fontWeight: 700,
             fontFamily: 'var(--font-heading)',
             color: 'var(--df-strong)',
