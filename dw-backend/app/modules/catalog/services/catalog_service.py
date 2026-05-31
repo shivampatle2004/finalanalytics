@@ -355,3 +355,99 @@ def drop_table(db: Session, schema_name: str, table_name: str):
     except Exception as e:
         db.rollback()
         raise e
+
+
+# ── Table Stats ───────────────────────────────────────────────────────────────
+
+def get_table_stats(db: Session, table_name: str, schema_name: str = "public") -> dict:
+    """Fetch deep statistics for a table using SQL queries."""
+    query = text("""
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = :schema_name AND table_name = :table_name
+    """)
+    if not db.execute(query, {"schema_name": schema_name, "table_name": table_name}).first():
+        raise ValueError(f"Table '{schema_name}.{table_name}' not found.")
+
+    cols = get_table_columns(db, table_name, schema_name)
+    total_columns = len(cols)
+    total_rows = db.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"')).scalar() or 0
+    
+    column_stats = []
+    total_nulls = 0
+    for c in cols:
+        col_name = c["column_name"]
+        dtype = c["data_type"].lower() if c["data_type"] else ""
+        stat = {
+            "column": col_name,
+            "type": dtype,
+            "null_count": 0,
+            "null_percent": 0,
+            "fill_rate": 100,
+            "distinct_count": 0,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "top_values": []
+        }
+        
+        try:
+            if "json" in dtype or "array" in dtype or "byte" in dtype or "xml" in dtype:
+                agg_q = text(f'SELECT COUNT(*) - COUNT("{col_name}") FROM "{schema_name}"."{table_name}"')
+                null_cnt = db.execute(agg_q).scalar() or 0
+            else:
+                is_num = "int" in dtype or "float" in dtype or "numeric" in dtype or "double" in dtype or "real" in dtype
+                mean_expr = f'AVG("{col_name}"::numeric)' if is_num else 'NULL'
+                
+                agg_q = text(f'''
+                    SELECT 
+                        COUNT(*) - COUNT("{col_name}") as null_cnt,
+                        COUNT(DISTINCT "{col_name}") as dist_cnt,
+                        MIN("{col_name}"::text) as min_val,
+                        MAX("{col_name}"::text) as max_val,
+                        {mean_expr} as mean_val
+                    FROM "{schema_name}"."{table_name}"
+                ''')
+                res = db.execute(agg_q).fetchone()
+                if res:
+                    null_cnt = res[0] or 0
+                    stat["distinct_count"] = res[1] or 0
+                    stat["min"] = res[2]
+                    stat["max"] = res[3]
+                    if is_num and res[4] is not None:
+                        stat["mean"] = round(float(res[4]), 2)
+                        
+            stat["null_count"] = null_cnt
+            stat["null_percent"] = round((null_cnt / total_rows * 100), 2) if total_rows else 0
+            stat["fill_rate"] = 100 - stat["null_percent"]
+            total_nulls += null_cnt
+            
+            if stat["distinct_count"] > 0 and stat["distinct_count"] < 1000:
+                top_q = text(f'''
+                    SELECT "{col_name}"::text, COUNT(*) as cnt 
+                    FROM "{schema_name}"."{table_name}"
+                    WHERE "{col_name}" IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY cnt DESC
+                    LIMIT 3
+                ''')
+                top_res = db.execute(top_q).fetchall()
+                stat["top_values"] = [{"value": row[0], "count": row[1]} for row in top_res]
+                
+        except Exception:
+            pass
+            
+        column_stats.append(stat)
+        
+    completeness = 100.0
+    if total_rows > 0 and total_columns > 0:
+        completeness = round((1 - (total_nulls / (total_rows * total_columns))) * 100, 2)
+        
+    return {
+        "table_schema": schema_name,
+        "table_name": table_name,
+        "total_rows": total_rows,
+        "total_columns": total_columns,
+        "duplicate_rows": 0,
+        "completeness_score": completeness,
+        "column_stats": column_stats
+    }

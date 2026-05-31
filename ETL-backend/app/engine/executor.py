@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import os
 import tempfile
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +29,6 @@ from app.engine.memory_guard import MemoryGuard
 from app.engine.transforms import apply_transform
 from app.models.chunk_failure import ChunkFailure
 from app.models.job import Job, JobRun
-from app.models.job_log import JobLog
 from app.models.pipeline import Pipeline
 from app.models.quality_rule import QualityRule, QualityResult
 from app.engine.data_quality import evaluate_rule
@@ -284,7 +281,7 @@ async def _execute_dag(
                     config = node_data.get("config", {})
                     dest_format = config.get("output_format", "database")
                     if dest_format == "database":
-                        target_table = config.get("table", "arithwise_output")
+                        target_table = config.get("table_name") or config.get("table", "arithwise_output")
                         await _run_data_quality_checks(session, job.id, node_id, label, target_table)
             except asyncio.TimeoutError:
                 raise RuntimeError(
@@ -649,9 +646,34 @@ async def _run_load_task(node_data: dict, input_lf: pl.LazyFrame, memory_guard: 
     dest_format = config.get("output_format", "database")
 
     if dest_format == "database":
-        target = config.get("table", "arithwise_output")
+        # The frontend provides 'table_name' for database targets and 'catalog'
+        target = config.get("table_name") or config.get("table", "arithwise_output")
         mode = "append" if config.get("_delta_watermark") else config.get("if_table_exists", "replace")
+        catalog_name = config.get("catalog")
         
+        target_schema = "public"
+        if catalog_name:
+            try:
+                query = text("""
+                        SELECT ls.physical_schema_name 
+                        FROM logical_schemas ls
+                        JOIN catalogs c ON ls.catalog_id = c.id
+                        WHERE c.name = :catalog AND ls.name = :schema
+                    """)
+                async with async_session() as session:
+                    res = await session.execute(query, {"catalog": catalog_name, "schema": layer})
+                    row = res.fetchone()
+                    if row:
+                        target_schema = row[0]
+                    else:
+                        raise ValueError(f"DW Catalog '{catalog_name}' does not have a schema '{layer}'. "
+                                         f"Please ensure the catalog exists and has Bronze/Silver schemas created.")
+            except Exception as e:
+                logger.error(f"Failed to resolve physical schema for catalog '{catalog_name}', layer '{layer}': {e}")
+                raise
+        
+        full_table_name = f"{target_schema}.{target}" if target_schema != "public" else target
+
         # BUG FIX: psycopg2 cannot adapt 'dict' types. 
         # We must stringify any Struct/Object/List columns before write_database using map_elements.
         for col in df.columns:
@@ -664,7 +686,7 @@ async def _run_load_task(node_data: dict, input_lf: pl.LazyFrame, memory_guard: 
 
         await asyncio.to_thread(
             df.write_database, 
-            table_name=target, 
+            table_name=full_table_name, 
             connection=get_sync_db_url(), 
             if_table_exists=mode, 
             engine="sqlalchemy"
