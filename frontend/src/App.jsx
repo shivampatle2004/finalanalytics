@@ -95,6 +95,8 @@ function App() {
                   {/* ── DW Module: /dw/* — Workspace ─────────────── */}
                   <Route path="/dw/workspace"
                     element={<DashboardLayout><WorkspacePage /></DashboardLayout>} />
+                  <Route path="/dw/workspace/:itemId"
+                    element={<DashboardLayout><WorkspacePage /></DashboardLayout>} />
 
                   {/* ── DW Module: /dw/* — Jobs & Pipelines ──────── */}
                   <Route path="/dw/jobs"

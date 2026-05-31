@@ -42,7 +42,7 @@ export const WorkspaceProvider = ({ children }) => {
   }, []);
 
   const handleCreate = useCallback(async (type, extra = {}) => {
-    const name = extra.name || prompt(`Enter name for new ${type}:`, `New ${type}`);
+    const name = extra.name;
     if (!name) return;
     const realParentId = (currentFolderId && currentFolderId.startsWith('__')) ? null : currentFolderId;
     const newItem = { 
@@ -53,12 +53,17 @@ export const WorkspaceProvider = ({ children }) => {
     if (type === 'notebook') {
       const lang = extra.language || 'sql';
       newItem.language = lang;
-      newItem.cells = [{ language: lang, content: '', output: null }];
-    } else { newItem.content = ''; }
+      newItem.cells = [{ id: `cell-${Date.now()}`, language: lang, content: '', output: null }];
+    } else {
+      newItem.content = '';
+    }
     try {
       const created = await api.createItem(newItem);
       setItems(prev => [...prev, created]);
-      if (type === 'notebook') setActiveItem(created);
+      // Open the new notebook immediately
+      if (type === 'notebook') {
+        setActiveItem(created);
+      }
     } catch (err) { console.error('[WorkspaceContext] Create failed:', err); }
   }, [currentFolderId]);
 

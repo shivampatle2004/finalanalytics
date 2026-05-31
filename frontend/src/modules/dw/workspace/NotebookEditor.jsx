@@ -1,302 +1,365 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { FiArrowLeft, FiSave, FiPlay, FiPlus, FiCheck, FiCpu, FiDatabase } from 'react-icons/fi';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { FiArrowLeft, FiPlay, FiPlus, FiCheck, FiCpu, FiDatabase, FiLoader } from 'react-icons/fi';
 import { notebook } from '../../../shared/services/api';
 import NotebookCell, { LANG_CONFIG } from './NotebookCell';
 
 const ENGINE_OPTIONS = [
   { value: 'postgres', label: 'PostgreSQL', icon: FiDatabase, color: '#60a5fa' },
-  { value: 'spark', label: 'Spark', icon: FiCpu, color: '#f59e0b' },
+  { value: 'spark',    label: 'Spark',      icon: FiCpu,      color: '#f59e0b' },
 ];
+
+/* Autosave debounce — 1.5 s after last change */
+const AUTOSAVE_DELAY = 1500;
+
+/* ── Between-cell insert bar — hidden until hover ── */
+const BetweenCellBar = ({ onAddCode, onAddText }) => {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        height: 40,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        margin: '2px 0',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Solid accent line — only on hover */}
+      <div style={{
+        position: 'absolute',
+        left: 0, right: 0, top: '50%',
+        height: 2,
+        backgroundColor: 'var(--df-accent)',
+        borderRadius: 2,
+        opacity: hovered ? 0.5 : 0,
+        transition: 'opacity 0.15s',
+      }} />
+
+      {/* Buttons — only on hover, clearly visible */}
+      <div style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: 'var(--df-bg-secondary)',
+        padding: '0 16px',
+        zIndex: 1,
+        opacity: hovered ? 1 : 0,
+        pointerEvents: hovered ? 'auto' : 'none',
+        transition: 'opacity 0.15s',
+      }}>
+        <button
+          onClick={onAddCode}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '6px 18px', borderRadius: 7,
+            fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
+            backgroundColor: 'var(--df-accent)',
+            color: '#fff',
+            border: 'none',
+            cursor: 'pointer', whiteSpace: 'nowrap', lineHeight: 1.4,
+            boxShadow: '0 2px 8px rgba(122,30,58,0.25)',
+            transition: 'opacity 0.12s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+        >
+          <FiPlus size={14} /> Code
+        </button>
+
+        <button
+          onClick={onAddText}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '6px 18px', borderRadius: 7,
+            fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
+            backgroundColor: 'var(--df-surface)',
+            color: 'var(--df-text)',
+            border: '1.5px solid var(--df-border)',
+            cursor: 'pointer', whiteSpace: 'nowrap', lineHeight: 1.4,
+            transition: 'background 0.12s, border-color 0.12s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-accent-soft)'; e.currentTarget.style.borderColor = 'var(--df-accent)'; e.currentTarget.style.color = 'var(--df-icon-accent)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-surface)'; e.currentTarget.style.borderColor = 'var(--df-border)'; e.currentTarget.style.color = 'var(--df-text)'; }}
+        >
+          <FiPlus size={14} /> Text
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const NotebookEditor = ({ notebook: notebookData, onBack, onSave }) => {
   const notebookId = notebookData.id || notebookData._id;
 
-  // Helper to load initial values checking localStorage draft first
-  const getInitialCells = () => {
-    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft);
-        if (parsed.cells && parsed.cells.length > 0) return parsed.cells;
-      } catch (e) {
-        console.error('Failed to parse notebook cells draft', e);
-      }
-    }
-    if (notebookData.cells && notebookData.cells.length > 0) return notebookData.cells;
+  /* ── State ── */
+  const [cells, setCells] = useState(() => {
+    if (notebookData.cells?.length > 0) return notebookData.cells;
     return [{ id: `cell-${Date.now()}`, language: notebookData.language || 'sql', content: notebookData.content || '', output: null }];
-  };
+  });
+  const [defaultLanguage, setDefaultLanguage] = useState(notebookData.language || 'sql');
+  const [engine, setEngine]                   = useState(notebookData.engine || 'postgres');
+  const [runningCells, setRunningCells]       = useState(new Set());
+  // 'idle' | 'saving' | 'saved'
+  const [saveStatus, setSaveStatus]           = useState('idle');
+  // drag state
+  const dragIndexRef = useRef(null);
 
-  const getInitialEngine = () => {
-    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft);
-        if (parsed.engine) return parsed.engine;
-      } catch (e) {}
-    }
-    return notebookData.engine || 'postgres';
-  };
+  const autosaveTimer = useRef(null);
+  const isFirstRender = useRef(true);
 
-  const getInitialLanguage = () => {
-    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft);
-        if (parsed.language) return parsed.language;
-      } catch (e) {}
-    }
-    return notebookData.language || 'sql';
-  };
-
-  const [cells, setCells] = useState(getInitialCells);
-  const [isSaving, setIsSaving] = useState(false);
-  const [defaultLanguage, setDefaultLanguage] = useState(getInitialLanguage);
-  const [engine, setEngine] = useState(getInitialEngine);
-  const [runningCells, setRunningCells] = useState(new Set());
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', 'unsaved'
-
-  // Update editor state when transitioning to another notebook
+  /* ── Sync when switching notebooks ── */
   useEffect(() => {
-    const draft = localStorage.getItem(`osa_notebook_draft_${notebookId}`);
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft);
-        if (parsed.cells) setCells(parsed.cells);
-        if (parsed.engine) setEngine(parsed.engine);
-        if (parsed.language) setDefaultLanguage(parsed.language);
-        setSaveStatus('unsaved');
-        return;
-      } catch (e) {}
-    }
-
-    if (notebookData.cells && notebookData.cells.length > 0) setCells(notebookData.cells);
+    if (notebookData.cells?.length > 0) setCells(notebookData.cells);
     else setCells([{ id: `cell-${Date.now()}`, language: notebookData.language || 'sql', content: notebookData.content || '', output: null }]);
     setDefaultLanguage(notebookData.language || 'sql');
     setEngine(notebookData.engine || 'postgres');
-    setSaveStatus('saved');
-  }, [notebookId, notebookData]);
+    setSaveStatus('idle');
+    isFirstRender.current = true;
+  }, [notebookId]);
 
-  // Instantly preserve local draft whenever code, cells, language, or engine changes
+  /* ── Autosave on cells / engine / language change ── */
   useEffect(() => {
-    if (!notebookId) return;
-    const draftData = {
-      cells,
-      engine,
-      language: defaultLanguage,
-      updatedAt: Date.now()
-    };
-    localStorage.setItem(`osa_notebook_draft_${notebookId}`, JSON.stringify(draftData));
-  }, [cells, engine, defaultLanguage, notebookId]);
+    // Skip the very first render (just loaded)
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
 
-  // Debounced auto-save directly to backend
-  useEffect(() => {
-    const isFirstLoad = !cells || (
-      cells.length === 1 && 
-      cells[0].content === '' && 
-      (!notebookData.cells || notebookData.cells.length === 0)
-    );
-
-    const isDifferent = JSON.stringify(cells) !== JSON.stringify(notebookData.cells) || 
-                        engine !== notebookData.engine || 
-                        defaultLanguage !== notebookData.language;
-
-    if (isFirstLoad || !isDifferent) {
-      setSaveStatus('saved');
-      return;
-    }
-
-    setSaveStatus('unsaved');
-
-    const timer = setTimeout(async () => {
-      setSaveStatus('saving');
-      try {
-        if (notebookData.type === 'sql') {
-          const sqlContent = cells.map(c => c.content).join('\n\n');
-          await onSave(notebookId, { content: sqlContent });
-        } else {
-          await onSave(notebookId, { cells, language: defaultLanguage, engine });
-        }
-        setSaveStatus('saved');
-        localStorage.removeItem(`osa_notebook_draft_${notebookId}`);
-      } catch (err) {
-        console.error('Auto-save failed:', err);
-        setSaveStatus('unsaved');
-      }
-    }, 2000); // 2 seconds debounce
-
-    return () => clearTimeout(timer);
-  }, [cells, engine, defaultLanguage, notebookId, onSave, notebookData]);
-
-  const handleSave = async () => {
-    setIsSaving(true);
     setSaveStatus('saving');
-    try {
+    clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
       if (notebookData.type === 'sql') {
-        const sqlContent = cells.map(c => c.content).join('\n\n');
-        await onSave(notebookId, { content: sqlContent });
+        onSave(notebookId, { content: cells.map(c => c.content).join('\n\n') });
       } else {
-        await onSave(notebookId, { cells, language: defaultLanguage, engine });
+        onSave(notebookId, { cells, language: defaultLanguage, engine });
       }
       setSaveStatus('saved');
-      localStorage.removeItem(`osa_notebook_draft_${notebookId}`);
-    } catch (err) {
-      console.error('Save failed:', err);
-      setSaveStatus('unsaved');
-    } finally {
-      setTimeout(() => setIsSaving(false), 600);
-    }
-  };
+      // Reset to idle after 2 s so the indicator fades
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    }, AUTOSAVE_DELAY);
 
+    return () => clearTimeout(autosaveTimer.current);
+  }, [cells, engine, defaultLanguage]);
+
+  /* ── Drag-to-reorder ── */
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const [draggingIndex, setDraggingIndex] = useState(null);
+
+  const handleDragStart = useCallback((index) => {
+    dragIndexRef.current = index;
+    setDraggingIndex(index);
+  }, []);
+
+  const handleDragOver = useCallback((index) => {
+    if (dragIndexRef.current !== index) setDragOverIndex(index);
+  }, []);
+
+  const handleDrop = useCallback((dropIndex) => {
+    const from = dragIndexRef.current;
+    if (from == null || from === dropIndex) { setDragOverIndex(null); setDraggingIndex(null); return; }
+    setCells(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(dropIndex, 0, moved);
+      return next;
+    });
+    dragIndexRef.current = null;
+    setDragOverIndex(null);
+    setDraggingIndex(null);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    dragIndexRef.current = null;
+    setDragOverIndex(null);
+    setDraggingIndex(null);
+  }, []);
+
+  /* ── Cell operations ── */
   const handleUpdateCell = useCallback((cellId, updates) => {
     setCells(prev => prev.map(c => c.id === cellId ? { ...c, ...updates } : c));
   }, []);
 
-  const handleDeleteCell = (cellId) => { setCells(prev => prev.filter(c => c.id !== cellId)); };
+  const handleDeleteCell = (cellId) => {
+    setCells(prev => {
+      if (prev.length <= 1) {
+        // Replace with a fresh empty cell instead of leaving zero cells
+        return [{ id: `cell-${Date.now()}`, language: defaultLanguage, content: '', output: null }];
+      }
+      return prev.filter(c => c.id !== cellId);
+    });
+  };
 
-  const handleAddCell = () => {
-    setCells(prev => [...prev, {
+  const handleAddCodeCell = (afterIndex = null) => {
+    const newCell = {
       id: `cell-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       language: defaultLanguage,
       content: '',
       output: null,
-    }]);
+    };
+    setCells(prev => {
+      if (afterIndex === null) return [...prev, newCell];
+      const next = [...prev];
+      next.splice(afterIndex + 1, 0, newCell);
+      return next;
+    });
+  };
+
+  const handleAddTextCell = (afterIndex = null) => {
+    const newCell = {
+      id: `cell-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      language: 'markdown',
+      content: '',
+      output: null,
+    };
+    setCells(prev => {
+      if (afterIndex === null) return [...prev, newCell];
+      const next = [...prev];
+      next.splice(afterIndex + 1, 0, newCell);
+      return next;
+    });
   };
 
   const handleMoveUp = (index) => {
     if (index <= 0) return;
-    setCells(prev => {
-      const next = [...prev];
-      [next[index - 1], next[index]] = [next[index], next[index - 1]];
-      return next;
-    });
+    setCells(prev => { const n = [...prev]; [n[index - 1], n[index]] = [n[index], n[index - 1]]; return n; });
   };
 
   const handleMoveDown = (index) => {
     setCells(prev => {
       if (index >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[index], next[index + 1]] = [next[index + 1], next[index]];
-      return next;
+      const n = [...prev]; [n[index], n[index + 1]] = [n[index + 1], n[index]]; return n;
     });
   };
 
-  // ── Real Execution ─────────────────────────────────────────────────────
-
+  /* ── Execution ── */
   const handleRunCell = useCallback(async (cell) => {
     if (runningCells.has(cell.id)) return;
-
-    // Mark cell as running
     setRunningCells(prev => new Set(prev).add(cell.id));
-    handleUpdateCell(cell.id, { output: null });
+    const runStartedAt = new Date().toISOString();
+    handleUpdateCell(cell.id, { output: null, lastRunAt: runStartedAt });
 
     try {
-      // Determine the engine to use for this cell type
       const cellEngine = cell.language === 'python' && engine !== 'spark' ? 'worker' : engine;
+      const sessionId  = notebookId;
+      const result     = await notebook.executeCell(cell.language, cell.content, cellEngine, 'public', sessionId);
 
-      // Pass notebook ID as session_id for persistent variable state
-      const sessionId = notebookData.id || notebookData._id || null;
-
-      const result = await notebook.executeCell(
-        cell.language,
-        cell.content,
-        cellEngine,
-        'public',
-        sessionId
-      );
-
-      // Build output object from backend response
       const output = {};
-
       if (!result.success) {
         output.error = result.message || 'Execution failed';
       } else {
-        output.type = result.output_type || 'text';
+        output.type         = result.output_type || 'text';
         output.image_base64 = result.image_base64;
         output.html_content = result.html_content;
-
-        // For SQL with tabular results
-        if (result.columns && result.columns.length > 0 && result.rows && result.rows.length > 0) {
+        if (result.columns?.length > 0 && result.rows?.length > 0) {
           output.columns = result.columns;
-          output.rows = result.rows;
-          output.text = result.message || '';
-          // Ensure table type is set for rich tabular rendering, but don't override rich types like 'image'
-          if (output.type === 'text') {
-            output.type = 'table';
-          }
-        }
-        // For Python stdout or SQL message-only
-        else if (result.output) {
+          output.rows    = result.rows;
+          output.text    = result.message || '';
+          if (output.type === 'text') output.type = 'table';
+        } else if (result.output) {
           output.text = result.output;
-        }
-        else {
+        } else {
           output.text = result.message || '✓ Executed successfully.';
         }
       }
-
-      output.execution_time = result.execution_time;
+      output.execution_time    = result.execution_time;
       output.execution_time_ms = result.execution_time_ms;
-      output.row_count = result.row_count || 0;
-      output.rows_returned = result.rows_returned || 0;
-      output.status = result.status || 'success';
-
-      handleUpdateCell(cell.id, { output });
-
-    } catch (err) {
+      output.row_count         = result.row_count || 0;
+      output.rows_returned     = result.rows_returned || 0;
+      output.status            = result.status || 'success';
+      handleUpdateCell(cell.id, { output, lastRunAt: new Date().toISOString() });    } catch (err) {
       handleUpdateCell(cell.id, {
         output: {
-          error: err.message || 'Failed to connect to backend. Is the server running?',
-          execution_time: 0,
-          row_count: 0,
+          error: err.message || 'Failed to connect to backend.',
+          execution_time: 0, row_count: 0,
         },
+        lastRunAt: new Date().toISOString(),
       });
     } finally {
-      setRunningCells(prev => {
-        const next = new Set(prev);
-        next.delete(cell.id);
-        return next;
-      });
+      setRunningCells(prev => { const n = new Set(prev); n.delete(cell.id); return n; });
     }
-  }, [engine, runningCells, handleUpdateCell]);
+  }, [engine, runningCells, handleUpdateCell, notebookId]);
 
   const handleRunAll = useCallback(async () => {
-    // Run cells sequentially so each cell can depend on prior state
     for (const cell of cells) {
-      if (cell.content.trim()) {
-        await handleRunCell(cell);
-      }
+      if (cell.content.trim()) await handleRunCell(cell);
     }
   }, [cells, handleRunCell]);
 
-  // ── Engine Selector ────────────────────────────────────────────────────
-
   const currentEngine = ENGINE_OPTIONS.find(e => e.value === engine) || ENGINE_OPTIONS[0];
+  const isRunning     = runningCells.size > 0;
+
+  /* ── Save status indicator ── */
+  const SaveIndicator = () => {
+    if (saveStatus === 'idle') return null;
+    return (
+      <span className="flex items-center gap-1.5 text-[13px]" style={{ color: 'var(--df-text-muted)', fontFamily: 'var(--font-sans)' }}>
+        {saveStatus === 'saving' && (
+          <><span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />Saving…</>
+        )}
+        {saveStatus === 'saved' && (
+          <><FiCheck size={13} style={{ color: '#10b981' }} />Saved</>
+        )}
+      </span>
+    );
+  };
 
   return (
-    <div className="flex flex-col h-full rounded-xl overflow-hidden border" style={{ backgroundColor: 'var(--df-card-bg)', borderColor: 'var(--df-border)' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b flex-shrink-0" style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border)' }}>
-        <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--df-text-soft)' }}
+    <div className="flex flex-col h-full rounded-xl overflow-hidden border"
+      style={{ backgroundColor: 'var(--df-card-bg)', borderColor: 'var(--df-border)' }}>
+
+      {/* ── Header ── */}
+      <div
+        className="flex items-center justify-between border-b flex-shrink-0"
+        style={{
+          backgroundColor: 'var(--df-surface)',
+          borderColor: 'var(--df-border)',
+          padding: '0 20px',
+          minHeight: 56,
+          gap: 16,
+        }}
+      >
+        {/* LEFT — back + badge + name */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onBack}
+            className="flex-shrink-0 p-1.5 rounded-lg transition-colors"
+            style={{ color: 'var(--df-text-soft)' }}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-accent-soft)'; e.currentTarget.style.color = 'var(--df-icon-accent)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--df-text-soft)'; }}>
-            <FiArrowLeft size={16} />
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--df-text-soft)'; }}
+          >
+            <FiArrowLeft size={18} />
           </button>
-          <h2 className="text-[13px] font-semibold flex items-center gap-2" style={{ color: 'var(--df-strong)' }}>
-            <span className="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider font-medium" style={{ backgroundColor: 'var(--df-accent)', color: '#fff' }}>
-              {notebookData.type === 'sql' ? 'SQL Query' : `${LANG_CONFIG[defaultLanguage]?.label} Notebook`}
-            </span>
+
+          <span
+            className="flex-shrink-0 text-[11px] px-2.5 py-1 rounded font-bold uppercase tracking-widest"
+            style={{ backgroundColor: 'var(--df-accent)', color: '#fff' }}
+          >
+            {notebookData.type === 'sql' ? 'SQL Notebook' : `${LANG_CONFIG[defaultLanguage]?.label || 'Python'} Notebook`}
+          </span>
+
+          <h2
+            className="text-[17px] font-semibold truncate"
+            style={{ color: 'var(--df-strong)', fontFamily: 'var(--font-sans)' }}
+          >
             {notebookData.name}
           </h2>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Engine Toggle */}
+
+        {/* RIGHT — engine + cell count + autosave status + Run All */}
+        <div className="flex items-center gap-4 flex-shrink-0">
+
+          {/* Engine toggle */}
           <div className="flex items-center rounded-lg border overflow-hidden" style={{ borderColor: 'var(--df-border)' }}>
             {ENGINE_OPTIONS.map((opt) => {
-              const Icon = opt.icon;
+              const Icon    = opt.icon;
               const isActive = engine === opt.value;
               return (
-                <button key={opt.value} onClick={() => setEngine(opt.value)}
-                  className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider transition-all"
+                <button
+                  key={opt.value}
+                  onClick={() => setEngine(opt.value)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wide transition-all"
                   style={{
                     backgroundColor: isActive ? 'var(--df-accent-soft)' : 'transparent',
                     color: isActive ? opt.color : 'var(--df-text-muted)',
@@ -304,89 +367,103 @@ const NotebookEditor = ({ notebook: notebookData, onBack, onSave }) => {
                   }}
                   title={`Use ${opt.label} engine`}
                 >
-                  <Icon size={11} />
+                  <Icon size={14} />
                   {opt.label}
                 </button>
               );
             })}
           </div>
 
-          <span className="text-[10px] font-medium" style={{ color: 'var(--df-text-muted)' }}>{cells.length} cell{cells.length !== 1 ? 's' : ''}</span>
-          
-          {/* Auto-save Status Indicator */}
-          <div className="flex items-center gap-1 py-1 px-2.5 rounded-lg border text-[10px] font-semibold flex-shrink-0 transition-all select-none" 
-            style={{ 
-              backgroundColor: 'var(--df-surface)', 
-              borderColor: 'var(--df-border)', 
-              color: 'var(--df-text-soft)' 
-            }}>
-            {saveStatus === 'saving' && (
-              <>
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                <span>Saving...</span>
-              </>
-            )}
-            {saveStatus === 'saved' && (
-              <>
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>Saved</span>
-              </>
-            )}
-            {saveStatus === 'unsaved' && (
-              <>
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
-                <span>Unsaved Draft</span>
-              </>
-            )}
-          </div>
+          {/* Cell count */}
+          <span className="text-[13px] font-medium" style={{ color: 'var(--df-text-muted)' }}>
+            {cells.length} cell{cells.length !== 1 ? 's' : ''}
+          </span>
 
-          <button onClick={handleSave} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all border"
-            style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border)', color: 'var(--df-strong)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-sidebar-hover)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-surface)'; }}>
-            {isSaving ? <FiCheck size={13} style={{ color: 'var(--df-success)' }} /> : <FiSave size={13} />}
-            <span>{isSaving ? 'Saved!' : 'Save'}</span>
-          </button>
-          <button onClick={handleRunAll}
-            disabled={runningCells.size > 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all text-white"
+          {/* Autosave indicator */}
+          <SaveIndicator />
+
+          {/* Run All */}
+          <button
+            onClick={handleRunAll}
+            disabled={isRunning}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg text-[14px] font-semibold transition-all"
             style={{
-              backgroundColor: runningCells.size > 0 ? 'var(--df-surface)' : 'var(--df-gradient)',
-              color: runningCells.size > 0 ? 'var(--df-text-muted)' : '#fff',
-              cursor: runningCells.size > 0 ? 'not-allowed' : 'pointer',
+              backgroundColor: isRunning ? 'var(--df-surface)' : 'var(--df-gradient)',
+              color: isRunning ? 'var(--df-text-muted)' : '#fff',
+              cursor: isRunning ? 'not-allowed' : 'pointer',
+              border: isRunning ? '1px solid var(--df-border)' : 'none',
+              minWidth: 110,
+              justifyContent: 'center',
             }}
-            onMouseEnter={(e) => { if (runningCells.size === 0) e.currentTarget.style.opacity = '0.9'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}>
-            <FiPlay size={12} /> {runningCells.size > 0 ? 'Running...' : 'Run All'}
+            onMouseEnter={(e) => { if (!isRunning) e.currentTarget.style.opacity = '0.88'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+          >
+            <FiPlay size={14} />
+            {isRunning ? 'Running…' : 'Run All'}
           </button>
         </div>
       </div>
 
-      {/* Cells */}
-      <div className="flex-1 overflow-y-auto df-scrollbar p-4 space-y-3" style={{ backgroundColor: 'var(--df-bg-secondary)' }}>
-        {cells.map((cell, index) => (
-          <NotebookCell key={cell.id} cell={cell} index={index} total={cells.length}
-            onUpdate={handleUpdateCell} onDelete={handleDeleteCell} onRun={handleRunCell}
-            onMoveUp={handleMoveUp} onMoveDown={handleMoveDown}
-            isRunning={runningCells.has(cell.id)} />
-        ))}
-        <button onClick={handleAddCell}
-          className="w-full py-3 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 text-[12px] font-medium transition-all"
-          style={{ borderColor: 'var(--df-border)', color: 'var(--df-text-muted)', backgroundColor: 'transparent' }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--df-accent)'; e.currentTarget.style.color = 'var(--df-icon-accent)'; e.currentTarget.style.backgroundColor = 'var(--df-accent-soft)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--df-border)'; e.currentTarget.style.color = 'var(--df-text-muted)'; e.currentTarget.style.backgroundColor = 'transparent'; }}>
-          <FiPlus size={14} /> Add Cell
-        </button>
+      {/* ── Cells ── */}
+      <div
+        className="flex-1 overflow-y-auto df-scrollbar p-5"
+        style={{ backgroundColor: 'var(--df-bg-secondary)' }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {cells.map((cell, index) => (
+            <div key={cell.id}>
+              {/* Drop indicator ABOVE this cell */}
+              <div
+                style={{
+                  height: dragOverIndex === index ? 4 : 0,
+                  marginBottom: dragOverIndex === index ? 6 : 0,
+                  marginTop: dragOverIndex === index ? 2 : 0,
+                  backgroundColor: 'var(--df-accent)',
+                  borderRadius: 4,
+                  transition: 'height 0.15s ease, margin 0.15s ease',
+                  boxShadow: dragOverIndex === index ? '0 0 8px rgba(122,30,58,0.5)' : 'none',
+                }}
+              />
+              <div style={{ marginBottom: 0 }}>
+                <NotebookCell
+                  cell={cell}
+                  index={index}
+                  total={cells.length}
+                  onUpdate={handleUpdateCell}
+                  onDelete={handleDeleteCell}
+                  onRun={handleRunCell}
+                  isRunning={runningCells.has(cell.id)}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onDragEnd={handleDragEnd}
+                  isDragging={draggingIndex === index}
+                  isDragOver={dragOverIndex === index}
+                />
+              </div>
+
+              {/* ── Between-cell insert bar ── */}
+              <BetweenCellBar
+                onAddCode={() => handleAddCodeCell(index)}
+                onAddText={() => handleAddTextCell(index)}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Footer */}
-      <div className="px-4 py-2 text-[10px] uppercase tracking-wider font-medium flex justify-between border-t flex-shrink-0"
-        style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border)', color: 'var(--df-text-muted)' }}>
+      {/* ── Footer ── */}
+      <div
+        className="px-5 py-2 flex justify-between items-center border-t flex-shrink-0 text-[12px] font-medium uppercase tracking-wider"
+        style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border)', color: 'var(--df-text-muted)' }}
+      >
         <span className="flex items-center gap-2">
-          Default: {LANG_CONFIG[defaultLanguage]?.label}
-          <span style={{ color: currentEngine.color }}>• Engine: {currentEngine.label}</span>
+          {LANG_CONFIG[defaultLanguage]?.label || defaultLanguage}
+          <span style={{ color: currentEngine.color }}>· {currentEngine.label}</span>
         </span>
-        <span>{cells.reduce((acc, c) => acc + (c.content ? c.content.split('\n').length : 0), 0)} total lines</span>
+        <span>
+          {cells.reduce((acc, c) => acc + (c.content ? String(c.content).split('\n').length : 0), 0)} lines
+        </span>
       </div>
     </div>
   );

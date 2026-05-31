@@ -7,12 +7,12 @@ from bson import ObjectId
 async def create_item(data):
     coll = get_workspace_collection()
     result = await coll.insert_one(data)
-    print(f"DEBUG [service]: ✅ Inserted document with _id: {result.inserted_id}")
+    print(f"DEBUG [service]: [SUCCESS] Inserted document with _id: {result.inserted_id}")
     new_item = await coll.find_one({"_id": result.inserted_id})
     if new_item:
-        print(f"DEBUG [service]: ✅ Verified - document found in DB after insert")
+        print(f"DEBUG [service]: [SUCCESS] Verified - document found in DB after insert")
     else:
-        print(f"ERROR [service]: ❌ Document NOT found after insert! Data may not have reached Atlas.")
+        print(f"ERROR [service]: [FAILED] Document NOT found after insert! Data may not have reached Atlas.")
     return serialize_item(new_item)
 
 
