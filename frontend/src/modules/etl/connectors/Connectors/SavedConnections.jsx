@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from "@services/api";
+import { api } from "../../services/etlService";
 import { Spinner } from "@ui/Spinner";
 import { Trash2, Play, FileSpreadsheet, HardDrive, AlertTriangle } from 'lucide-react';
 import { LOGO_MAP } from './ConnectorHub'; // Assuming we export these

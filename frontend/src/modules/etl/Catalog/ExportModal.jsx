@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Download, X, FileJson, FileSpreadsheet, HardDrive, Loader2, Globe } from 'lucide-react';
-import { api } from "@services/api";
+import { api } from '../services/etlService';
 
 export function ExportModal({ tableName, onClose }) {
   const [formats, setFormats] = useState([]);

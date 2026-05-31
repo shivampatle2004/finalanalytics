@@ -242,7 +242,11 @@ const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions, node
                   <>
                     <select
                       className="ui-select"
-                      value={value}
+                      value={uploadedFiles?.find(f => {
+                        const fName = (f.filename || f.file_path || '').split(/[/\\]/).pop().toLowerCase();
+                        const vName = (value || '').split(/[/\\]/).pop().toLowerCase();
+                        return fName && vName && fName === vName;
+                      })?.file_path || value}
                       onChange={(e) => handleChange(key, e.target.value)}
                       style={{ marginBottom: '8px' }}
                     >

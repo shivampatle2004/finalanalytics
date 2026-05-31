@@ -49,7 +49,10 @@ class SnowflakeConnector(BaseConnector):
             from sqlalchemy import create_engine, text
 
             def _test():
-                engine = create_engine(self._get_uri(is_async=False))
+                engine = create_engine(
+                    self._get_uri(is_async=False),
+                    connect_args={'login_timeout': 5, 'network_timeout': 5}
+                )
                 with engine.connect() as conn:
                     conn.execute(text("SELECT CURRENT_VERSION()"))
                 engine.dispose()

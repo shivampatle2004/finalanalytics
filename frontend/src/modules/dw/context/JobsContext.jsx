@@ -39,27 +39,47 @@ export const JobsProvider = ({ children }) => {
     }
 
     let etlPipelines = [];
+    let etlStatusMap = {};
     try {
       const etlApiModule = await import('../../etl/services/etlService');
-      const etlRes = await etlApiModule.api.getPipelines({ limit: 200 });
-      // API returns { pipelines: [...] } shape
+      const [etlRes, statusRes] = await Promise.all([
+        etlApiModule.api.getPipelines({ limit: 200 }),
+        etlApiModule.api.getPipelineStatusSummary().catch(() => ({}))
+      ]);
       etlPipelines = Array.isArray(etlRes) ? etlRes : (etlRes?.pipelines || []);
+      etlStatusMap = statusRes || {};
     } catch (err) {
        console.error('Failed to fetch ETL pipelines', err);
     }
 
-    const formattedEtl = (etlPipelines || []).map(p => ({
-      id: p.id,
-      name: p.name,
-      type: 'ETL',
-      status: p.status || 'Success',
-      schedule: p.schedule_cron ? { type: 'custom', value: p.schedule_cron } : null,
-      lastRun: p.last_run_at || null,
-      owner: 'System', 
-      tasks: (p.dag_definition?.nodes || []).map(n => ({ id: n.id, name: n.data?.label, status: 'Pending' })),
-      runs: [],
-      description: p.description
-    }));
+    // Normalize ETL status -> display value
+    const toDisplay = (raw) => {
+      const s = (raw || '').toLowerCase();
+      if (s === 'success') return 'Success';
+      if (s === 'failed') return 'Failed';
+      if (s === 'running') return 'Running';
+      if (s === 'pending') return 'Pending';
+      if (s === 'cancelled') return 'Cancelled';
+      return 'Draft';
+    };
+
+    const formattedEtl = (etlPipelines || []).map(p => {
+      const jobSummary = etlStatusMap[p.id];
+      return {
+        id: p.id,
+        name: p.name,
+        type: 'ETL',
+        // Use actual last-job status, NOT p.status (which is always 'draft')
+        status: jobSummary ? toDisplay(jobSummary.status) : 'Draft',
+        schedule: p.schedule_cron ? { type: 'custom', value: p.schedule_cron } : null,
+        lastRun: jobSummary?.started_at || p.last_run_at || null,
+        owner: 'System',
+        tasks: (p.dag_definition?.nodes || []).map(n => ({ id: n.id, name: n.data?.label, status: 'Pending' })),
+        runs: [],
+        description: p.description,
+        _etl: true,  // flag so deleteJob routes to ETL API
+      };
+    });
 
     const combinedData = [...dwJobs, ...formattedEtl];
 
@@ -86,9 +106,11 @@ export const JobsProvider = ({ children }) => {
     });
   }, []);
 
-  // Load initially
+  // Load initially + keep statuses fresh every 30s
   useEffect(() => {
     fetchJobs();
+    const interval = setInterval(fetchJobs, 30000);
+    return () => clearInterval(interval);
   }, [fetchJobs]);
 
   const fetchJobDetails = useCallback(async (jobId) => {
@@ -136,15 +158,23 @@ export const JobsProvider = ({ children }) => {
 
   const deleteJob = useCallback(async (jobId) => {
     try {
-      await api.jobs.remove(jobId);
+      const job = jobs.find(j => j.id === jobId);
+      if (job?._etl) {
+        // ETL pipelines: must use ETL deletePipeline endpoint
+        const etlApiModule = await import('../../etl/services/etlService');
+        await etlApiModule.api.deletePipeline(jobId);
+      } else {
+        await api.jobs.remove(jobId);
+      }
       setJobs(prev => prev.filter(j => j.id !== jobId));
-      toast.success('Job deleted');
+      toast.success('Deleted successfully');
       return true;
     } catch (err) {
-      toast.error('Failed to delete job');
+      console.error('Delete error:', err);
+      toast.error('Failed to delete');
       return false;
     }
-  }, [toast]);
+  }, [jobs, toast]);
 
   const updateJobParameters = useCallback(async (jobId, parameters) => {
     try {

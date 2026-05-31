@@ -104,7 +104,7 @@ const SchemaDetailsView = ({ containerInfo, catalogs, onBack, onSelectTable, onS
         setIsDeleting(item.name);
         try {
             if (item.type === 'table') {
-                const physicalSchema = item.data?.table_schema || schemaName;
+                const physicalSchema = item.data?.physicalSchema || item.data?.table_schema || schemaName;
                 await catalogApi.dropTable(physicalSchema, item.name);
                 toast.success(`Table "${item.name}" dropped successfully`);
             } else {

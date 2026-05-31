@@ -10,7 +10,7 @@ import {
   ArrowRight, GitBranch, ArrowDownRight, Workflow,
   ShieldCheck, Download, History
 } from 'lucide-react';
-import { api } from '@services/api';
+import { api } from '../services/etlService';
 import { Tooltip } from '@ui/Tooltip';
 import { QualityTab } from './QualityTab';
 import { ExportModal } from './ExportModal';
@@ -634,7 +634,7 @@ export function Catalog() {
                                           className={`cat-table-row ${selectedTable === table.name ? 'active' : ''}`}
                                           onClick={() => handleSelectTable(table.name)}>
                                           <Table2 size={13} />
-                                          <span className="cat-table-name">{table.name}</span>
+                                          <span className="cat-table-name">{table.display_name || table.name}</span>
                                           <span className="cat-table-rows">
                                             {table.row_count > 0 ? `${table.row_count.toLocaleString()}` : ''}
                                           </span>
@@ -808,8 +808,7 @@ function FilePreviewTab({ filename }) {
     const load = async () => {
       setLoading(true);
       try {
-        const r = await fetch(`${API}/file-transforms/preview/${encodeURIComponent(filename)}?limit=100`);
-        const d = await r.json();
+        const d = await api.getFilePreview(filename, 100);
         if (d && d.columns) {
            const internalCols = new Set(['_source_node', '_ingestion_timestamp', '_source_file', '_batch_id']);
            d.columns = d.columns.filter(c => !internalCols.has(c));
@@ -853,8 +852,7 @@ function FileSchemaTab({ filename }) {
     const load = async () => {
       setLoading(true);
       try {
-        const r = await fetch(`${API}/file-transforms/preview/${encodeURIComponent(filename)}?limit=1`);
-        const d = await r.json();
+        const d = await api.getFilePreview(filename, 1);
         setData(d);
       } catch { setData(null); }
       finally { setLoading(false); }
@@ -894,11 +892,10 @@ function FileStatsTab({ filename }) {
     const load = async () => {
       setLoading(true);
       try {
-        const r = await fetch(`${API}/catalog/files/${encodeURIComponent(filename)}/profile`);
-        const d = await r.json();
+        const d = await api.getFileStats(filename);
         if (d.error) { setError(d.error); setStats(null); }
         else setStats(d);
-      } catch (e) { setError(e.message || 'Failed to load statistics'); setStats(null); }
+      } catch (e) { setError(e.response?.data?.detail || e.message || 'Failed to load statistics'); setStats(null); }
       finally { setLoading(false); }
     };
     load();

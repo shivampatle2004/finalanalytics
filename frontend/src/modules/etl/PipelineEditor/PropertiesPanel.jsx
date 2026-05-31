@@ -1027,7 +1027,7 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
                 {node.type === 'transform' ? 'Transform Type' : 'Connector Engine'}
               </label>
               
-              {!transformSchema && engine && (
+              {!transformSchema && engine && engine !== 'warehouse' && (
                 <VaultSection 
                   engine={engine} 
                   currentConfig={config}
@@ -1054,100 +1054,130 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
             </select>
           </div>
 
-          {loading ? (
-            <div className="pe-prop-loading" style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
-              <Loader2 size={24} className="animate-spin" />
+          {/* Internal DW: show compact form only */}
+          {node.type === 'load' && engine === 'warehouse' ? (
+            <div className="prop-section">
+              <label className="prop-label">Target Catalog</label>
+              <select
+                className="ui-select"
+                value={config.catalog || ''}
+                onChange={(e) => onUpdateNode(node.id, {
+                  ...node.data,
+                  config: { ...config, catalog: e.target.value }
+                })}
+              >
+                <option value="">Select Catalog...</option>
+                {dwCatalogs.map(c => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+
+              <div style={{ marginTop: '10px' }}>
+                <label className="prop-label">Output Table Name</label>
+                <input
+                  className="ui-input"
+                  value={config.table_name || ''}
+                  placeholder="e.g. clean_transactions"
+                  onChange={(e) => onUpdateNode(node.id, {
+                    ...node.data,
+                    config: { ...config, table_name: e.target.value }
+                  })}
+                />
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: '1.4' }}>
+                  Target layer (Bronze/Silver) is determined automatically.
+                  <br/>
+                  • <b>Bronze:</b> Extract → Load (Raw data)
+                  <br/>
+                  • <b>Silver:</b> Extract → Transform → Load (Cleaned data)
+                </span>
+              </div>
+
+              <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="save_config_dw"
+                  checked={config.save_to_vault || false}
+                  onChange={(e) => onUpdateNode(node.id, {
+                    ...node.data,
+                    config: { ...config, save_to_vault: e.target.checked }
+                  })}
+                />
+                <label htmlFor="save_config_dw" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                  Save configuration for quick extraction
+                </label>
+              </div>
             </div>
           ) : (
-            (connectorSchema || transformSchema) && (
-              <div className="prop-section">
-                {node.type === 'transform' && (transformType === 'custom_python' || transformType === 'custom_sql') ? (
-                  <NotebookEditorCell 
-                    node={node}
-                    transformType={transformType}
-                    onUpdateNode={onUpdateNode}
-                    pipelineId={pipelineId}
-                  />
-                ) : (
-                  <DynamicForm 
-                    schema={node.type === 'transform' ? transformSchema : connectorSchema}
-                    data={node.type === 'transform' ? transformConfig : config}
-                    onChange={(newData) => {
-                      // Check if they just enabled "save_to_vault"
-                      if (newData.save_to_vault && !config.save_to_vault) {
-                         const name = newData.output_file_name || `${engine}_vault_${Date.now()}`;
-                         api.createVaultCredential({
-                           name,
-                           engine,
-                           config: newData
-                         }).then(() => console.log('Auto-saved to vault')).catch(e => console.error('Auto-save failed', e));
-                      }
-                      onUpdateNode(node.id, { 
-                        ...node.data, 
-                        [node.type === 'transform' ? 'transform_config' : 'config']: newData 
-                      });
-                    }}
-                    uploadedFiles={uploadedFiles}
-                    vaultCredentials={allVaultItems || []}
-                    nodeType={node.type}
-                    onFileUpload={api.uploadFile}
-                    fieldActions={googleTargetKey ? {
-                      [googleTargetKey]: {
-                        label: 'Auto-load JSON',
-                        onClick: handleLoadGoogleCredentials,
-                        icon: <Zap size={12} />
-                      }
-                    } : null}
-                  />
-                )}
-                
-                {node.type === 'extract' && (
-                  <ExtractPreviewCell 
-                    engine={engine}
-                    config={config}
-                  />
-                )}
+            // Full connector form for non-warehouse connectors
+            loading ? (
+              <div className="pe-prop-loading" style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+                <Loader2 size={24} className="animate-spin" />
               </div>
+            ) : (
+              (connectorSchema || transformSchema) && (
+                <div className="prop-section">
+                  {node.type === 'transform' && (transformType === 'custom_python' || transformType === 'custom_sql') ? (
+                    <NotebookEditorCell 
+                      node={node}
+                      transformType={transformType}
+                      onUpdateNode={onUpdateNode}
+                      pipelineId={pipelineId}
+                    />
+                  ) : (
+                    <DynamicForm 
+                      schema={node.type === 'transform' ? transformSchema : connectorSchema}
+                      data={node.type === 'transform' ? transformConfig : config}
+                      onChange={(newData) => {
+                        if (newData.save_to_vault && !config.save_to_vault) {
+                           const name = newData.output_file_name || `${engine}_vault_${Date.now()}`;
+                           api.createVaultCredential({
+                             name,
+                             engine,
+                             config: newData
+                           }).then(() => console.log('Auto-saved to vault')).catch(e => console.error('Auto-save failed', e));
+                        }
+                        onUpdateNode(node.id, { 
+                          ...node.data, 
+                          [node.type === 'transform' ? 'transform_config' : 'config']: newData 
+                        });
+                      }}
+                      uploadedFiles={uploadedFiles}
+                      vaultCredentials={allVaultItems || []}
+                      nodeType={node.type}
+                      onFileUpload={async (file) => {
+                        const res = await api.uploadFile(file);
+                        try {
+                          const files = await api.getUploadedFiles();
+                          setUploadedFiles(files);
+                        } catch (err) {
+                          console.error("Failed to reload files after upload", err);
+                        }
+                        return res;
+                      }}
+                      fieldActions={googleTargetKey ? {
+                        [googleTargetKey]: {
+                          label: 'Auto-load JSON',
+                          onClick: handleLoadGoogleCredentials,
+                          icon: <Zap size={12} />
+                        }
+                      } : null}
+                    />
+                  )}
+                  
+                  {node.type === 'extract' && (
+                    <ExtractPreviewCell 
+                      engine={engine}
+                      config={config}
+                    />
+                  )}
+                </div>
+              )
             )
           )}
         </>
       )}
 
-      {/* ── Fixed Bottom Actions ── */}
-      {node.type === 'load' && (
-        <div className="prop-section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-          <label className="prop-label">Target Catalog</label>
-          <select
-            className="ui-select"
-            value={config.catalog || ''}
-            onChange={(e) => onUpdateNode(node.id, {
-              ...node.data,
-              config: { ...config, catalog: e.target.value }
-            })}
-          >
-            <option value="">Select Catalog</option>
-            {dwCatalogs.map(c => (
-              <option key={c.id} value={c.name}>{c.name}</option>
-            ))}
-          </select>
-          
-          <div style={{ marginTop: '8px' }}>
-            <label className="prop-label">Target Table Name</label>
-            <input
-              className="ui-input"
-              value={config.table_name || ''}
-              placeholder="e.g. clean_transactions"
-              onChange={(e) => onUpdateNode(node.id, {
-                ...node.data,
-                config: { ...config, table_name: e.target.value }
-              })}
-            />
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-              Table will be created in Bronze/Silver schema automatically.
-            </span>
-          </div>
-        </div>
-      )}
+
 
       <div className="pe-prop-actions">
         <button 

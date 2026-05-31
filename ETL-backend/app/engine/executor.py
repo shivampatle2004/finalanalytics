@@ -527,10 +527,20 @@ async def _run_extract_task(
                         status="INFO", node_id=run.node_id
                     )
         except Exception as wm_err:
-            raise RuntimeError(
-                f"Incremental sync error: The cursor column '{cursor_col}' was not found in the extracted dataset or could not be queried. "
-                f"Details: {wm_err}"
+            # Non-fatal: warn but don't crash the pipeline
+            # The cursor column may not exist in this data source (e.g. CSV without 'updated_at')
+            logger.warning(
+                f"Incremental sync: could not update watermark for cursor column '{cursor_col}'. "
+                f"Continuing without incremental sync. Details: {wm_err}"
             )
+            try:
+                await _emit_log(
+                    session, str(run.job_id),
+                    message=f"Incremental sync warning: cursor column '{cursor_col}' not found in data. Running full sync.",
+                    status="WARNING", node_id=run.node_id
+                )
+            except Exception:
+                pass
 
     return lf
 
@@ -651,28 +661,49 @@ async def _run_load_task(node_data: dict, input_lf: pl.LazyFrame, memory_guard: 
         mode = "append" if config.get("_delta_watermark") else config.get("if_table_exists", "replace")
         catalog_name = config.get("catalog")
         
-        target_schema = "public"
+        # ── Resolve physical schema ──────────────────────────────────────────────
+        # Priority 1: lookup catalog → logical schema → physical schema from DB
+        # Priority 2: fallback to 'etl_{layer}' schema (visible in DW catalog)
+        # NOTE: 'public' is excluded from DW catalog listing, so we never fall back to it.
+        target_schema = f"etl_{layer}"  # safe fallback — always visible in DW catalog
+        
         if catalog_name:
             try:
                 query = text("""
-                        SELECT ls.physical_schema_name 
-                        FROM logical_schemas ls
-                        JOIN catalogs c ON ls.catalog_id = c.id
-                        WHERE c.name = :catalog AND ls.name = :schema
-                    """)
+                    SELECT ls.physical_schema_name 
+                    FROM logical_schemas ls
+                    JOIN catalogs c ON ls.catalog_id = c.id
+                    WHERE LOWER(c.name) = LOWER(:catalog) AND LOWER(ls.name) = LOWER(:schema)
+                """)
                 async with async_session() as session:
                     res = await session.execute(query, {"catalog": catalog_name, "schema": layer})
                     row = res.fetchone()
                     if row:
                         target_schema = row[0]
+                        logger.info(f"Resolved catalog '{catalog_name}'.{layer} → physical schema '{target_schema}'")
                     else:
-                        raise ValueError(f"DW Catalog '{catalog_name}' does not have a schema '{layer}'. "
-                                         f"Please ensure the catalog exists and has Bronze/Silver schemas created.")
+                        logger.warning(
+                            f"Catalog '{catalog_name}' has no '{layer}' schema in logical_schemas. "
+                            f"Falling back to schema '{target_schema}'. "
+                            f"Tip: create the catalog in the Data Warehouse module first."
+                        )
             except Exception as e:
-                logger.error(f"Failed to resolve physical schema for catalog '{catalog_name}', layer '{layer}': {e}")
-                raise
-        
-        full_table_name = f"{target_schema}.{target}" if target_schema != "public" else target
+                logger.error(f"Schema resolution failed for catalog '{catalog_name}', layer '{layer}': {e}. Using fallback '{target_schema}'.")
+                # Do NOT re-raise — fall back gracefully so data still gets written
+        else:
+            logger.info(f"No catalog specified for load node. Writing to fallback schema '{target_schema}'.")
+
+        # Ensure the target schema exists (create if needed)
+        try:
+            ensure_schema_sql = text(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
+            async with async_session() as session:
+                await session.execute(ensure_schema_sql)
+                await session.commit()
+        except Exception as e:
+            logger.warning(f"Could not auto-create schema '{target_schema}': {e}")
+
+        # Always use schema-qualified table name so it appears in DW catalog
+        full_table_name = f"{target_schema}.{target}"
 
         # BUG FIX: psycopg2 cannot adapt 'dict' types. 
         # We must stringify any Struct/Object/List columns before write_database using map_elements.

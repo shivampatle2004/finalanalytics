@@ -1,0 +1,223 @@
+/* ══════════════════════════════════════════════════
+   RunningPipelinesStatus — Live pipeline banner
+   ══════════════════════════════════════════════════ */
+
+.rps-banner {
+  margin-bottom: 12px;
+  background: linear-gradient(135deg,
+    rgba(59, 130, 246, 0.08) 0%,
+    rgba(139, 92, 246, 0.06) 100%
+  );
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.1),
+    0 4px 16px rgba(59, 130, 246, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ── Header ── */
+.rps-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.12);
+}
+
+.rps-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rps-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 100px;
+  animation: rps-badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes rps-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+  50%       { box-shadow: 0 0 0 5px rgba(59, 130, 246, 0);  }
+}
+
+.rps-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rps-dismiss-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.rps-dismiss-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
+/* ── Rows ── */
+.rps-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.rps-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.07);
+  transition: background 0.15s;
+}
+.rps-row:last-child { border-bottom: none; }
+.rps-row:hover { background: rgba(59, 130, 246, 0.04); }
+
+/* Pulsing dot */
+.rps-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  animation: rps-dot-ping 1.4s ease-in-out infinite;
+}
+
+@keyframes rps-dot-ping {
+  0%   { box-shadow: 0 0 0 0   rgba(59, 130, 246, 0.7); }
+  70%  { box-shadow: 0 0 0 7px rgba(59, 130, 246, 0);   }
+  100% { box-shadow: 0 0 0 0   rgba(59, 130, 246, 0);   }
+}
+
+/* Pipeline name */
+.rps-name {
+  flex-shrink: 0;
+  width: 160px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Progress bar */
+.rps-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: rgba(59, 130, 246, 0.12);
+  border-radius: 100px;
+  overflow: hidden;
+  position: relative;
+}
+
+.rps-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  border-radius: 100px;
+  min-width: 4px;
+}
+
+/* Shimmer on top of fill */
+.rps-bar-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: rps-shimmer 1.6s linear infinite;
+  border-radius: 100px;
+}
+
+@keyframes rps-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+/* Pct label */
+.rps-pct {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #3b82f6;
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Elapsed */
+.rps-elapsed {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+}
+
+/* Status chip */
+.rps-status-chip {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 100px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.rps-status-chip.running {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+.rps-status-chip.pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+/* Cancel btn */
+.rps-cancel-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.rps-cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.4);
+}

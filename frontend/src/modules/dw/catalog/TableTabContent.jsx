@@ -1,4 +1,4 @@
-import React from 'react';
+import React from 'react'; // Force HMR
 import {
     FiLayers, FiActivity, FiDatabase, FiClock, FiLayout, FiTable, FiLoader,
     FiInfo, FiCheckCircle, FiTrendingUp, FiShield, FiChevronRight, FiPlus, FiSearch
@@ -109,9 +109,10 @@ export const StatisticsTab = ({ table, schema }) => {
 
     React.useEffect(() => {
         if (!table) return;
+        setStats(null);
         setLoading(true);
         setError(null);
-        const actualSchema = table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
+        const actualSchema = table.physicalSchema || table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
         api.tables.stats(table.name, actualSchema)
             .then(data => setStats(data))
             .catch(e => setError(e.response?.data?.detail || e.message || 'Failed to load statistics'))

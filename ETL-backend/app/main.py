@@ -125,7 +125,7 @@ async def _cleanup_zombie_jobs():
         # Step 2: Cancel stuck jobs and runs using raw SQL.
         async with async_session() as session:
             result = await session.execute(text("""
-                UPDATE jobs
+                UPDATE etl.jobs
                 SET status = 'cancelled',
                     error_message = 'Terminated by system watchdog (Server Restart)',
                     finished_at = NOW()
@@ -134,7 +134,7 @@ async def _cleanup_zombie_jobs():
             job_count = result.rowcount
 
             result2 = await session.execute(text("""
-                UPDATE job_runs
+                UPDATE etl.job_runs
                 SET status = 'cancelled',
                     error_detail = 'Interrupted by server restart',
                     finished_at = NOW()

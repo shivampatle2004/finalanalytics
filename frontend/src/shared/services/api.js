@@ -240,4 +240,5 @@ export const runs = {
   tasks: (runId) => request(`/dw/runs/${runId}/tasks`),
 };
 
-export default { catalogs, query, injection, tables, tags, dashboard, compute, volumes, jobs, notebook, workspace, runs };
+export const api = { catalogs, query, injection, tables, tags, dashboard, compute, volumes, jobs, notebook, workspace, runs };
+export default api;

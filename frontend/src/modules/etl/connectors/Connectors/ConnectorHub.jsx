@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import { Spinner } from "@ui/Spinner";
-import { api } from "@services/api";
+import { api } from "../../services/etlService";
 import DynamicForm from '../../components/Form/DynamicForm';
 import { SavedConnectionsTab } from './SavedConnections';
 import './ConnectorHub.css';
@@ -770,7 +770,13 @@ function DetailPanel({ connector, onClose }) {
         discoverMutation.mutate();
       }
     },
-    onError: (e) => setTestResult({ success: false, message: e.response?.data?.detail || e.message })
+    onError: (e) => {
+      const isTimeout = e.code === 'ECONNABORTED' || e.message?.toLowerCase().includes('timeout');
+      const msg = isTimeout
+        ? 'Connection timed out — the service is unreachable or slow. Check credentials and host.'
+        : (e.response?.data?.detail || e.message || 'Connection test failed.');
+      setTestResult({ success: false, message: msg });
+    }
   });
 
   const discoverMutation = useMutation({
@@ -868,7 +874,13 @@ function DetailPanel({ connector, onClose }) {
         setTimeout(() => { window.location.hash = 'tables'; }, 1500);
       }
     },
-    onError: (e) => setTestResult({ success: false, message: e.response?.data?.detail || e.message })
+    onError: (e) => {
+      const isTimeout = e.code === 'ECONNABORTED' || e.message?.toLowerCase().includes('timeout');
+      const msg = isTimeout
+        ? 'Extraction timed out — the service is unreachable or slow. Check credentials and host.'
+        : (e.response?.data?.detail || e.message || 'Extraction failed.');
+      setTestResult({ success: false, message: msg });
+    }
   });
 
   const handleLoadGoogleCredentials = async () => {

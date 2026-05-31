@@ -15,6 +15,7 @@ import { api } from '../services/etlService';
 import { Tooltip } from '@ui/Tooltip';
 import { ContextMenu } from '@ui/ContextMenu';
 import { PIPELINE_TEMPLATES } from './PipelineTemplates';
+import { RunningPipelinesStatus } from '@ui/RunningPipelinesStatus';
 import './PipelineList.css';
 
 const stagger = {
@@ -263,7 +264,18 @@ export function PipelineList() {
   // ── Initial load ──
   useEffect(() => { fetchAll(true); }, [fetchAll]);
 
-  // ── Poll: only when a job is active. Uses the cheap summary endpoint ──
+  // ── Poll: always refresh status every 15s (background), and faster when active ──
+  useEffect(() => {
+    // Initial status load (no spinner)
+    fetchStatusSummary();
+
+    // Always-on background refresh (15s) so status is never stale
+    const backgroundPoll = setInterval(fetchStatusSummary, 15000);
+
+    return () => clearInterval(backgroundPoll);
+  }, [fetchStatusSummary]);
+
+  // Fast-poll (3s) only when a job is actively running/pending
   useEffect(() => {
     const hasActive = Object.values(statusSummary).some(
       s => s.status === 'running' || s.status === 'pending'
@@ -273,7 +285,7 @@ export function PipelineList() {
     });
 
     if (hasActive) {
-      pollRef.current = setInterval(fetchStatusSummary, 5000);
+      pollRef.current = setInterval(fetchStatusSummary, 3000);
     }
     return () => clearInterval(pollRef.current);
   }, [jobs, statusSummary, fetchStatusSummary]);
@@ -300,6 +312,31 @@ export function PipelineList() {
     const s = String(j.status).toLowerCase();
     return s === 'running' || s === 'pending';
   });
+
+  // Pipelines that are actively running/pending (for the status banner)
+  const runningPipelines = pipelines.filter(p => {
+    const s = String(lastJobMap[p.id]?.status || '').toLowerCase();
+    return s === 'running' || s === 'pending';
+  });
+
+  // Pct map: pipelineId → progress %
+  const pctMap = {};
+  pipelines.forEach(p => {
+    const job = lastJobMap[p.id];
+    const status = getEffectiveStatus(p, job);
+    pctMap[p.id] = calcProgress(status, job);
+  });
+
+  // Cancel handler for the banner
+  const handleCancelFromBanner = async (job) => {
+    if (!job) return;
+    try {
+      await api.cancelJob(job.id);
+      fetchStatusSummary();
+    } catch (err) {
+      console.error('Failed to cancel job from banner', err);
+    }
+  };
 
   // ── Actions ──
   const handleCreateNew = async () => {
@@ -336,15 +373,53 @@ export function PipelineList() {
       fetchAll(false);
     } catch (err) {
       console.error('Failed to delete', err);
+      alert('Failed to delete pipeline: ' + (err.response?.data?.detail || err.message));
     }
   };
+
 
   const handleRun = async (e, id) => {
     e.stopPropagation();
     try {
-      await api.executePipeline(id);
-      // Immediate fetch to pick up the new pending job, then polling takes over
-      setTimeout(() => fetchAll(false), 500);
+      const result = await api.executePipeline(id);
+      const jobId = result?.job_id || result?.id;
+
+      // Optimistic: immediately mark this pipeline as pending in statusSummary
+      if (jobId) {
+        setStatusSummary(prev => ({
+          ...prev,
+          [id]: { job_id: jobId, status: 'pending', pct: 2 }
+        }));
+      }
+
+      // Fetch fresh data quickly at 1s and 3s to get the real state fast
+      setTimeout(() => fetchStatusSummary(), 1000);
+      setTimeout(() => { fetchStatusSummary(); fetchAll(false); }, 3000);
+
+      // Poll until job finishes, then show a completion alert
+      if (jobId) {
+        const pollCompletion = setInterval(async () => {
+          try {
+            const jobData = await api.getJob(jobId);
+            const status = (jobData?.status || '').toLowerCase();
+            if (status === 'success' || status === 'failed' || status === 'cancelled') {
+              clearInterval(pollCompletion);
+              fetchAll(false);
+              fetchStatusSummary();
+              if (status === 'success') {
+                alert('✅ Pipeline completed successfully! Data is now available in the catalog.');
+              } else if (status === 'failed') {
+                const errMsg = jobData?.error_message || 'Unknown error';
+                alert('❌ Pipeline failed: ' + errMsg);
+              }
+            }
+          } catch (_) {
+            clearInterval(pollCompletion);
+          }
+        }, 4000);
+        // Safety: stop polling after 30 minutes
+        setTimeout(() => clearInterval(pollCompletion), 30 * 60 * 1000);
+      }
     } catch (err) {
       alert('Failed to start: ' + (err.response?.data?.detail || err.message));
     }
@@ -472,6 +547,14 @@ export function PipelineList() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Running Pipelines Status Banner ── */}
+      <RunningPipelinesStatus
+        runningPipelines={runningPipelines}
+        lastJobMap={lastJobMap}
+        pctMap={pctMap}
+        onCancel={handleCancelFromBanner}
+      />
 
       {/* ── Toolbar ── */}
       <div className="pipeline-toolbar" style={{ padding: '0 0 6px', marginBottom: '8px' }}>
@@ -628,6 +711,15 @@ export function PipelineList() {
                               style={{ color: 'var(--text-muted)' }}
                             >
                               <History size={14} />
+                            </button>
+                          </Tooltip>
+                          <Tooltip content="Delete Pipeline">
+                            <button
+                              className="pl-action-btn"
+                              onClick={(e) => handleDelete(e, pipeline.id)}
+                              style={{ color: 'var(--danger)' }}
+                            >
+                              <Trash2 size={14} />
                             </button>
                           </Tooltip>
                         </div>

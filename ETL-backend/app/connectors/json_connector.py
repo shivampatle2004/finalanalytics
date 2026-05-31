@@ -22,13 +22,28 @@ logger = get_logger("connectors.json")
 class JSONConnector(BaseConnector):
     def __init__(self, config: dict[str, Any]):
         super().__init__(config)
-        self.file_path = self.config.get("file_path", "")
-        if self.file_path and not os.path.isabs(self.file_path):
-            backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            uploads_dir = os.path.join(backend_dir, "uploads")
-            fallback_path = os.path.join(uploads_dir, self.file_path)
-            if os.path.exists(fallback_path):
-                self.file_path = fallback_path
+        raw_path = self.config.get("file_path", "")
+        self.file_path = self._resolve_path(raw_path)
+
+    @staticmethod
+    def _resolve_path(raw_path: str) -> str:
+        """Resolve an uploaded file path using a robust multi-step lookup."""
+        if not raw_path:
+            return raw_path
+        if os.path.isabs(raw_path) and os.path.exists(raw_path):
+            return raw_path
+        if os.path.exists(raw_path):
+            return raw_path
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        uploads_dir = os.path.join(backend_dir, "uploads")
+        for candidate in [
+            os.path.join(uploads_dir, raw_path),
+            os.path.join(uploads_dir, os.path.basename(raw_path)),
+        ]:
+            if os.path.exists(candidate):
+                return candidate
+        return raw_path
+
 
     async def test_connection(self) -> bool:
         """Non-blocking path check."""

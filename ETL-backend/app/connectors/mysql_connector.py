@@ -34,6 +34,7 @@ class MySQLConnector(BaseConnector):
                     db=url.path.lstrip('/') or "",
                     user=url.username or "",
                     password=url.password or "",
+                    connect_timeout=5,
                 )
             else:
                 ssl_ctx = True if self.config.get("ssl_mode", "disable") != "disable" else None
@@ -44,6 +45,7 @@ class MySQLConnector(BaseConnector):
                     user=self.config.get("username", ""),
                     password=self.config.get("password", ""),
                     ssl=ssl_ctx,
+                    connect_timeout=5,
                 )
             async with conn.cursor() as cur:
                 await cur.execute("SELECT 1")

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Network, Database } from 'lucide-react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { api } from "@services/api";
+import { api } from '../services/etlService';
 import { Spinner } from "@ui/Spinner";
 import './DataLineage.css';
 

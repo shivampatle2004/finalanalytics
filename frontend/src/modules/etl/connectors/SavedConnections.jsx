@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/etlService';
 import { Spinner } from '../components/ui/Spinner';
@@ -13,7 +14,20 @@ export function SavedConnectionsTab() {
   const [discovering, setDiscovering] = useState(false);
   const [selectedTable, setSelectedTable] = useState(null);
   const [outputFileName, setOutputFileName] = useState('');
+  const [selectedCatalog, setSelectedCatalog] = useState('');
   const [statusMessage, setStatusMessage] = useState(null);
+
+  const { data: catalogs } = useQuery({
+    queryKey: ['catalogs'],
+    queryFn: async () => {
+      try {
+        const res = await axios.get('/dw/catalog/list');
+        return res.data || [];
+      } catch (e) {
+        return [];
+      }
+    }
+  });
 
   // 1. Fetch saved connections (now including both DBs and saved Files)
   const { data: savedConns, isLoading: loadingConns } = useQuery({
@@ -33,17 +47,23 @@ export function SavedConnectionsTab() {
   });
 
   const extractMutation = useMutation({
-    mutationFn: async ({ id, isFile, filename, engine, tableName, outputName }) => {
+    mutationFn: async ({ id, isFile, filename, engine, tableName, outputName, catalog }) => {
       setExtractingId(id || filename);
       setStatusMessage("Starting extraction...");
       if (isFile) {
         return api.quickExtractConnector({
           engine: engine || 'csv',
           config: { file_name: filename },
-          output_file_name: outputName || filename.split('.')[0]
+          output_file_name: outputName || filename.split('.')[0],
+          catalog: catalog
         });
       } else {
-        return await api.extractSavedConnection(id, tableName, outputName);
+        // Need to add catalog param to extractSavedConnection wrapper in api.js? 
+        // We'll update the mutation directly in the backend but we need to pass it here.
+        // Let's use axios for the endpoint directly to avoid touching api.js for this param:
+        return axios.post(`/etl/api/v1/saved-connections/${id}/extract`, null, { 
+          params: { table_name: tableName, output_file_name: outputName, catalog: catalog } 
+        }).then(r => r.data);
       }
     },
     onSuccess: (res) => {
@@ -51,6 +71,7 @@ export function SavedConnectionsTab() {
       setSelectingTableId(null);
       setSelectedTable(null);
       setOutputFileName('');
+      setSelectedCatalog('');
 
       if (res.success) {
         setStatusMessage(`Success! Extracted into '${res.table_name || 'table'}'.`);
@@ -72,6 +93,13 @@ export function SavedConnectionsTab() {
 
   const handleDiscover = async (conn) => {
     setSelectingTableId(conn.id);
+    const isDatabase = ['postgres', 'mysql', 'sqlite', 'mongodb', 'snowflake'].includes(conn.engine);
+    if (!isDatabase || conn.is_file) {
+      setSelectedTable(conn.config.file_name || 'source_file');
+      setOutputFileName(conn.config.file_name?.split('.')[0] || 'output');
+      return;
+    }
+    
     setDiscovering(true);
     setDiscoveredTables([]);
     setSelectedTable(null);
@@ -181,6 +209,21 @@ export function SavedConnectionsTab() {
                         <span style={{ opacity: 0.6 }}>Selected:</span>
                         <span style={{ fontWeight: 600 }}>{selectedTable}</span>
                       </div>
+                      
+                      <div className="ui-input-group">
+                        <label style={{ fontSize: '10px', fontWeight: 700, opacity: 0.6, marginBottom: '4px', display: 'block' }}>TARGET CATALOG</label>
+                        <select
+                          value={selectedCatalog}
+                          onChange={(e) => setSelectedCatalog(e.target.value)}
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '13px', marginBottom: '8px' }}
+                        >
+                          <option value="">Default (Public Schema)</option>
+                          {catalogs?.map(c => (
+                            <option key={c.id} value={c.name}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div className="ui-input-group">
                         <label style={{ fontSize: '10px', fontWeight: 700, opacity: 0.6, marginBottom: '4px', display: 'block' }}>TARGET TABLE NAME</label>
                         <input
@@ -192,7 +235,7 @@ export function SavedConnectionsTab() {
                         />
                       </div>
                       <button
-                        onClick={() => extractMutation.mutate({ id: conn.id, isFile: false, tableName: selectedTable, outputName: outputFileName })}
+                        onClick={() => extractMutation.mutate({ id: conn.id, isFile: isFile, filename: conn.config.file_name, engine: conn.engine, tableName: selectedTable, outputName: outputFileName, catalog: selectedCatalog })}
                         disabled={isExtracting || !outputFileName}
                         style={{ width: '100%', background: 'var(--accent)', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                       >
@@ -204,7 +247,7 @@ export function SavedConnectionsTab() {
                 </div>
               ) : (
                 <button
-                  onClick={() => isDatabase ? handleDiscover(conn) : extractMutation.mutate({ id: conn.id, isFile: isFile, filename: conn.config.file_name, engine: conn.engine })}
+                  onClick={() => handleDiscover(conn)}
                   disabled={isExtracting}
                   style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: '8px', padding: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: isExtracting ? 'not-allowed' : 'pointer', transition: 'all 0.2s' }}
                 >
