@@ -12,7 +12,7 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "Sarvesh10")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME_PG", "onestopanalytics")
+DB_NAME = os.getenv("DB_NAME", "onestopanalytics")
 
 # Construct the URL if individual components are provided
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -98,6 +98,30 @@ def _ensure_quick_measures_table():
         print(f"Note: could not ensure quick_measures table: {ex}")
 
 
+def _ensure_api_schema_tables():
+    """Add schema_config column and api_connector_data table for REST API normalization."""
+    try:
+        insp = inspect(engine)
+        tables = set(insp.get_table_names())
+        dialect = engine.dialect.name
+
+        if "api_connections" in tables:
+            cols = {c["name"] for c in insp.get_columns("api_connections")}
+            if "schema_config" not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE api_connections ADD COLUMN schema_config JSON"))
+                print("api_connections.schema_config column added.")
+
+        if "api_connector_data" not in tables:
+            from models import ApiConnectorData
+            ApiConnectorData.__table__.create(bind=engine, checkfirst=True)
+            print("api_connector_data table created successfully.")
+        else:
+            print("api_connector_data table already exists.")
+    except Exception as ex:
+        print(f"Note: could not migrate API schema tables: {ex}")
+
+
 def init_db():
     if _HAS_PSYCOPG2:
         create_database_if_not_exists()
@@ -113,6 +137,7 @@ def init_db():
         print("Database tables verified/created successfully!")
         _ensure_remote_connection_profile_columns()
         _ensure_quick_measures_table()
+        _ensure_api_schema_tables()
         try:
             import asyncio
             from connectors.registry import seed_connectors

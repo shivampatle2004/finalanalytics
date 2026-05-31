@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Tuple
@@ -45,6 +46,21 @@ class DataProcessor:
                 print(f"✅ Cache cleared for: {file_path}")
                 return {"cleared": True, "file": file_path}
             return {"cleared": False, "message": "File not in cache"}
+
+    @staticmethod
+    def _read_json_to_dataframe(file_path: str) -> pd.DataFrame:
+        """Read JSON array/object files without ujson int overflow (common in crypto APIs)."""
+        with open(file_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if isinstance(payload, list):
+            if not payload:
+                return pd.DataFrame()
+            if all(isinstance(x, dict) for x in payload):
+                return pd.DataFrame(payload)
+            return pd.DataFrame({"value": payload})
+        if isinstance(payload, dict):
+            return pd.DataFrame([payload])
+        return pd.DataFrame([{"value": payload}])
 
     @staticmethod
     def read_file(file_path: str, skip_cache: bool = False) -> pd.DataFrame:
@@ -154,7 +170,7 @@ class DataProcessor:
                     # Last-resort fallback to pandas default behavior
                     df = pd.read_excel(file_path, engine=excel_engine)
             elif extension == "json":
-                df = pd.read_json(file_path)
+                df = DataProcessor._read_json_to_dataframe(file_path)
             elif extension == "txt":
                 df = pd.read_csv(file_path, sep=None, engine="python")
             elif extension == "tsv":

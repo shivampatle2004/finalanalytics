@@ -6,14 +6,13 @@ Read / write to MySQL databases using aiomysql.
 
 from __future__ import annotations
 
-from typing import Any
-
-from typing import Any
 import urllib.parse
+from typing import Any
 
 import polars as pl
 
 from connectors.base import BaseConnector, LoadResult
+from connectors.exceptions import ConnectorConnectionError
 from utils.logger import get_logger
 
 logger = get_logger("connectors.mysql")
@@ -21,30 +20,41 @@ logger = get_logger("connectors.mysql")
 
 class MySQLConnector(BaseConnector):
 
+    def _mysql_connect_kwargs(self) -> dict[str, Any]:
+        ssl_mode = self.config.get("ssl_mode", "disable")
+        kwargs: dict[str, Any] = {
+            "host": self.config.get("host", "localhost"),
+            "port": int(self.config.get("port", 3306)),
+            "db": self.config.get("database", ""),
+            "user": self.config.get("username") or self.config.get("user", ""),
+            "password": self.config.get("password", ""),
+        }
+        if ssl_mode and ssl_mode != "disable":
+            kwargs["ssl"] = True
+        return kwargs
+
     async def test_connection(self) -> bool:
+        import aiomysql
+
         try:
-            import aiomysql
-            conn = await aiomysql.connect(
-                host=self.config.get("host", "localhost"),
-                port=self.config.get("port", 3306),
-                db=self.config.get("database", ""),
-                user=self.config.get("username", ""),
-                password=self.config.get("password", ""),
-                ssl=True if self.config.get("ssl_mode") and self.config.get("ssl_mode") != "disable" else None,
-            )
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT 1")
-            conn.close()
+            async with aiomysql.connect(**self._mysql_connect_kwargs()) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT 1")
             return True
         except Exception as e:
             logger.error(f"MySQL connection test failed: {e}")
-            return False
+            raise ConnectorConnectionError(
+                f"MySQL connection failed: {e}. "
+                "Verify host, port, database, username, password, and SSL mode."
+            ) from e
 
     async def extract(self):
         host = self.config.get("host", "localhost")
         port = self.config.get("port", 3306)
         database = self.config.get("database", "")
-        username = urllib.parse.quote_plus(self.config.get("username", ""))
+        username = urllib.parse.quote_plus(
+            self.config.get("username") or self.config.get("user", "")
+        )
         password = urllib.parse.quote_plus(self.config.get("password", ""))
         table = self.config.get("table")
         query = self.config.get("query")
@@ -86,26 +96,17 @@ class MySQLConnector(BaseConnector):
 
         try:
             import aiomysql
-            conn = await aiomysql.connect(
-                host=self.config.get("host", "localhost"),
-                port=self.config.get("port", 3306),
-                db=self.config.get("database", ""),
-                user=self.config.get("username", ""),
-                password=self.config.get("password", ""),
-                ssl=True if self.config.get("ssl_mode") and self.config.get("ssl_mode") != "disable" else None,
-            )
+            async with aiomysql.connect(**self._mysql_connect_kwargs()) as conn:
+                columns = data.columns
+                col_names = ", ".join(columns)
+                placeholders = ", ".join(["%s"] * len(columns))
+                insert_sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
 
-            columns = data.columns
-            col_names = ", ".join(columns)
-            placeholders = ", ".join(["%s"] * len(columns))
-            insert_sql = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders})"
+                async with conn.cursor() as cur:
+                    rows = data.rows()
+                    await cur.executemany(insert_sql, rows)
+                    await conn.commit()
 
-            async with conn.cursor() as cur:
-                rows = data.rows()
-                await cur.executemany(insert_sql, rows)
-                await conn.commit()
-
-            conn.close()
             logger.info(f"Loaded {len(data)} rows into MySQL table: {table}")
             return LoadResult(success=True, rows_loaded=len(data), message=f"Loaded into {table}")
         except Exception as e:

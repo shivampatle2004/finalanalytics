@@ -851,6 +851,7 @@ class ApiConnection(Base):
     last_refresh_at = Column(DateTime(timezone=True), nullable=True)
     refresh_interval = Column(String(50), nullable=True)
     connection_status = Column(String(50), nullable=True)
+    schema_config = Column(JSON, nullable=True)
 
     __table_args__ = (
         Index("idx_api_connections_created_by", "created_by"),
@@ -908,3 +909,24 @@ class ApiCache(Base):
     cached_response = Column(JSON, nullable=True)
     cache_created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class ApiConnectorData(Base):
+    """One normalized entity per row (coin, order, customer, etc.) for BI charts."""
+    __tablename__ = "api_connector_data"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    connection_id = Column(String, ForeignKey("api_connections.id"), nullable=False, index=True)
+    entity_id = Column(String(255), nullable=False, index=True)
+    primary_key = Column(String(512), nullable=True, index=True)
+    instrument = Column(String(255), nullable=True)
+    price = Column(Float, nullable=True)
+    data = Column(JSON, nullable=False, default=dict)
+    checksum = Column(String(64), nullable=True, index=True)
+    delta_type = Column(String(20), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_api_connector_data_conn_entity", "connection_id", "entity_id", unique=True),
+    )

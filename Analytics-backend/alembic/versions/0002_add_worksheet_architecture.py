@@ -35,11 +35,10 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), onupdate=sa.func.now()),
         sa.Column('last_accessed_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id'),
-        if_not_exists=True,
     )
-    op.create_index('idx_worksheets_owner',   'worksheets', ['owner_id'],   if_not_exists=True)
-    op.create_index('idx_worksheets_shared',   'worksheets', ['is_shared'],  if_not_exists=True)
-    op.create_index('idx_worksheets_created',  'worksheets', ['created_at'], if_not_exists=True)
+    op.create_index('idx_worksheets_owner', 'worksheets', ['owner_id'])
+    op.create_index('idx_worksheets_shared', 'worksheets', ['is_shared'])
+    op.create_index('idx_worksheets_created', 'worksheets', ['created_at'])
 
     # ── worksheet_columns ──────────────────────────────────────────────────────
     op.create_table(
@@ -57,9 +56,8 @@ def upgrade() -> None:
         sa.Column('is_indexed', sa.Boolean(), default=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('id'),
-        if_not_exists=True,
     )
-    op.create_index('idx_ws_col', 'worksheet_columns', ['worksheet_id', 'column_name'], if_not_exists=True)
+    op.create_index('idx_ws_col', 'worksheet_columns', ['worksheet_id', 'column_name'])
 
     # ── worksheet_data ─────────────────────────────────────────────────────────
     op.create_table(
@@ -71,10 +69,9 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), onupdate=sa.func.now()),
         sa.PrimaryKeyConstraint('id'),
-        if_not_exists=True,
     )
-    op.create_index('idx_ws_data_ws',  'worksheet_data', ['worksheet_id'],              if_not_exists=True)
-    op.create_index('idx_ws_data_row', 'worksheet_data', ['worksheet_id', 'row_number'], if_not_exists=True)
+    op.create_index('idx_ws_data_ws', 'worksheet_data', ['worksheet_id'])
+    op.create_index('idx_ws_data_row', 'worksheet_data', ['worksheet_id', 'row_number'])
 
     # ── worksheet_permissions ──────────────────────────────────────────────────
     op.create_table(
@@ -88,10 +85,9 @@ def upgrade() -> None:
         sa.Column('granted_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('granted_by', sa.Integer(), sa.ForeignKey('users.id'), nullable=True),
         sa.PrimaryKeyConstraint('id'),
-        if_not_exists=True,
     )
-    op.create_index('idx_perm_user', 'worksheet_permissions', ['user_id'],      if_not_exists=True)
-    op.create_index('idx_perm_ws',   'worksheet_permissions', ['worksheet_id'], if_not_exists=True)
+    op.create_index('idx_perm_user', 'worksheet_permissions', ['user_id'])
+    op.create_index('idx_perm_ws', 'worksheet_permissions', ['worksheet_id'])
 
     # ── data_import_queue ──────────────────────────────────────────────────────
     op.create_table(
@@ -106,7 +102,6 @@ def upgrade() -> None:
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id'),
-        if_not_exists=True,
     )
 
     # ── worksheet_transformations ──────────────────────────────────────────────
@@ -121,14 +116,13 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column('created_by', sa.Integer(), sa.ForeignKey('users.id'), nullable=True),
         sa.PrimaryKeyConstraint('id'),
-        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_table('worksheet_transformations', if_exists=True)
-    op.drop_table('data_import_queue',         if_exists=True)
-    op.drop_table('worksheet_permissions',     if_exists=True)
-    op.drop_table('worksheet_data',            if_exists=True)
-    op.drop_table('worksheet_columns',         if_exists=True)
-    op.drop_table('worksheets',                if_exists=True)
+    op.drop_table('worksheet_transformations')
+    op.drop_table('data_import_queue')
+    op.drop_table('worksheet_permissions')
+    op.drop_table('worksheet_data')
+    op.drop_table('worksheet_columns')
+    op.drop_table('worksheets')

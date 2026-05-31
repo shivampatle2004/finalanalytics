@@ -110,9 +110,10 @@ def reset_change_detection(config_id: str, db: Session = Depends(get_db)):
 
 @router.get("/date-hierarchy/{file_id}")
 def get_date_hierarchy(file_id: str, db: Session = Depends(get_db)):
+    empty_hierarchy = {"years": [], "months": [], "quarters": []}
     dt = db.query(DateTable).filter(DateTable.table_name == file_id).first()
     if not dt:
-        raise HTTPException(status_code=404, detail="No date table marked for this file")
+        return empty_hierarchy
         
     from services.modeling_service import ModelingService
     from services.time_intelligence import TimeIntelligence

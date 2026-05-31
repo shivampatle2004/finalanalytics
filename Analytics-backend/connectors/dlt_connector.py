@@ -12,6 +12,7 @@ import polars as pl
 import dlt
 
 from connectors.base import BaseConnector, LoadResult
+from connectors.lightweight_checks import validate_engine_connection
 from utils.logger import get_logger
 
 logger = get_logger("connectors.dlt")
@@ -40,9 +41,21 @@ class DltConnector(BaseConnector):
                 if self.config.get("is_singer", False):
                     import shutil
                     return shutil.which(source_name) is not None
+
+                engine_name = self.config.get("engine_name", "") or source_name
+
+                # REST / driver checks without optional DLT source dependencies
+                try:
+                    lightweight = validate_engine_connection(engine_name, self.config)
+                    if lightweight is True:
+                        return True
+                except Exception as e:
+                    logger.warning(f"Lightweight check failed for {engine_name}: {e}. Trying standard DLT check fallback.")
+                    # Bubble up clear authentication or missing key errors immediately
+                    if any(term in str(e).lower() for term in ["401", "unauthorized", "invalid", "required"]):
+                        raise e
                 
                 # Fast-path for Google services connection test to reduce latency
-                engine_name = self.config.get("engine_name", "")
                 if engine_name == "google_sheets" or engine_name.startswith("google_"):
                     try:
                         # Direct minimal check for Google Sheets / Google services
@@ -232,7 +245,6 @@ class DltConnector(BaseConnector):
             return _hubspot(api_key=self.config.get("api_key"))
 
         elif engine == "stripe":
-            # Function is stripe_source, not stripe_analytics
             from stripe_analytics import stripe_source as _stripe
             return _stripe(stripe_secret_key=self.config.get("api_key"))
 
@@ -280,11 +292,10 @@ class DltConnector(BaseConnector):
                 raise ImportError("requests library is required for Zoho CRM connector.")
 
         elif engine == "facebook_ads":
-            # Function is facebook_ads_source, not facebook_ads
             from facebook_ads import facebook_ads_source as _fb_ads
             return _fb_ads(
                 account_id=self.config.get("account_id"),
-                access_token=self.config.get("access_token")
+                access_token=self.config.get("access_token"),
             )
 
         elif engine == "linkedin_ads":
@@ -309,11 +320,10 @@ class DltConnector(BaseConnector):
             return _notion(api_key=self.config.get("api_key"))
 
         elif engine == "airtable":
-            # Function is airtable_source, not airtable
             from airtable import airtable_source as _airtable
             return _airtable(
                 base_id=self.config.get("base_id"),
-                access_token=self.config.get("api_key")
+                access_token=self.config.get("api_key"),
             )
 
         elif engine == "github":
@@ -364,8 +374,14 @@ class DltConnector(BaseConnector):
         elif engine == "mongodb":
             # mongodb() is the correct function name
             from mongodb import mongodb as _mongodb
+            # Accept both 'connection_url' (DLT schema key) and 'connection_string'
+            # (MongoDBConnector schema key) so either config path works
+            connection_url = (
+                self.config.get("connection_url")
+                or self.config.get("connection_string")
+            )
             return _mongodb(
-                connection_url=self.config.get("connection_url"),
+                connection_url=connection_url,
                 database=self.config.get("database")
             )
 
@@ -433,7 +449,21 @@ class DltConnector(BaseConnector):
         source = await loop.run_in_executor(None, self._get_dlt_source)
         
         if not source:
-            raise ValueError(f"DLT source '{engine}' could not be initialized or is not implemented. Check configuration.")
+            raise ValueError(
+                f"DLT source '{engine}' could not be initialized. "
+                f"Verify your credentials and configuration."
+            )
+
+        # Guard: ensure at least one resource is selected before iterating
+        if not source.selected_resources:
+            logger.warning(f"[{engine}] No resources selected. Attempting to select all discovered resources.")
+            source = source.with_resources(*source.resources.keys())
+
+        if not source.selected_resources:
+            raise ValueError(
+                f"No extractable resources found for '{engine}'. "
+                f"Check API permissions or configuration."
+            )
 
         # Efficiently iterate through DLT source records and yield as Polars DataFrames (Zero-Copy)
         for resource in source.selected_resources.values():
@@ -510,8 +540,7 @@ class DltConnector(BaseConnector):
             "hubspot": {
                 "type": "object",
                 "properties": {
-                    "api_key": {"type": "string", "title": "Private App Access Token", "secret": True},
-                    "table_name": {"type": "string", "title": "Target Table", "default": "hubspot_contacts"}
+                    "api_key": {"type": "string", "title": "Private App Access Token", "secret": True}
                 },
                 "required": ["api_key"]
             },

@@ -3,17 +3,23 @@ from typing import Any, Optional
 from pathlib import Path
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import models
 from database import SessionLocal
+from services.api_connector.api_transformer import APIDataTransformer
 from services.api_connector.cache_manager import write_cache
+from services.api_connector.delta_processor import load_connector_rows, save_to_database_with_delta
 from services.api_connector.encryption import decrypt_auth_config, encrypt_auth_config
 from services.api_connector.fetcher import APIRequestError, fetch_api_data
 from services.api_connector.schema_detector import detect_schema
-from services.api_connector.transformer import to_rows
+from services.api_connector.schema_registry import (
+    infer_schema_from_payload,
+    merge_schema_config,
+    schema_fields_for_ui,
+)
 
 router = APIRouter(prefix="/api/rest", tags=["api_connections"])
 
@@ -38,10 +44,20 @@ class ApiConnectionPayload(BaseModel):
     auth_config: dict[str, Any] = Field(default_factory=dict)
     refresh_interval: Optional[str] = "manual"
     created_by: Optional[str] = None
+    schema_config: Optional[dict[str, Any]] = None
 
 
-async def _materialize_preview(payload: ApiConnectionPayload):
-    result = await fetch_api_data(
+class SchemaUpdatePayload(BaseModel):
+    records_path: Optional[str] = None
+    primary_key: Optional[str] = None
+    field_mappings: Optional[dict[str, str]] = None
+    included_fields: Optional[list[str]] = None
+    excluded_fields: Optional[list[str]] = None
+    delta_fields: Optional[list[str]] = None
+
+
+async def _fetch_raw(payload: ApiConnectionPayload):
+    return await fetch_api_data(
         base_url=payload.base_url,
         endpoint=payload.endpoint,
         method=payload.http_method,
@@ -51,8 +67,16 @@ async def _materialize_preview(payload: ApiConnectionPayload):
         auth_config=payload.auth_config,
         request_body=payload.request_body,
     )
-    rows = to_rows(result["data"])
-    return result, rows
+
+
+def _resolve_schema_config(raw_payload: Any, user_schema: dict | None) -> dict:
+    inferred = infer_schema_from_payload(raw_payload)
+    return merge_schema_config(inferred, user_schema)
+
+
+def _transform_payload(raw_payload: Any, schema_config: dict) -> tuple[list[dict], dict]:
+    transformer = APIDataTransformer(schema_config)
+    return transformer.transform(raw_payload)
 
 
 def _save_dataset_records(
@@ -61,20 +85,25 @@ def _save_dataset_records(
     connection_id: str,
     connection_name: str,
     result_data: Any,
-    rows: list[dict],
+    normalized_rows: list[dict],
+    schema_config: dict,
+    delta_stats: dict | None = None,
 ):
+    public_sample = [
+        {k: v for k, v in r.items() if not k.startswith("_")} for r in normalized_rows[:20]
+    ]
     dataset = models.ApiDataset(
         connection_id=connection_id,
         dataset_name=f"{connection_name} Dataset",
         raw_response=result_data,
-        flattened_sample=rows[:20],
-        row_count=len(rows),
+        flattened_sample=public_sample,
+        row_count=len(normalized_rows),
         schema_detected=True,
     )
     db.add(dataset)
     db.flush()
 
-    fields = detect_schema(rows[:200])
+    fields = schema_fields_for_ui(schema_config) or detect_schema(public_sample)
     for field in fields:
         db.add(
             models.ApiDatasetField(
@@ -90,18 +119,51 @@ def _save_dataset_records(
             )
         )
     db.flush()
-    return dataset
+    return dataset, delta_stats or {}
+
+
+async def _ingest_connection(
+    db: Session,
+    *,
+    connection_id: str,
+    connection_name: str,
+    payload: ApiConnectionPayload,
+    schema_config: dict | None = None,
+):
+    result = await _fetch_raw(payload)
+    merged_schema = _resolve_schema_config(result["data"], schema_config)
+    normalized_rows, _ = _transform_payload(result["data"], merged_schema)
+    delta_stats = save_to_database_with_delta(
+        db,
+        connection_id=connection_id,
+        rows=normalized_rows,
+        primary_key_field=merged_schema.get("primary_key"),
+    )
+    dataset, delta_stats = _save_dataset_records(
+        db,
+        connection_id=connection_id,
+        connection_name=connection_name,
+        result_data=result["data"],
+        normalized_rows=normalized_rows,
+        schema_config=merged_schema,
+        delta_stats=delta_stats,
+    )
+    write_cache(db, connection_id, result["data"], payload.refresh_interval)
+    return result, normalized_rows, merged_schema, dataset, delta_stats
 
 
 @router.post("/connections/test")
 async def test_connection(payload: ApiConnectionPayload):
     try:
-        result, rows = await _materialize_preview(payload)
+        result = await _fetch_raw(payload)
+        preview = APIDataTransformer.from_payload(
+            result["data"], payload.schema_config
+        ).transform_for_preview(result["data"])
         return {
             "success": True,
             "response_time": result["response_time"],
             "status_code": result["status_code"],
-            "sample_data": rows[:20],
+            "sample_data": preview["rows"][:20],
         }
     except APIRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -110,17 +172,36 @@ async def test_connection(payload: ApiConnectionPayload):
 @router.post("/connections/preview")
 async def preview_connection(payload: ApiConnectionPayload):
     try:
-        result, rows = await _materialize_preview(payload)
-        fields = detect_schema(rows[:200])
-        columns = [f["field_name"] for f in fields]
+        result = await _fetch_raw(payload)
+        preview = APIDataTransformer.from_payload(
+            result["data"], payload.schema_config
+        ).transform_for_preview(result["data"])
         return {
             "success": True,
             "status_code": result["status_code"],
             "response_time": result["response_time"],
-            "columns": columns,
-            "rows": rows[:20],
-            "schema": fields,
-            "row_count": len(rows),
+            "columns": preview["columns"],
+            "rows": preview["rows"],
+            "schema": preview["schema"],
+            "schema_config": preview["schema_config"],
+            "row_count": preview["row_count"],
+            "processed": preview["processed"],
+        }
+    except APIRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/connections/infer-schema")
+async def infer_schema(payload: ApiConnectionPayload):
+    """Fetch API once and return auto-inferred schema for user review."""
+    try:
+        result = await _fetch_raw(payload)
+        schema_config = _resolve_schema_config(result["data"], payload.schema_config)
+        preview = APIDataTransformer(schema_config).transform_for_preview(result["data"])
+        return {
+            "success": True,
+            "schema_config": schema_config,
+            "preview": preview,
         }
     except APIRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -129,7 +210,8 @@ async def preview_connection(payload: ApiConnectionPayload):
 @router.post("/connections/save")
 async def save_connection(payload: ApiConnectionPayload, db: Session = Depends(get_db)):
     try:
-        result, rows = await _materialize_preview(payload)
+        result = await _fetch_raw(payload)
+        schema_config = _resolve_schema_config(result["data"], payload.schema_config)
     except APIRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -148,20 +230,40 @@ async def save_connection(payload: ApiConnectionPayload, db: Session = Depends(g
         connection_status="active",
         last_tested_at=datetime.now(timezone.utc),
         last_refresh_at=datetime.now(timezone.utc),
+        schema_config=schema_config,
     )
     db.add(conn)
     db.flush()
 
-    dataset = _save_dataset_records(
+    normalized_rows, _ = _transform_payload(result["data"], schema_config)
+    delta_stats = save_to_database_with_delta(
+        db,
+        connection_id=conn.id,
+        rows=normalized_rows,
+        primary_key_field=schema_config.get("primary_key"),
+    )
+    dataset, _ = _save_dataset_records(
         db,
         connection_id=conn.id,
         connection_name=payload.name,
         result_data=result["data"],
-        rows=rows,
+        normalized_rows=normalized_rows,
+        schema_config=schema_config,
+        delta_stats=delta_stats,
     )
     write_cache(db, conn.id, result["data"], payload.refresh_interval)
     db.commit()
-    return {"success": True, "connection_id": conn.id, "dataset_id": dataset.id}
+
+    from services.api_connector.refresh_scheduler import load_api_refresh_schedules
+    load_api_refresh_schedules()
+
+    return {
+        "success": True,
+        "connection_id": conn.id,
+        "dataset_id": dataset.id,
+        "schema_config": schema_config,
+        "delta": delta_stats,
+    }
 
 
 @router.get("/connections")
@@ -176,6 +278,81 @@ def get_connection(connection_id: str, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Connection not found")
     return {"connection": row}
+
+
+@router.get("/connections/{connection_id}/schema")
+def get_connection_schema(connection_id: str, db: Session = Depends(get_db)):
+    row = db.query(models.ApiConnection).filter(models.ApiConnection.id == connection_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    schema_config = row.schema_config or {}
+    return {
+        "schema_config": schema_config,
+        "fields": schema_fields_for_ui(schema_config),
+    }
+
+
+@router.put("/connections/{connection_id}/schema")
+def update_connection_schema(
+    connection_id: str,
+    body: SchemaUpdatePayload,
+    db: Session = Depends(get_db),
+):
+    row = db.query(models.ApiConnection).filter(models.ApiConnection.id == connection_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    current = dict(row.schema_config or {})
+    overrides = body.model_dump(exclude_unset=True)
+    merged = merge_schema_config(current, overrides)
+    merged["auto_inferred"] = False
+    row.schema_config = merged
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"success": True, "schema_config": merged, "fields": schema_fields_for_ui(merged)}
+
+
+@router.get("/connections/{connection_id}/fields")
+def get_connection_fields(connection_id: str, db: Session = Depends(get_db)):
+    row = db.query(models.ApiConnection).filter(models.ApiConnection.id == connection_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if row.schema_config:
+        return {"fields": schema_fields_for_ui(row.schema_config)}
+    sample = (
+        db.query(models.ApiConnectorData)
+        .filter(models.ApiConnectorData.connection_id == connection_id)
+        .limit(50)
+        .all()
+    )
+    rows = [dict(r.data or {}) for r in sample]
+    return {"fields": detect_schema(rows) if rows else []}
+
+
+@router.get("/connections/{connection_id}/data")
+def get_connection_data(
+    connection_id: str,
+    limit: int = Query(100, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    row = db.query(models.ApiConnection).filter(models.ApiConnection.id == connection_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    rows = load_connector_rows(db, connection_id, limit=limit, offset=offset)
+    total = (
+        db.query(models.ApiConnectorData)
+        .filter(models.ApiConnectorData.connection_id == connection_id)
+        .count()
+    )
+    fields = schema_fields_for_ui(row.schema_config or {}) if row.schema_config else detect_schema(rows[:50])
+    return {
+        "rows": rows,
+        "columns": list(rows[0].keys()) if rows else [],
+        "fields": fields,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.put("/connections/{connection_id}")
@@ -193,8 +370,14 @@ def update_connection(connection_id: str, payload: ApiConnectionPayload, db: Ses
     row.auth_type = payload.auth_type
     row.auth_config = encrypt_auth_config(payload.auth_config)
     row.refresh_interval = payload.refresh_interval
+    if payload.schema_config is not None:
+        row.schema_config = merge_schema_config(row.schema_config or {}, payload.schema_config)
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
+
+    from services.api_connector.refresh_scheduler import load_api_refresh_schedules
+    load_api_refresh_schedules()
+
     return {"success": True}
 
 
@@ -210,6 +393,7 @@ def delete_connection(connection_id: str, db: Session = Depends(get_db)):
     db.query(models.ApiDataset).filter(models.ApiDataset.connection_id == connection_id).delete(synchronize_session=False)
     db.query(models.ApiRefreshLog).filter(models.ApiRefreshLog.connection_id == connection_id).delete(synchronize_session=False)
     db.query(models.ApiCache).filter(models.ApiCache.connection_id == connection_id).delete(synchronize_session=False)
+    db.query(models.ApiConnectorData).filter(models.ApiConnectorData.connection_id == connection_id).delete(synchronize_session=False)
     db.delete(row)
     db.commit()
     return {"success": True}
@@ -241,24 +425,33 @@ async def refresh_connection(connection_id: str, db: Session = Depends(get_db)):
         auth_config=decrypt_auth_config(row.auth_config or {}),
         refresh_interval=row.refresh_interval,
         created_by=row.created_by,
+        schema_config=row.schema_config,
     )
     try:
-        result, rows = await _materialize_preview(payload)
-        dataset = _save_dataset_records(
+        result, normalized_rows, schema_config, dataset, delta_stats = await _ingest_connection(
             db,
             connection_id=row.id,
             connection_name=row.name,
-            result_data=result["data"],
-            rows=rows,
+            payload=payload,
+            schema_config=row.schema_config,
         )
-        write_cache(db, row.id, result["data"], row.refresh_interval)
+        if not row.schema_config:
+            row.schema_config = schema_config
         row.last_refresh_at = datetime.now(timezone.utc)
         row.connection_status = "active"
         log.refresh_status = "success"
-        log.rows_fetched = len(rows)
+        log.rows_fetched = len(normalized_rows)
         log.completed_at = datetime.now(timezone.utc)
         db.commit()
-        return {"success": True, "dataset_id": dataset.id, "rows_fetched": len(rows)}
+        return {
+            "success": True,
+            "dataset_id": dataset.id,
+            "rows_fetched": len(normalized_rows),
+            "processed": delta_stats.get("processed", len(normalized_rows)),
+            "records_saved": delta_stats.get("saved", 0),
+            "skipped": delta_stats.get("skipped", 0),
+            "delta": delta_stats,
+        }
     except APIRequestError as exc:
         row.connection_status = "failed"
         log.refresh_status = "failed"
@@ -293,20 +486,26 @@ def materialize_connection_dataset(connection_id: str, db: Session = Depends(get
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    dataset = (
-        db.query(models.ApiDataset)
-        .filter(models.ApiDataset.connection_id == connection_id)
-        .order_by(models.ApiDataset.created_at.desc())
-        .first()
-    )
-    if not dataset:
-        raise HTTPException(status_code=404, detail="No dataset found for this connection")
+    rows = load_connector_rows(db, connection_id, limit=50000)
+    if not rows:
+        dataset = (
+            db.query(models.ApiDataset)
+            .filter(models.ApiDataset.connection_id == connection_id)
+            .order_by(models.ApiDataset.created_at.desc())
+            .first()
+        )
+        if dataset and dataset.flattened_sample:
+            rows = list(dataset.flattened_sample)
+        elif dataset and dataset.raw_response:
+            schema_config = conn.schema_config or infer_schema_from_payload(dataset.raw_response)
+            normalized, _ = _transform_payload(dataset.raw_response, schema_config)
+            rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in normalized]
 
-    rows = to_rows(dataset.raw_response or [])
     if not rows:
-        rows = list(dataset.flattened_sample or [])
-    if not rows:
-        raise HTTPException(status_code=400, detail="No rows available to materialize")
+        raise HTTPException(
+            status_code=400,
+            detail="No rows available. Run the connector at least once to ingest data.",
+        )
 
     uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -334,35 +533,17 @@ def materialize_connection_dataset(connection_id: str, db: Session = Depends(get
     db.add(uploaded)
     db.flush()
 
-    fields = (
-        db.query(models.ApiDatasetField)
-        .filter(models.ApiDatasetField.dataset_id == dataset.id)
-        .order_by(models.ApiDatasetField.field_name.asc())
-        .all()
-    )
-    if fields:
-        for fld in fields:
-            db.add(
-                models.FileColumn(
-                    file_id=uploaded.id,
-                    column_name=fld.field_name,
-                    data_type=fld.data_type or "unknown",
-                    null_count=0,
-                    unique_count=0,
-                )
+    fields = schema_fields_for_ui(conn.schema_config or {}) if conn.schema_config else detect_schema(rows[:300])
+    for fld in fields:
+        db.add(
+            models.FileColumn(
+                file_id=uploaded.id,
+                column_name=fld["field_name"],
+                data_type=fld["data_type"],
+                null_count=0,
+                unique_count=0,
             )
-    else:
-        for fld in detect_schema(rows[:300]):
-            db.add(
-                models.FileColumn(
-                    file_id=uploaded.id,
-                    column_name=fld["field_name"],
-                    data_type=fld["data_type"],
-                    null_count=0,
-                    unique_count=0,
-                )
-            )
+        )
 
     db.commit()
-    return {"success": True, "file_id": uploaded.id, "file_name": uploaded.file_name}
-
+    return {"success": True, "file_id": uploaded.id, "file_name": uploaded.file_name, "row_count": len(rows)}

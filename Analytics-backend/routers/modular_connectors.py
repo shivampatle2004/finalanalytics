@@ -170,6 +170,9 @@ async def test_connector_connection(payload: Dict[str, Any] = Body(...)):
             return {"success": True, "message": "Connection test passed successfully."}
         else:
             return {"success": False, "message": "Connection test failed. Please check your credentials."}
+    except HTTPException as he:
+        logger.error(f"HTTPException testing connection for {engine}: {he.detail}")
+        return {"success": False, "message": he.detail}
     except Exception as e:
         logger.error(f"Error testing connection for {engine}: {e}")
         return {"success": False, "message": f"An error occurred: {str(e)}"}

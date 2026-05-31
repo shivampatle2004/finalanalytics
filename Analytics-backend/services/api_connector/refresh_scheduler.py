@@ -19,8 +19,7 @@ def _interval_to_minutes(value: str | None):
 
 
 def _run_refresh(connection_id: str):
-    # Lazy import to avoid circular import
-    from routers.api_connections import ApiConnectionPayload, _materialize_preview, _save_dataset_records
+    from routers.api_connections import ApiConnectionPayload, _ingest_connection
     from services.api_connector.cache_manager import write_cache
     from services.api_connector.encryption import decrypt_auth_config
 
@@ -41,6 +40,7 @@ def _run_refresh(connection_id: str):
             auth_config=decrypt_auth_config(row.auth_config or {}),
             refresh_interval=row.refresh_interval,
             created_by=row.created_by,
+            schema_config=row.schema_config,
         )
         log = models.ApiRefreshLog(
             connection_id=connection_id,
@@ -49,19 +49,22 @@ def _run_refresh(connection_id: str):
         )
         db.add(log)
         db.flush()
-        result, rows = asyncio.run(_materialize_preview(payload))
-        _save_dataset_records(
-            db,
-            connection_id=row.id,
-            connection_name=row.name,
-            result_data=result["data"],
-            rows=rows,
+        result, normalized_rows, schema_config, _, delta_stats = asyncio.run(
+            _ingest_connection(
+                db,
+                connection_id=row.id,
+                connection_name=row.name,
+                payload=payload,
+                schema_config=row.schema_config,
+            )
         )
+        if not row.schema_config:
+            row.schema_config = schema_config
         write_cache(db, row.id, result["data"], row.refresh_interval)
         row.last_refresh_at = datetime.now(timezone.utc)
         row.connection_status = "active"
         log.refresh_status = "success"
-        log.rows_fetched = len(rows)
+        log.rows_fetched = len(normalized_rows)
         log.completed_at = datetime.now(timezone.utc)
         db.commit()
     except Exception as exc:
@@ -113,4 +116,3 @@ def load_api_refresh_schedules():
             )
     finally:
         db.close()
-

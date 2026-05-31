@@ -38,7 +38,19 @@ psycopg2-binary
 asyncpg
 playwright
 reportlab
-asyncpg
 connectorx
 pyarrow
 alembic
+
+# Additional Connector Dependencies
+stripe
+google-ads
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+google-cloud-bigquery
+google-analytics-data
+pyairtable
+pendulum
+orjson
+simplejson
