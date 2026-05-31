@@ -5,12 +5,12 @@ import {
 } from 'react-icons/fi';
 
 const sanitizeName = (name) => {
-    if (!name) return name;
-    let sanitized = name;
-    if (sanitized.startsWith('dt_')) sanitized = sanitized.substring(3);
-    const hexSuffixMatch = sanitized.match(/_[a-f0-9]{8}$/i);
-    if (hexSuffixMatch) sanitized = sanitized.substring(0, hexSuffixMatch.index);
-    return sanitized;
+  if (!name) return name;
+  let sanitized = name;
+  if (sanitized.startsWith('dt_')) sanitized = sanitized.substring(3);
+  const hexSuffixMatch = sanitized.match(/_[a-f0-9]{8}$/i);
+  if (hexSuffixMatch) sanitized = sanitized.substring(0, hexSuffixMatch.index);
+  return sanitized;
 };
 
 const SchemaBrowser = ({ onTablePreview }) => {

@@ -1,100 +1,102 @@
-import React, { useState, useEffect } from 'react';
-import { FiSave, FiX, FiInfo } from 'react-icons/fi';
+import React, { useState, useEffect, useRef } from 'react';
+import { FiSave, FiX } from 'react-icons/fi';
 
 const SaveQueryModal = ({ isOpen, onClose, onSave, initialName = '' }) => {
     const [name, setName] = useState(initialName);
-    const [description, setDescription] = useState('');
+    const inputRef = useRef(null);
 
-    // Sync name whenever the modal opens or initialName changes
     useEffect(() => {
         if (isOpen) {
             setName(initialName);
-            setDescription('');
+            // Small delay to ensure modal is mounted before focusing
+            setTimeout(() => inputRef.current?.focus(), 50);
         }
     }, [isOpen, initialName]);
 
     if (!isOpen) return null;
 
+    const handleSave = () => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        onSave(trimmed);
+        onClose();
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') handleSave();
+        if (e.key === 'Escape') onClose();
+    };
+
     return (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-all duration-300"
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
                 onClick={onClose}
-            ></div>
+            />
 
-            {/* Modal Content */}
+            {/* Modal */}
             <div
-                className="relative w-full max-w-md transform transition-all duration-300 animate-in fade-in zoom-in-95 scale-100 rounded-3xl overflow-hidden shadow-2xl border border-[var(--df-border)]"
-                style={{ backgroundColor: 'var(--df-card-bg)' }}
+                className="relative w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl border"
+                style={{ backgroundColor: 'var(--df-card-bg)', borderColor: 'var(--df-border)' }}
             >
-                <div className="p-6">
-                    <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2.5 rounded-2xl bg-[var(--df-accent-soft)]" style={{ color: 'var(--df-icon-accent)' }}>
-                                <FiSave size={20} />
-                            </div>
-                            <div>
-                                <h3 className="text-lg font-medium tracking-tight" style={{ color: 'var(--df-strong)' }}>Save Query</h3>
-                                <p className="text-xs" style={{ color: 'var(--df-text-muted)' }}>Store this query for later use</p>
-                            </div>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 rounded-xl transition-colors hover:bg-[var(--df-sidebar-hover)]"
-                            style={{ color: 'var(--df-text-muted)' }}
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 pt-5 pb-4">
+                    <div className="flex items-center gap-3">
+                        <div
+                            className="w-8 h-8 rounded-xl flex items-center justify-center"
+                            style={{ background: 'linear-gradient(135deg, var(--df-accent), color-mix(in srgb, var(--df-accent) 70%, #000))' }}
                         >
-                            <FiX size={20} />
-                        </button>
-                    </div>
-
-                    <div className="space-y-5">
-                        <div>
-                            <label className="block text-[11px] font-black uppercase tracking-wider mb-2 ml-1" style={{ color: 'var(--df-text-muted)' }}>Query Name</label>
-                            <input
-                                autoFocus
-                                type="text"
-                                placeholder="e.g. Monthly Sales Report"
-                                className="w-full df-input py-3 px-4 rounded-2xl text-sm"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
+                            <FiSave size={15} color="#fff" />
                         </div>
-
                         <div>
-                            <label className="block text-[11px] font-black uppercase tracking-wider mb-2 ml-1" style={{ color: 'var(--df-text-muted)' }}>Description (Optional)</label>
-                            <textarea
-                                placeholder="What does this query do?"
-                                className="w-full df-input py-3 px-4 rounded-2xl text-sm min-h-[80px] resize-none"
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                            />
-                        </div>
-
-                        <div className="flex items-start gap-2 p-3 rounded-2xl border border-blue-500/10 bg-blue-500/5 mt-2">
-                            <FiInfo className="mt-0.5 shrink-0" size={14} style={{ color: 'var(--df-info)' }} />
-                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--df-text-soft)' }}>
-                                Saved queries are available across all your sessions and can be accessed from the "Saved" sidebar.
+                            <h3 className="text-[14px] font-bold tracking-tight" style={{ color: 'var(--df-strong)' }}>
+                                Name your query
+                            </h3>
+                            <p className="text-[11px]" style={{ color: 'var(--df-text-muted)' }}>
+                                It will appear in your workspace
                             </p>
                         </div>
                     </div>
-                </div>
-
-                <div className="px-6 py-4 flex items-center justify-end gap-3 mt-2" style={{ backgroundColor: 'var(--df-surface)', borderTop: '1px solid var(--df-border)' }}>
                     <button
                         onClick={onClose}
-                        className="px-5 py-2.5 text-sm font-medium transition-all rounded-2xl hover:bg-[var(--df-sidebar-hover)]"
+                        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--df-sidebar-hover)]"
                         style={{ color: 'var(--df-text-muted)' }}
                     >
-                        Cancel
+                        <FiX size={16} />
                     </button>
-                    <button
-                        onClick={() => { onSave(name, description); onClose(); }}
-                        disabled={!name.trim()}
-                        className="df-btn df-btn-primary px-8 py-2.5 text-sm font-black shadow-[0_8px_20px_-6px_var(--df-accent)] disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                        Save Query
-                    </button>
+                </div>
+
+                {/* Input */}
+                <div className="px-5 pb-5">
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        placeholder="e.g. Monthly Sales Report"
+                        className="w-full df-input py-2.5 px-4 rounded-xl text-sm mb-4"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                    />
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 text-[13px] font-medium rounded-xl transition-all hover:bg-[var(--df-sidebar-hover)]"
+                            style={{ color: 'var(--df-text-muted)' }}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            disabled={!name.trim()}
+                            className="px-5 py-2 text-[13px] font-bold rounded-xl text-white transition-all hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                            style={{ background: 'linear-gradient(135deg, var(--df-accent), color-mix(in srgb, var(--df-accent) 80%, #000))' }}
+                        >
+                            Save Query
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

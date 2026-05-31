@@ -10,7 +10,7 @@ export const useQueryTabs = () => {
     } catch (e) {
       console.warn("Failed to parse saved tabs", e);
     }
-    return [{ id: 1, name: 'Query 1', content: defaultQuery, type: 'sql', results: null, status: null, executionTime: null }];
+    return [{ id: 1, name: 'Query 1', content: defaultQuery, type: 'sql', results: null, status: null, executionTime: null, workspaceItemId: null }];
   });
 
   const [activeTabId, setActiveTabId] = useState(() => {
@@ -58,7 +58,8 @@ export const useQueryTabs = () => {
       type: type,
       results: null, 
       status: null, 
-      executionTime: null 
+      executionTime: null,
+      workspaceItemId: null,
     }];
     setTabs(newTabs);
     setActiveTabId(newId);
@@ -92,5 +93,9 @@ export const useQueryTabs = () => {
     setTabs(prevTabs => prevTabs.map(t => t.id === id ? { ...t, results, status, executionTime } : t));
   };
 
-  return { tabs, activeTabId, setActiveTabId, addTab, removeTab, updateTabContent, updateTabResults, renameTab };
+  const setTabWorkspaceId = (id, workspaceItemId) => {
+    setTabs(prevTabs => prevTabs.map(t => t.id === id ? { ...t, workspaceItemId } : t));
+  };
+
+  return { tabs, activeTabId, setActiveTabId, addTab, removeTab, updateTabContent, updateTabResults, renameTab, setTabWorkspaceId };
 };
