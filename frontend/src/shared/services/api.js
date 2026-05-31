@@ -220,12 +220,21 @@ export const runs = {
     const qs = new URLSearchParams();
     if (params.status) qs.set('status', params.status);
     if (params.job_name) qs.set('job_name', params.job_name);
+    if (params.type) qs.set('type', params.type);
+    if (params.start_date) qs.set('start_date', params.start_date);
+    if (params.end_date) qs.set('end_date', params.end_date);
     if (params.hours) qs.set('hours', params.hours);
     if (params.limit) qs.set('limit', params.limit);
     if (params.offset) qs.set('offset', params.offset);
     return request(`/dw/runs?${qs.toString()}`);
   },
-  stats: (days = 7) => request(`/dw/runs/stats?days=${days}`),
+  stats: (days = 7, params = {}) => {
+    const qs = new URLSearchParams();
+    qs.set('days', days);
+    if (params.start_date) qs.set('start_date', params.start_date);
+    if (params.end_date) qs.set('end_date', params.end_date);
+    return request(`/dw/runs/stats?${qs.toString()}`);
+  },
   get: (runId) => request(`/dw/runs/${runId}`),
   tasks: (runId) => request(`/dw/runs/${runId}/tasks`),
 };

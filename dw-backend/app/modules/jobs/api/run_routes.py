@@ -22,6 +22,9 @@ router = APIRouter(prefix="/dw/runs", tags=["Runs"])
 def list_all_runs(
     status: Optional[str] = None,
     job_name: Optional[str] = None,
+    type: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     hours: Optional[int] = Query(None, description="Filter runs from the last N hours"),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
@@ -40,7 +43,29 @@ def list_all_runs(
     if job_name:
         query = query.filter(Job.name.ilike(f"%{job_name}%"))
 
-    if hours:
+    if type:
+        if type == "Jobs":
+            query = query.filter(Job.type == "Job")
+        elif type == "Pipelines":
+            query = query.filter(Job.type == "Pipeline")
+        elif type == "ETL Pipelines":
+            query = query.filter(Job.type == "Pipeline", Job.name.ilike("%ingest%"))
+
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.filter(JobRun.started_at >= start_dt.replace(tzinfo=None))
+        except ValueError:
+            pass
+
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.filter(JobRun.started_at <= end_dt.replace(tzinfo=None))
+        except ValueError:
+            pass
+
+    if hours and not (start_date or end_date):
         cutoff = datetime.utcnow() - timedelta(hours=hours)
         query = query.filter(JobRun.started_at >= cutoff)
 
