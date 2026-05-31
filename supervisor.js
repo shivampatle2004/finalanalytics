@@ -76,9 +76,21 @@ const SERVICES = {
   }
 };
 
-// Log formatting function (Generic & Space-Saving)
+// De-duplication structures
+const lastLoggedLines = {};
+let lastStatusMatrix = '';
+
+// Log formatting function (Generic, Space-Saving & Prefix-only Colorful)
 function log(serviceName, message, color = colors.reset) {
-  console.log(`${color}${message}${colors.reset}`);
+  // Regex to split bracketed prefix tag from the rest of the message
+  const match = message.match(/^(\[[A-Z]+\])\s*(.*)/);
+  if (match) {
+    const prefix = match[1]; // e.g. [INFO], [SUCCESS], [WARNING], [ERROR]
+    const rest = match[2];   // e.g. "API Server active on port 8000"
+    console.log(`${color}${prefix}${colors.reset} ${rest}`);
+  } else {
+    console.log(`${color}${message}${colors.reset}`);
+  }
 }
 
 // Log Parser to keep the output extremely quiet, clean, and professional
@@ -86,7 +98,13 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
   const line = rawLine.trim();
   if (!line) return;
 
-  // 1. Filter out background health ping requests and internal DB traffic logs to prevent log spam
+  // 1. De-duplicate consecutive identical raw lines to prevent log spam
+  if (lastLoggedLines[serviceName] === line) {
+    return;
+  }
+  lastLoggedLines[serviceName] = line;
+
+  // 2. Filter out background health ping requests and internal DB traffic logs to prevent log spam
   if (
     line.includes('/etl/health') || 
     line.includes('/health') || 
@@ -101,7 +119,7 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
     return;
   }
 
-  // 2. Filter out noisy standard build/watcher logs
+  // 3. Filter out noisy standard build/watcher logs
   if (
     line.includes('[vite] (client) hmr update') || 
     line.includes('[vite] (client) page reload') ||
@@ -118,12 +136,12 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
     return;
   }
 
-  // 3. Skip background MongoDB/Postgres debug heartbeats
+  // 4. Skip background MongoDB/Postgres debug heartbeats
   if (line.includes('DEBUG') && (line.includes('database') || line.includes('config') || line.includes('service') || line.includes('async_jobs'))) {
     return;
   }
 
-  // 4. Important Errors, Criticals, and Tracebacks
+  // 5. Important Errors, Criticals, and Tracebacks
   if (
     line.toUpperCase().includes('ERROR') || 
     line.toUpperCase().includes('CRITICAL') || 
@@ -135,7 +153,7 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
     return;
   }
 
-  // 5. Warnings
+  // 6. Warnings
   if (
     line.toUpperCase().includes('WARNING') || 
     line.toUpperCase().includes('WARN')
@@ -144,7 +162,7 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
     return;
   }
 
-  // 6. Action/State Success Indicators
+  // 7. Action/State Success Indicators
   if (
     line.toUpperCase().includes('SUCCESS') || 
     line.toUpperCase().includes('ESTABLISHED') || 
@@ -155,7 +173,7 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
     return;
   }
 
-  // 7. Clean server active/start ports info
+  // 8. Clean server active/start ports info
   if (line.includes('Uvicorn running on')) {
     const urlMatch = line.match(/http:\/\/[\d\.]+:(\d+)/);
     const port = urlMatch ? urlMatch[1] : '';
@@ -167,7 +185,7 @@ function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
     return;
   }
 
-  // 8. General INFO output logs (with standard info text simplified)
+  // 9. General INFO output logs (with standard info text simplified)
   let displayLine = line;
   if (line.startsWith('INFO:')) {
     displayLine = line.replace(/^INFO:\s+/, '');
@@ -335,7 +353,14 @@ setTimeout(() => {
         const service = SERVICES[key];
         return `${service.name}: ${status}`;
       }).join(' | ');
-      log('HealthGuard', `[WARNING] Systems Status Matrix: ${statusMatrix}`, colors.yellow);
+      
+      // De-duplicate: Only print status matrix if it has changed from the last warning check
+      if (statusMatrix !== lastStatusMatrix) {
+        log('HealthGuard', `[WARNING] Systems Status Matrix: ${statusMatrix}`, colors.yellow);
+        lastStatusMatrix = statusMatrix;
+      }
+    } else {
+      lastStatusMatrix = ''; // Clear matrix memory when fully healthy
     }
   }, 25000);
 }, 15000); // 15s warm-up delay
