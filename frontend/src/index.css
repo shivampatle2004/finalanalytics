@@ -117,3 +117,6 @@ th {
   --font-sans: 'Inter', sans-serif;
   --header-height: 64px; /* Matches DW top navbar height */
 }
+@keyframes spinSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin-slow { animation: spinSlow 3s linear infinite; }
+

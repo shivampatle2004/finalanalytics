@@ -4,7 +4,7 @@
   "description": "OneStop Analytics Orchestration",
   "scripts": {
     "frontend": "cd frontend && npm run dev",
-    "etl": "cd ETL-backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload --port 8000 --reload-dir app",
+    "etl": "cd ETL-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --port 8111 --reload-dir app",
     "dw": "cd dw-backend && venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --port 8004 --reload-dir app",
     "analytics": "cd Analytics-backend && venv\\Scripts\\python.exe -m uvicorn main:app --reload --port 8010 --reload-dir routers --reload-dir connectors --reload-dir services --reload-dir utils",
 

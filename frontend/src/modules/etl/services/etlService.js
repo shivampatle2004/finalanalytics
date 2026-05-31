@@ -6,6 +6,7 @@ const API_BASE = '/etl/api/v1';
 
 const apiClient = axios.create({
   baseURL: API_BASE,
+  timeout: 30000, // 30s general timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -49,17 +50,27 @@ export const api = {
   getPipelines: (params) => apiClient.get('/pipelines', { params }).then(r => r.data),
   getPipeline: (id) => apiClient.get(`/pipelines/${id}`).then(r => r.data),
   getPipelineVersions: (id) => apiClient.get(`/pipelines/${id}/versions`).then(r => r.data),
+  restorePipelineVersion: (pipelineId, versionId) => apiClient.post(`/pipelines/${pipelineId}/versions/${versionId}/restore`).then(r => r.data),
+  getPipelineStatusSummary: () => apiClient.get('/pipelines/status-summary').then(r => r.data),
+  importPipeline: (data) => apiClient.post('/pipelines/import', data).then(r => r.data),
   createPipeline: (data) => apiClient.post('/pipelines', data).then(r => r.data),
   updatePipeline: (id, data) => apiClient.put(`/pipelines/${id}`, data).then(r => r.data),
   executePipeline: (id) => apiClient.post(`/pipelines/${id}/execute`).then(r => r.data),
   previewData: (pipelineId, nodeId) => apiClient.post(`/pipelines/${pipelineId}/preview/${nodeId}`).then(r => r.data),
   deletePipeline: (id) => apiClient.delete(`/pipelines/${id}`).then(r => r.data),
 
+  // Catalog (Tables and Files)
+  getTableStatistics: (tableName) => apiClient.get(`/catalog/internal-tables/${tableName}/profile`).then(r => r.data),
+  getFilePreview: (filename, limit = 100) => apiClient.get(`/file-transforms/preview/${encodeURIComponent(filename)}`, { params: { limit } }).then(r => r.data),
+  getFileStats: (filename) => apiClient.get(`/catalog/files/${encodeURIComponent(filename)}/profile`).then(r => r.data),
+
   // Jobs
-  getJobs: (pipelineId) => apiClient.get('/jobs', { params: { pipeline_id: pipelineId } }).then(r => r.data),
+  getJobs: (params) => apiClient.get('/jobs', { params }).then(r => r.data),
   getJob: (id) => apiClient.get(`/jobs/${id}`).then(r => r.data),
   getJobFailures: (id) => apiClient.get(`/jobs/${id}/failures`).then(r => r.data),
   rerunJob: (id) => apiClient.post(`/jobs/${id}/rerun`).then(r => r.data),
+  cancelJob: (id) => apiClient.post(`/jobs/${id}/cancel`).then(r => r.data),
+  deleteJob: (id) => apiClient.delete(`/jobs/${id}`).then(r => r.data),
 
   // Transforms
   getTransformCatalog: () => apiClient.get('/transforms/catalog').then(r => r.data),
@@ -103,7 +114,7 @@ export const api = {
   getConnectors: () => apiClient.get('/connectors').then(r => r.data),
   getConnectorSchema: (engine) => apiClient.get(`/connectors/${engine}/schema`).then(r => r.data),
   getExtractSchema: (url) => apiClient.get('/connectors/extract-schema', { params: { url } }).then(r => r.data),
-  testConnector: (data) => apiClient.post('/connectors/test', data).then(r => r.data),
+  testConnector: (data) => apiClient.post('/connectors/test', data, { timeout: 15000 }).then(r => r.data),
   discoverConnectorMetadata: (data) => apiClient.post('/connectors/discover', data).then(r => r.data),
   quickExtractConnector: (data) => apiClient.post('/connectors/quick-extract', data).then(r => r.data),
   loadTank: (data) => apiClient.post('/connectors/load-tank', { data }).then(r => r.data),

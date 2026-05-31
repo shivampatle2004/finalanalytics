@@ -626,6 +626,18 @@ function DetailPanel({ connector, onClose }) {
     }
   });
 
+  const { data: catalogs } = useQuery({
+    queryKey: ['catalogs'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/dw/catalog/list');
+        return await res.json() || [];
+      } catch (e) {
+        return [];
+      }
+    }
+  });
+
   const schema = configData?.schema;
   const uploadedFiles = configData?.uploadedFiles || [];
 
@@ -669,7 +681,13 @@ function DetailPanel({ connector, onClose }) {
         discoverMutation.mutate();
       }
     },
-    onError: (e) => setTestResult({ success: false, message: e.response?.data?.detail || e.message })
+    onError: (e) => {
+      const isTimeout = e.code === 'ECONNABORTED' || e.message?.toLowerCase().includes('timeout');
+      const msg = isTimeout
+        ? 'Connection timed out — the service is unreachable or slow. Check credentials and host.'
+        : (e.response?.data?.detail || e.message || 'Connection test failed.');
+      setTestResult({ success: false, message: msg });
+    }
   });
 
   const discoverMutation = useMutation({
@@ -708,14 +726,20 @@ function DetailPanel({ connector, onClose }) {
   }, [schema, discoveredMetadata]);
 
   const extractMutation = useMutation({
-    mutationFn: () => api.quickExtractConnector({ engine: connector.engine, config: formData, output_file_name: formData.output_file_name, save_profile: formData.save_profile }),
+    mutationFn: () => api.quickExtractConnector({ engine: connector.engine, config: formData, output_file_name: formData.output_file_name, catalog: formData.catalog, save_profile: formData.save_profile }),
     onSuccess: (res) => {
       setTestResult(res);
       if (res.success && res.table_name) {
         setTimeout(() => { window.location.hash = 'tables'; }, 1500);
       }
     },
-    onError: (e) => setTestResult({ success: false, message: e.response?.data?.detail || e.message })
+    onError: (e) => {
+      const isTimeout = e.code === 'ECONNABORTED' || e.message?.toLowerCase().includes('timeout');
+      const msg = isTimeout
+        ? 'Connection timed out — the service is unreachable or slow. Check credentials and host.'
+        : (e.response?.data?.detail || e.message || 'Extraction failed.');
+      setTestResult({ success: false, message: msg });
+    }
   });
 
   const handleLoadGoogleCredentials = async () => {
@@ -958,6 +982,37 @@ function DetailPanel({ connector, onClose }) {
                       </motion.div>
                     )}
                   </div>
+
+                  {/* Extract Options */}
+                  <div className="extract-options" style={{ marginTop: '20px', padding: '16px', background: 'var(--bg-secondary)', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, opacity: 0.7, textTransform: 'uppercase', marginBottom: '4px' }}>Extraction Settings</div>
+                    
+                    <div className="ui-input-group">
+                      <label style={{ fontSize: '10px', fontWeight: 600, opacity: 0.6, marginBottom: '4px', display: 'block' }}>TARGET CATALOG</label>
+                      <select
+                        value={formData.catalog || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, catalog: e.target.value }))}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '13px' }}
+                      >
+                        <option value="">Default (Public Schema)</option>
+                        {catalogs?.map(c => (
+                          <option key={c.id} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="ui-input-group">
+                      <label style={{ fontSize: '10px', fontWeight: 600, opacity: 0.6, marginBottom: '4px', display: 'block' }}>OUTPUT TABLE NAME</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. raw_customers"
+                        value={formData.output_file_name || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, output_file_name: e.target.value }))}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: '13px' }}
+                      />
+                    </div>
+                  </div>
+
                 </div>
               )}
             </div>
@@ -982,7 +1037,8 @@ function DetailPanel({ connector, onClose }) {
                     extractMutation.mutate();
                   }
                 }}
-                disabled={extractMutation.isPending || loading || testMutation.isPending}
+                disabled={extractMutation.isPending || loading || testMutation.isPending || !formData.output_file_name}
+                title={!formData.output_file_name ? "Please enter an Output Table Name" : ""}
               >
                 {extractMutation.isPending ? <Spinner size={16} /> : <Play size={16} fill="currentColor" />}
                 Extract Now
@@ -1053,7 +1109,7 @@ export function ConnectorHub() {
   // Calculate generic category based on name/engine for UI
   const getCategory = (engine) => {
     if (MANUAL_SETUP_ENGINES.includes(engine)) return 'Enterprise ERP';
-    if (['postgres', 'mysql', 'sqlite', 'mongodb', 'snowflake', 'bigquery', 'internal_dw'].includes(engine)) return 'Database / Warehouse';
+    if (['postgres', 'mysql', 'sqlite', 'mongodb', 'snowflake', 'bigquery', 'warehouse'].includes(engine)) return 'Database / Warehouse';
     if (['s3'].includes(engine)) return 'Cloud Storage';
     if (['csv', 'json', 'parquet', 'excel'].includes(engine)) return 'File Format';
     if (['hubspot', 'salesforce', 'zoho', 'pipedrive', 'intercom', 'zendesk'].includes(engine)) return 'CRM / Support';

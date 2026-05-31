@@ -80,78 +80,87 @@ async def get_database_catalog(db: AsyncSession = Depends(get_db)):
     from app.models.pipeline import Pipeline
     try:
         if is_postgres():
-            sql = (
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
-                "ORDER BY table_name"
-            )
+            # Query ALL non-system schemas to capture ETL-loaded tables (etl_bronze, etl_silver, etc.)
+            sql = """
+                SELECT 
+                    n.nspname AS table_schema,
+                    c.relname AS table_name,
+                    c.reltuples::bigint AS approx_rows
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'workflow', 'history', 'analytics', 'etl', 'dw')
+                  AND n.nspname NOT LIKE 'pg_toast%'
+                  AND n.nspname NOT LIKE 'pg_temp%'
+                  AND c.relkind = 'r'
+                ORDER BY n.nspname, c.relname
+            """
         else:
-            sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            
+            sql = "SELECT 'public' as table_schema, name as table_name, 0 as approx_rows FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+
         result = await db.execute(text(sql))
-        all_tables = [row[0] for row in result.fetchall() if row[0] not in SYSTEM_TABLES]
+        all_rows = [(row[0], row[1], row[2] or 0) for row in result.fetchall() if row[1] not in SYSTEM_TABLES]
 
-        pipelines_result = await db.execute(select(Pipeline))
-        pipelines = pipelines_result.scalars().all()
-        
-        node_to_engine = {}
-        for p in pipelines:
-            nodes = (p.dag_definition or {}).get("nodes", [])
-            for n in nodes:
-                engine = n.get("data", {}).get("connector_engine")
-                if engine:
-                    node_to_engine[n.get("id")] = engine
-
+        # Get exact row counts for non-public schemas (ETL data is here)
         enriched_tables = []
-        for table in all_tables:
-            engine = "local"
+        for schema_name, table_name, approx_rows in all_rows:
             try:
-                src_result = await db.execute(text(f'SELECT DISTINCT "_source_node" FROM "{table}" LIMIT 1'))
-                src_node = src_result.scalar()
-                if src_node and src_node in node_to_engine:
-                    engine = node_to_engine[src_node]
-            except Exception:
-                pass
-            
-            try:
-                row_res = await db.execute(text(f'SELECT COUNT(*) FROM "{table}"'))
-                row_count = row_res.scalar() or 0
-                
                 if is_postgres():
-                    col_res = await db.execute(text(f"SELECT COUNT(*) FROM information_schema.columns WHERE table_name = '{table}'"))
-                    col_count = col_res.scalar() or 0
+                    row_res = await db.execute(text(f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'))
+                    col_res = await db.execute(text(
+                        "SELECT COUNT(*) FROM information_schema.columns "
+                        f"WHERE table_schema = '{schema_name}' AND table_name = '{table_name}'"
+                    ))
                 else:
-                    col_res = await db.execute(text(f'PRAGMA table_info("{table}")'))
-                    col_count = len(col_res.fetchall())
+                    row_res = await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+                    col_res = await db.execute(text(f'PRAGMA table_info("{table_name}")'))
+                row_count = row_res.scalar() or 0
+                col_count = col_res.scalar() or 0
             except Exception:
-                row_count = 0
+                row_count = max(0, approx_rows)
                 col_count = 0
 
             enriched_tables.append({
-                "name": table,
-                "engine": engine,
+                "schema": schema_name,
+                "name": table_name,
+                "engine": "warehouse",
                 "row_count": row_count,
                 "column_count": col_count
             })
 
+        # Build catalog dict grouped by schema layer
         catalog_dict = {}
         for t in enriched_tables:
-            group_name = "Local / Manual" if t["engine"] == "local" else f"{str(t['engine']).capitalize()} Data"
+            schema = t["schema"]
+            table = t["name"]
+            # Determine group name based on schema
+            if schema == "public":
+                group_name = "Local / Manual"
+            elif schema in ("etl_bronze",) or schema.endswith("_bronze"):
+                group_name = "🥉 Bronze Layer (Raw Data)"
+            elif schema in ("etl_silver",) or schema.endswith("_silver"):
+                group_name = "🥈 Silver Layer (Cleaned)"
+            elif schema in ("etl_gold",) or schema.endswith("_gold"):
+                group_name = "🥇 Gold Layer (Analytics)"
+            else:
+                group_name = f"📁 {schema}"
+
             if group_name not in catalog_dict:
                 catalog_dict[group_name] = {
-                    "engine": t["engine"],
+                    "engine": "warehouse",
                     "schemas": {"default": []}
                 }
-            
+
             catalog_dict[group_name]["schemas"]["default"].append({
-                "name": t["name"],
+                "name": f"{schema}.{table}",   # fully-qualified so table lookups work
+                "display_name": table,
+                "schema": schema,
                 "row_count": t["row_count"],
                 "column_count": t["column_count"]
             })
 
         return {
             "catalog": catalog_dict,
-            "total_tables": len(all_tables)
+            "total_tables": len(enriched_tables)
         }
 
     except Exception as e:
@@ -159,19 +168,27 @@ async def get_database_catalog(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to retrieve catalog data.")
 
 
+
 @router.get("/tables/{table_name}/metadata")
 async def get_table_metadata(table_name: str, db: AsyncSession = Depends(get_db)):
     """Fetch base bounding metadata for the UI representation."""
     _validate_identifier(table_name)
+    # Support schema-qualified names like 'etl_silver.orders'
+    if '.' in table_name:
+        schema_part, tbl_part = table_name.split('.', 1)
+    else:
+        schema_part, tbl_part = 'public', table_name
     try:
-        row_res = await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+        row_res = await db.execute(text(f'SELECT COUNT(*) FROM "{schema_part}"."{tbl_part}"'))
         row_count = row_res.scalar() or 0
 
         if is_postgres():
-            col_res = await db.execute(text(f"SELECT COUNT(*) FROM information_schema.columns WHERE table_name = '{table_name}'"))
+            col_res = await db.execute(text(
+                f"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = '{schema_part}' AND table_name = '{tbl_part}'"
+            ))
             col_count = col_res.scalar() or 0
         else:
-            col_res = await db.execute(text(f'PRAGMA table_info("{table_name}")'))
+            col_res = await db.execute(text(f'PRAGMA table_info("{tbl_part}")'))
             col_count = len(col_res.fetchall())
 
         return {
@@ -189,15 +206,18 @@ async def get_table_metadata(table_name: str, db: AsyncSession = Depends(get_db)
 async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
     """Reflect the column definitions and types for a specific table."""
     _validate_identifier(table_name)
+    # Support schema-qualified names like 'etl_silver.orders'
+    if '.' in table_name:
+        schema_part, tbl_part = table_name.split('.', 1)
+    else:
+        schema_part, tbl_part = 'public', table_name
     
     try:
         if not is_postgres():
-            # SQLite reflection
-            result = await db.execute(text(f'PRAGMA table_info("{table_name}")'))
+            result = await db.execute(text(f'PRAGMA table_info("{tbl_part}")'))
             rows = result.fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="Table not found")
-                
             columns = [
                 ColumnSchema(
                     column_name=row[1],
@@ -208,20 +228,18 @@ async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
                 for row in rows
             ]
         else:
-            # Postgres reflection
             result = await db.execute(
                 text(
                     "SELECT column_name, data_type, is_nullable, column_default "
                     "FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = :table "
+                    "WHERE table_schema = :schema AND table_name = :table "
                     "ORDER BY ordinal_position"
                 ),
-                {"table": table_name},
+                {"schema": schema_part, "table": tbl_part},
             )
             rows = result.fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="Table not found")
-
             columns = [
                 ColumnSchema(
                     column_name=row[0],
@@ -377,10 +395,16 @@ async def execute_managed_sql(payload: SQLRequest, db: AsyncSession = Depends(ge
 async def preview_table_data(table_name: str, limit: int = 50, db: AsyncSession = Depends(get_db)):
     """Fetch sample rows for data validation in the UI."""
     _validate_identifier(table_name)
+    # Support schema-qualified names like 'etl_silver.orders'
+    if '.' in table_name:
+        schema_part, tbl_part = table_name.split('.', 1)
+        fq = f'"{schema_part}"."{tbl_part}"'
+    else:
+        fq = f'"{table_name}"'
 
     try:
         result = await db.execute(
-            text(f'SELECT * FROM "{table_name}" LIMIT :limit'),
+            text(f'SELECT * FROM {fq} LIMIT :limit'),
             {"limit": min(limit, 1000)},
         )
         rows = result.fetchall()
@@ -395,24 +419,27 @@ async def preview_table_data(table_name: str, limit: int = 50, db: AsyncSession 
         raise HTTPException(status_code=400, detail=f"Preview failed: {str(e)}")
 
 
+
 # ── Statistics ───────────────────────────────────────────────────────────────
 
 @router.get("/tables/{table_name}/statistics")
 async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_db)):
     """
-    Full data-quality profile for a table:
-    - total rows, total columns
-    - duplicate row count (full-row duplicates)
-    - overall completeness score
-    - per-column: null_count, null_percent, fill_rate, distinct_count,
-                  data type, and numeric min/max/mean where applicable
+    Full data-quality profile for a table.
+    Supports schema-qualified names like 'etl_silver.orders'.
     """
     _validate_identifier(table_name)
     postgres = is_postgres()
+    # Parse schema-qualified names
+    if '.' in table_name:
+        schema_part, tbl_part = table_name.split('.', 1)
+    else:
+        schema_part, tbl_part = 'public', table_name
+    fq = f'"{schema_part}"."{tbl_part}"'
 
     try:
         # ── 1. Row count ────────────────────────────────────────────────────
-        row_res = await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+        row_res = await db.execute(text(f'SELECT COUNT(*) FROM {fq}'))
         total_rows: int = row_res.scalar() or 0
 
         # ── 2. Column list and types ────────────────────────────────────────
@@ -421,16 +448,15 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
                 text(
                     "SELECT column_name, data_type "
                     "FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = :t "
+                    "WHERE table_schema = :schema AND table_name = :t "
                     "ORDER BY ordinal_position"
                 ),
-                {"t": table_name},
+                {"schema": schema_part, "t": tbl_part},
             )
             col_rows = col_res.fetchall()
             columns = [(r[0], r[1]) for r in col_rows]
         else:
-            # SQLite PRAGMA
-            col_res = await db.execute(text(f'PRAGMA table_info("{table_name}")'))
+            col_res = await db.execute(text(f'PRAGMA table_info("{tbl_part}")'))
             col_rows = col_res.fetchall()
             columns = [(r[1], r[2] or "TEXT") for r in col_rows]
 
@@ -445,7 +471,7 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
             dup_sql = f"""
                 SELECT SUM(cnt - 1) FROM (
                     SELECT COUNT(*) AS cnt
-                    FROM "{table_name}"
+                    FROM {fq}
                     GROUP BY {col_list}
                     HAVING COUNT(*) > 1
                 ) AS dups
@@ -466,9 +492,8 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
         total_null_cells = 0
 
         for col_name, col_type in columns:
-            # null count
             null_res = await db.execute(
-                text(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col_name}" IS NULL')
+                text(f'SELECT COUNT(*) FROM {fq} WHERE "{col_name}" IS NULL')
             )
             null_count: int = null_res.scalar() or 0
             total_null_cells += null_count
@@ -476,16 +501,14 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
             null_percent = round(null_count / total_rows * 100, 1) if total_rows else 0.0
             fill_rate = round(100 - null_percent, 1)
 
-            # distinct count
             try:
                 dist_res = await db.execute(
-                    text(f'SELECT COUNT(DISTINCT "{col_name}") FROM "{table_name}"')
+                    text(f'SELECT COUNT(DISTINCT "{col_name}") FROM {fq}')
                 )
                 distinct_count: int = dist_res.scalar() or 0
             except Exception:
                 distinct_count = 0
 
-            # numeric min / max / mean
             col_type_lower = col_type.lower()
             is_numeric = any(t in col_type_lower for t in NUMERIC_TYPES)
             col_min = col_max = col_mean = None
@@ -495,7 +518,7 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
                     num_res = await db.execute(
                         text(
                             f'SELECT MIN("{col_name}"), MAX("{col_name}"), AVG("{col_name}") '
-                            f'FROM "{table_name}"'
+                            f'FROM {fq}'
                         )
                     )
                     num_row = num_res.fetchone()
@@ -506,14 +529,13 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
                 except Exception:
                     pass
 
-            # top 5 most-frequent values (text columns)
             top_values = []
             if not is_numeric and total_rows > 0:
                 try:
                     top_res = await db.execute(
                         text(
                             f'SELECT "{col_name}", COUNT(*) AS cnt '
-                            f'FROM "{table_name}" '
+                            f'FROM {fq} '
                             f'WHERE "{col_name}" IS NOT NULL '
                             f'GROUP BY "{col_name}" '
                             f'ORDER BY cnt DESC LIMIT 5'
@@ -554,7 +576,7 @@ async def get_table_statistics(table_name: str, db: AsyncSession = Depends(get_d
             "total_rows": total_rows,
             "total_columns": total_columns,
             "duplicate_rows": duplicate_rows,
-            "duplicate_groups": duplicate_rows,  # alias kept for frontend compat
+            "duplicate_groups": duplicate_rows,
             "completeness_score": completeness_score,
             "column_stats": column_stats,
         }

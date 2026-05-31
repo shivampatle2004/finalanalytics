@@ -103,8 +103,46 @@ function JsonSecretField({ value, onChange, placeholder }) {
 }
 
 
-const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions }) => {
+const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions, onFileUpload, nodeType }) => {
+  const [draggingKey, setDraggingKey] = useState(null);
+  const [uploadingKey, setUploadingKey] = useState(null);
+
   if (!schema || !schema.properties) return null;
+
+  const handleDrop = async (e, key) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingKey(null);
+    if (!onFileUpload) return;
+
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+
+    try {
+      setUploadingKey(key);
+      const res = await onFileUpload(file);
+      if (res && res.file_path) {
+        handleChange(key, res.file_path);
+      }
+    } catch (err) {
+      console.error("Upload failed", err);
+      alert("Upload failed: " + err.message);
+    } finally {
+      setUploadingKey(null);
+    }
+  };
+
+  const handleDragOver = (e, key) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingKey(key);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingKey(null);
+  };
 
   const handleChange = (key, value) => {
     onChange({ ...data, [key]: value });
@@ -115,6 +153,9 @@ const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions }) =>
   return (
     <div className="dynamic-form">
       {properties.map(([key, prop]) => {
+        // Skip output_file_name if nodeType is not 'load'
+        if (key === 'output_file_name' && nodeType !== 'load') return null;
+
         const isRequired = schema.required?.includes(key);
         const value = data[key] !== undefined ? data[key] : (prop.default || '');
         const action = fieldActions?.[key];
@@ -180,27 +221,57 @@ const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions }) =>
                 />
               </label>
             ) : prop.format === 'file' || key === 'file_path' || key === 'file_id' ? (
-              <select
-                className="ui-select"
-                value={value}
-                onChange={(e) => handleChange(key, e.target.value)}
+              <div 
+                className={`df-file-dropzone ${draggingKey === key ? 'dragging' : ''}`}
+                onDragOver={(e) => handleDragOver(e, key)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, key)}
+                style={{
+                  border: draggingKey === key ? '2px dashed var(--accent)' : '1px dashed var(--border-strong)',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  textAlign: 'center',
+                  background: draggingKey === key ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                  transition: 'all 0.2s',
+                  position: 'relative'
+                }}
               >
-                <option value="">Select File...</option>
-                {uploadedFiles?.filter(f => {
-                  if (!prop.accepted_extensions || !prop.accepted_extensions.length) return true;
-                  const filename = (f.filename || f.file_path || '').toLowerCase();
-                  return prop.accepted_extensions.some(ext => filename.endsWith(ext.toLowerCase()));
-                }).map(f => {
-                  const displayName = f.filename && f.filename.length > 9 && f.filename.charAt(8) === '_'
-                    ? f.filename.substring(9)
-                    : f.filename;
-                  return (
-                    <option key={f.file_path || f.filename} value={f.file_path}>
-                      {displayName}
-                    </option>
-                  );
-                })}
-              </select>
+                {uploadingKey === key ? (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Uploading...</div>
+                ) : (
+                  <>
+                    <select
+                      className="ui-select"
+                      value={uploadedFiles?.find(f => {
+                        const fName = (f.filename || f.file_path || '').split(/[/\\]/).pop().toLowerCase();
+                        const vName = (value || '').split(/[/\\]/).pop().toLowerCase();
+                        return fName && vName && fName === vName;
+                      })?.file_path || value}
+                      onChange={(e) => handleChange(key, e.target.value)}
+                      style={{ marginBottom: '8px' }}
+                    >
+                      <option value="">Select File...</option>
+                      {uploadedFiles?.filter(f => {
+                        if (!prop.accepted_extensions || !prop.accepted_extensions.length) return true;
+                        const filename = (f.filename || f.file_path || '').toLowerCase();
+                        return prop.accepted_extensions.some(ext => filename.endsWith(ext.toLowerCase()));
+                      }).map(f => {
+                        const displayName = f.filename && f.filename.length > 9 && f.filename.charAt(8) === '_'
+                          ? f.filename.substring(9)
+                          : f.filename;
+                        return (
+                          <option key={f.file_path || f.filename} value={f.file_path}>
+                            {displayName}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      Or drag and drop a file here to upload
+                    </div>
+                  </>
+                )}
+              </div>
             ) : (prop.type === 'object' || prop.json_editor) && prop.secret ? (
               /* JSON credentials field: textarea with show/hide, parses on the fly */
               <JsonSecretField

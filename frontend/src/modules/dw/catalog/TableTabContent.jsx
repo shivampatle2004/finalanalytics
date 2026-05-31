@@ -1,4 +1,4 @@
-import React from 'react';
+import React from 'react'; // Force HMR
 import {
     FiLayers, FiActivity, FiDatabase, FiClock, FiLayout, FiTable, FiLoader,
     FiInfo, FiCheckCircle, FiTrendingUp, FiShield, FiChevronRight, FiPlus, FiSearch
@@ -98,6 +98,119 @@ export const SampleTab = ({ isLoading, previewData, previewColumns }) => (
         )}
     </div>
 );
+
+
+/* ── Statistics Tab ── */
+export const StatisticsTab = ({ table, schema }) => {
+    const [stats, setStats] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+
+    React.useEffect(() => {
+        if (!table) return;
+        setStats(null);
+        setLoading(true);
+        setError(null);
+        const actualSchema = table.physicalSchema || table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
+        api.tables.stats(table.name, actualSchema)
+            .then(data => setStats(data))
+            .catch(e => setError(e.response?.data?.detail || e.message || 'Failed to load statistics'))
+            .finally(() => setLoading(false));
+    }, [table?.name, schema?.name]);
+
+    if (loading) return (
+        <div className="flex items-center justify-center py-12 px-6">
+            <FiLoader size={32} className="animate-spin" style={{ color: 'var(--df-accent)' }} />
+        </div>
+    );
+    if (error) return (
+        <div className="py-20 text-center flex flex-col items-center gap-4 px-8">
+            <div className="text-red-500 font-bold">{error}</div>
+        </div>
+    );
+    if (!stats) return null;
+
+    const cols = stats.column_stats || [];
+    const completenessColor = stats.completeness_score >= 90 ? '#16A34A' : stats.completeness_score >= 70 ? '#CA8A04' : '#DC2626';
+
+    return (
+        <div className="p-6">
+            <div className="grid grid-cols-4 gap-4 mb-8">
+                <div className="p-4 rounded-xl border flex flex-col gap-1 shadow-sm" style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border-light)' }}>
+                    <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-text-soft)' }}>Total Rows</span>
+                    <span className="text-2xl font-bold" style={{ color: 'var(--df-strong)' }}>{stats.total_rows?.toLocaleString() ?? '—'}</span>
+                </div>
+                <div className="p-4 rounded-xl border flex flex-col gap-1 shadow-sm" style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border-light)' }}>
+                    <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-text-soft)' }}>Columns</span>
+                    <span className="text-2xl font-bold" style={{ color: 'var(--df-strong)' }}>{stats.total_columns ?? cols.length}</span>
+                </div>
+                <div className="p-4 rounded-xl border flex flex-col gap-1 shadow-sm" style={{ backgroundColor: 'var(--df-surface)', borderColor: 'var(--df-border-light)' }}>
+                    <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-text-soft)' }}>Duplicate Rows</span>
+                    <span className="text-2xl font-bold" style={{ color: (stats.duplicate_rows ?? 0) > 0 ? '#CA8A04' : '#16A34A' }}>
+                        {(stats.duplicate_rows ?? 0).toLocaleString()}
+                    </span>
+                </div>
+                <div className="p-4 rounded-xl border flex flex-col gap-1 shadow-sm" style={{ backgroundColor: 'var(--df-surface)', borderColor: completenessColor }}>
+                    <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-text-soft)' }}>Completeness</span>
+                    <span className="text-2xl font-bold" style={{ color: completenessColor }}>
+                        {stats.completeness_score ?? 100}%
+                    </span>
+                </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-[12px] font-black uppercase tracking-widest mb-4" style={{ color: 'var(--df-strong)' }}>
+                <FiActivity size={14} style={{ color: '#0F9D58' }} /> COLUMN PROFILE
+            </div>
+            
+            <div className="overflow-x-auto border rounded-xl" style={{ borderColor: 'var(--df-border-light)' }}>
+                <table className="w-full text-left border-collapse">
+                    <thead>
+                        <tr className="border-b" style={{ borderColor: 'var(--df-border-light)', backgroundColor: 'var(--df-surface)' }}>
+                            <th className="py-2.5 px-4 text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-strong)' }}>Column</th>
+                            <th className="py-2.5 px-4 text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-strong)' }}>Type</th>
+                            <th className="py-2.5 px-4 text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-strong)' }}>Null %</th>
+                            <th className="py-2.5 px-4 text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-strong)' }}>Distinct</th>
+                            <th className="py-2.5 px-4 text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-strong)' }}>Min/Max/Mean</th>
+                            <th className="py-2.5 px-4 text-[11px] font-black uppercase tracking-widest" style={{ color: 'var(--df-strong)' }}>Top Values</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {cols.map((col, i) => (
+                            <tr key={i} className="border-b last:border-0 hover:bg-[var(--df-sidebar-hover)] transition-colors" style={{ borderColor: 'var(--df-border-light)' }}>
+                                <td className="py-3 px-4 font-bold text-[13px]" style={{ color: 'var(--df-strong)' }}>{col.column}</td>
+                                <td className="py-3 px-4 text-[11px] font-mono" style={{ color: 'var(--df-text-soft)' }}>{col.type}</td>
+                                <td className="py-3 px-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 h-1.5 bg-[var(--df-border-light)] rounded-full overflow-hidden">
+                                            <div className="h-full rounded-full" style={{ width: `${col.fill_rate}%`, backgroundColor: col.fill_rate >= 90 ? '#16A34A' : col.fill_rate >= 70 ? '#CA8A04' : '#DC2626' }} />
+                                        </div>
+                                        <span className="text-[11px] font-bold" style={{ color: 'var(--df-text)' }}>{col.null_percent}%</span>
+                                    </div>
+                                </td>
+                                <td className="py-3 px-4 text-[12px] font-medium" style={{ color: 'var(--df-text)' }}>{col.distinct_count?.toLocaleString()}</td>
+                                <td className="py-3 px-4 text-[11px] font-mono" style={{ color: 'var(--df-text-soft)' }}>
+                                    {col.min !== null ? col.min : '—'} / {col.max !== null ? col.max : '—'} / {col.mean !== null ? col.mean : '—'}
+                                </td>
+                                <td className="py-3 px-4">
+                                    {col.top_values?.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                            {col.top_values.slice(0, 3).map((v, idx) => (
+                                                <div key={idx} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border" style={{ backgroundColor: 'var(--df-bg-secondary)', borderColor: 'var(--df-border)', color: 'var(--df-text)' }}>
+                                                    <span className="truncate max-w-[80px]" title={v.value}>{String(v.value)}</span>
+                                                    <span className="font-bold opacity-60">({v.count})</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : <span className="text-[12px] opacity-40">—</span>}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
 
 /* ── Lineage Tab ── */
 export const LineageTab = ({ lineage, table }) => (

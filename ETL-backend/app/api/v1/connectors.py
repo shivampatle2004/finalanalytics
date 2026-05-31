@@ -99,9 +99,9 @@ async def test_connector(
         config.setdefault("engine_name", payload.engine)
             
         connector = connector_cls(config)
-        # Apply 20s timeout to accommodate slower SaaS APIs (Notion, Zendesk, etc.)
+        # Apply 10s timeout to avoid long hanging on unreachable DBs/APIs
         try:
-            success = await asyncio.wait_for(connector.test_connection(), timeout=20.0)
+            success = await asyncio.wait_for(connector.test_connection(), timeout=10.0)
             msg = "Connection established successfully" if success else "Failed to establish connection. Please check your credentials."
             await emit_job_log(
                 session=db,
@@ -276,6 +276,10 @@ async def quick_extract_connector(
         # 4. Sanitize and prepare target table
         base_name = payload.output_file_name or f"{payload.engine}_{int(time.time())}"
         table_name = sanitize_identifier(base_name)
+        
+        if getattr(payload, "catalog", None):
+            catalog_sanitized = sanitize_identifier(payload.catalog)
+            table_name = f"{catalog_sanitized}_bronze.{table_name}"
         
         # 5. Persist to internal DB
         await _persist_to_internal_db(df, table_name)

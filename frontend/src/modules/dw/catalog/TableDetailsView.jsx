@@ -46,8 +46,11 @@ const TableDetailsView = ({ table, schema, catalog, onBack }) => {
     useEffect(() => {
         if (!table) return;
         setActiveTab('overview');
+        setPreviewData([]);
+        setPreviewColumns([]);
         setIsLoadingTags(true);
-        api.tags.list(schema?.name || 'public', table.name)
+        const actualSchema = table.physicalSchema || table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
+        api.tags.list(actualSchema, table.name)
             .then(data => setTableTags(data || []))
             .catch(() => setTableTags([]))
             .finally(() => setIsLoadingTags(false));
@@ -62,7 +65,8 @@ const TableDetailsView = ({ table, schema, catalog, onBack }) => {
     useEffect(() => {
         if (activeTab === 'sample' && previewData.length === 0) {
             setIsLoadingPreview(true);
-            api.tables.preview(table.name, schema?.name || 'public', 20)
+            const actualSchema = table.physicalSchema || table.table_schema || schema?.physical_schema_name || schema?.name || 'public';
+            api.tables.preview(table.name, actualSchema, 20)
                 .then(response => { setPreviewData(response.rows || []); setPreviewColumns(response.columns || []); })
                 .catch(() => { setPreviewData([]); setPreviewColumns([]); })
                 .finally(() => setIsLoadingPreview(false));

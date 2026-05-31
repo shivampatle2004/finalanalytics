@@ -6,6 +6,7 @@ const API_BASE = '/etl/api/v1';
 
 const apiClient = axios.create({
   baseURL: API_BASE,
+  timeout: 30000, // 30s general timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -114,7 +115,7 @@ export const api = {
   getConnectors: () => apiClient.get('/connectors').then(r => r.data),
   getConnectorSchema: (engine) => apiClient.get(`/connectors/${engine}/schema`).then(r => r.data),
   getExtractSchema: (url) => apiClient.get('/connectors/extract-schema', { params: { url } }).then(r => r.data),
-  testConnector: (data) => apiClient.post('/connectors/test', data).then(r => r.data),
+  testConnector: (data) => apiClient.post('/connectors/test', data, { timeout: 15000 }).then(r => r.data),
   discoverConnectorMetadata: (data) => apiClient.post('/connectors/discover', data).then(r => r.data),
   quickExtractConnector: (data) => apiClient.post('/connectors/quick-extract', data).then(r => r.data),
   loadTank: (data) => apiClient.post('/connectors/load-tank', { data }).then(r => r.data),

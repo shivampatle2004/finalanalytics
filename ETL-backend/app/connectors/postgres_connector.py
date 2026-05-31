@@ -56,9 +56,10 @@ class PostgresConnector(BaseConnector):
         if "sslmode=require" in conn_str or "sslmode=verify" in conn_str:
             ssl_mode = "require"
 
+        args = {"timeout": 5.0}
         if ssl_mode and ssl_mode != "disable":
-            return {"ssl": True}
-        return {}
+            args["ssl"] = True
+        return args
 
     async def test_connection(self) -> bool:
         try:

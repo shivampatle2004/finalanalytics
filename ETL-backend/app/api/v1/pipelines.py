@@ -97,6 +97,96 @@ async def create_pipeline(
     return PipelineResponse.model_validate(pipeline)
 
 
+@router.get("/status-summary")
+async def get_pipeline_status_summary(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Lightweight status summary for the Pipeline List UI polling.
+    Returns the latest job status and progress per pipeline in a single
+    efficient query — replaces the expensive per-pipeline job+runs+chunks fetch.
+    MUST be declared before /{pipeline_id} to avoid UUID parse conflicts.
+    """
+    from sqlalchemy import text
+
+    # One query: latest job per pipeline with aggregated run stats
+    # IMPORTANT: tables live in the 'etl' schema, NOT 'public'
+    # NOTE: rows_processed is on etl.job_runs, NOT on etl.jobs
+    sql = text("""
+        SELECT
+            j.pipeline_id,
+            j.id           AS job_id,
+            j.status       AS job_status,
+            j.started_at,
+            j.finished_at,
+            COALESCE(SUM(jr.rows_processed), 0)                                 AS rows_processed,
+            COUNT(jr.id)                                                        AS total_runs,
+            SUM(CASE WHEN jr.status IN ('success','failed') THEN 1 ELSE 0 END) AS done_runs,
+            SUM(CASE WHEN jr.status = 'running'             THEN 1 ELSE 0 END) AS running_runs
+        FROM etl.jobs j
+        LEFT JOIN etl.job_runs jr ON jr.job_id = j.id
+        WHERE j.id IN (
+            SELECT DISTINCT ON (pipeline_id) id
+            FROM etl.jobs
+            WHERE pipeline_id IS NOT NULL
+            ORDER BY pipeline_id, created_at DESC
+        )
+        GROUP BY j.pipeline_id, j.id, j.status, j.started_at, j.finished_at
+    """)
+
+    try:
+        result = await db.execute(sql)
+        rows = result.fetchall()
+    except Exception:
+        sql_lite = text("""
+            SELECT
+                j.pipeline_id,
+                j.id           AS job_id,
+                j.status       AS job_status,
+                j.started_at,
+                j.finished_at,
+                COALESCE(SUM(jr.rows_processed), 0)                                 AS rows_processed,
+                COUNT(jr.id)                                                        AS total_runs,
+                SUM(CASE WHEN jr.status IN ('success','failed') THEN 1 ELSE 0 END) AS done_runs,
+                SUM(CASE WHEN jr.status = 'running'             THEN 1 ELSE 0 END) AS running_runs
+            FROM etl.jobs j
+            LEFT JOIN etl.job_runs jr ON jr.job_id = j.id
+            WHERE j.id IN (
+                SELECT id FROM etl.jobs j2
+                WHERE j2.pipeline_id = j.pipeline_id
+                ORDER BY j2.created_at DESC LIMIT 1
+            )
+            GROUP BY j.pipeline_id, j.id, j.status, j.started_at, j.finished_at
+        """)
+        result = await db.execute(sql_lite)
+        rows = result.fetchall()
+
+    summary = {}
+    for row in rows:
+        pid = str(row.pipeline_id)
+        total = row.total_runs or 0
+        done = row.done_runs or 0
+        running = row.running_runs or 0
+
+        if row.job_status == "success":
+            pct = 100
+        elif total == 0:
+            pct = 5 if row.job_status == "running" else 0
+        else:
+            pct = min(99, max(5, round(((done + running * 0.5) / total) * 100)))
+
+        summary[pid] = {
+            "job_id":       str(row.job_id),
+            "status":       row.job_status,
+            "pct":          pct,
+            "started_at":   row.started_at.isoformat() if row.started_at else None,
+            "finished_at":  row.finished_at.isoformat() if row.finished_at else None,
+            "rows_processed": row.rows_processed or 0,
+        }
+
+    return summary
+
+
 @router.get("/{pipeline_id}", response_model=PipelineResponse)
 async def get_pipeline(
     pipeline_id: uuid.UUID,
@@ -107,6 +197,7 @@ async def get_pipeline(
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     return PipelineResponse.model_validate(pipeline)
+
 
 
 @router.put("/{pipeline_id}", response_model=PipelineResponse)
@@ -155,19 +246,6 @@ async def update_pipeline(
     return PipelineResponse.model_validate(pipeline)
 
 
-@router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_pipeline(
-    pipeline_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    """Hard-delete a pipeline."""
-    pipeline = await db.get(Pipeline, pipeline_id)
-    if not pipeline:
-        raise HTTPException(status_code=404, detail="Pipeline not found")
-
-    await db.delete(pipeline)
-    await db.commit()
-    logger.info(f"Deleted pipeline '{pipeline.name}'", extra={"pipeline_id": pipeline_id})
 
 
 @router.post("/{pipeline_id}/execute", response_model=dict)
@@ -207,93 +285,6 @@ async def execute_pipeline(
         "message": f"Pipeline queued for execution (queue depth: {job_queue.queue_depth()})"
     }
 
-
-@router.get("/status-summary")
-async def get_pipeline_status_summary(
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Lightweight status summary for the Pipeline List UI polling.
-    Returns the latest job status and progress per pipeline in a single
-    efficient query — replaces the expensive per-pipeline job+runs+chunks fetch.
-    """
-    from sqlalchemy import text
-
-    # One query: latest job per pipeline with aggregated run stats
-    sql = text("""
-        SELECT
-            j.pipeline_id,
-            j.id           AS job_id,
-            j.status       AS job_status,
-            j.started_at,
-            j.finished_at,
-            j.rows_processed,
-            COUNT(jr.id)                                                        AS total_runs,
-            SUM(CASE WHEN jr.status IN ('success','failed') THEN 1 ELSE 0 END) AS done_runs,
-            SUM(CASE WHEN jr.status = 'running'             THEN 1 ELSE 0 END) AS running_runs
-        FROM jobs j
-        LEFT JOIN job_runs jr ON jr.job_id = j.id
-        WHERE j.id IN (
-            SELECT DISTINCT ON (pipeline_id) id
-            FROM jobs
-            WHERE pipeline_id IS NOT NULL
-            ORDER BY pipeline_id, created_at DESC
-        )
-        GROUP BY j.pipeline_id, j.id, j.status, j.started_at, j.finished_at, j.rows_processed
-    """)
-
-    try:
-        result = await db.execute(sql)
-        rows = result.fetchall()
-    except Exception:
-        # Fallback for SQLite (no DISTINCT ON)
-        sql_lite = text("""
-            SELECT
-                j.pipeline_id,
-                j.id           AS job_id,
-                j.status       AS job_status,
-                j.started_at,
-                j.finished_at,
-                j.rows_processed,
-                COUNT(jr.id)                                                        AS total_runs,
-                SUM(CASE WHEN jr.status IN ('success','failed') THEN 1 ELSE 0 END) AS done_runs,
-                SUM(CASE WHEN jr.status = 'running'             THEN 1 ELSE 0 END) AS running_runs
-            FROM jobs j
-            LEFT JOIN job_runs jr ON jr.job_id = j.id
-            WHERE j.id IN (
-                SELECT id FROM jobs j2
-                WHERE j2.pipeline_id = j.pipeline_id
-                ORDER BY j2.created_at DESC LIMIT 1
-            )
-            GROUP BY j.pipeline_id, j.id, j.status, j.started_at, j.finished_at, j.rows_processed
-        """)
-        result = await db.execute(sql_lite)
-        rows = result.fetchall()
-
-    summary = {}
-    for row in rows:
-        pid = str(row.pipeline_id)
-        total = row.total_runs or 0
-        done = row.done_runs or 0
-        running = row.running_runs or 0
-
-        if row.job_status == "success":
-            pct = 100
-        elif total == 0:
-            pct = 5 if row.job_status == "running" else 0
-        else:
-            pct = min(99, max(5, round(((done + running * 0.5) / total) * 100)))
-
-        summary[pid] = {
-            "job_id":       str(row.job_id),
-            "status":       row.job_status,
-            "pct":          pct,
-            "started_at":   row.started_at.isoformat() if row.started_at else None,
-            "finished_at":  row.finished_at.isoformat() if row.finished_at else None,
-            "rows_processed": row.rows_processed or 0,
-        }
-
-    return summary
 
 
 @router.get("/{pipeline_id}/validate", response_model=PipelineValidation)
@@ -842,4 +833,66 @@ async def import_pipeline(
         
     logger.info(f"Imported pipeline '{pipeline.name}' as '{pipeline.name}'", extra={"pipeline_id": pipeline.id})
     return PipelineResponse.model_validate(pipeline)
+
+@router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pipeline(
+    pipeline_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a pipeline permanently."""
+    import uuid
+    from sqlalchemy import text
+
+    try:
+        pipeline_uuid = uuid.UUID(pipeline_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid pipeline ID format")
+
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_uuid))
+    pipeline = result.scalar_one_or_none()
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+        
+    try:
+        # Delete using raw SQL in dependency-order to guarantee database constraints are satisfied
+        # 1. Delete watermarks
+        await db.execute(text("DELETE FROM etl.pipeline_watermarks WHERE pipeline_id = :id"), {"id": pipeline_uuid})
+        # 2. Delete chunk failures
+        await db.execute(text("""
+            DELETE FROM etl.chunk_failures 
+            WHERE job_run_id IN (
+                SELECT jr.id FROM etl.job_runs jr
+                JOIN etl.jobs j ON jr.job_id = j.id
+                WHERE j.pipeline_id = :id
+            )
+        """), {"id": pipeline_uuid})
+        # 3. Delete job runs
+        await db.execute(text("""
+            DELETE FROM etl.job_runs 
+            WHERE job_id IN (
+                SELECT id FROM etl.jobs WHERE pipeline_id = :id
+            )
+        """), {"id": pipeline_uuid})
+        # 4. Delete job logs
+        await db.execute(text("""
+            DELETE FROM etl.job_logs 
+            WHERE job_id IN (
+                SELECT id FROM etl.jobs WHERE pipeline_id = :id
+            )
+        """), {"id": pipeline_uuid})
+        # 5. Delete jobs
+        await db.execute(text("DELETE FROM etl.jobs WHERE pipeline_id = :id"), {"id": pipeline_uuid})
+        # 6. Delete pipeline versions
+        await db.execute(text("DELETE FROM etl.pipeline_versions WHERE pipeline_id = :id"), {"id": pipeline_uuid})
+        # 7. Delete pipeline itself
+        await db.execute(text("DELETE FROM etl.pipelines WHERE id = :id"), {"id": pipeline_uuid})
+        
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete pipeline {pipeline_id}: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to delete pipeline: {str(e)}")
+        
+    logger.info(f"Deleted pipeline '{pipeline.name}' ({pipeline_id})")
+    return None
 

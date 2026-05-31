@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ShieldCheck, Plus, Play, Loader2, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
-import { api } from "@services/api";
+import { api } from '../services/etlService';
 
 export function QualityTab({ tableName }) {
   const [rules, setRules] = useState([]);

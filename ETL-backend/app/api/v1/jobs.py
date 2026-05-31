@@ -134,12 +134,33 @@ async def delete_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Hard-delete a job record and all its associated logs and runs."""
+    from sqlalchemy import text
+
     job = await db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    await db.delete(job)
-    await db.commit()
-    
+    try:
+        # Delete in dependency order to avoid FK constraint violations
+        # 1. Chunk failures (depend on job_runs)
+        await db.execute(text("""
+            DELETE FROM etl.chunk_failures
+            WHERE job_run_id IN (
+                SELECT id FROM etl.job_runs WHERE job_id = :id
+            )
+        """), {"id": job_id})
+        # 2. Job runs
+        await db.execute(text("DELETE FROM etl.job_runs WHERE job_id = :id"), {"id": job_id})
+        # 3. Job logs
+        await db.execute(text("DELETE FROM etl.job_logs WHERE job_id = :id"), {"id": job_id})
+        # 4. Job itself
+        await db.execute(text("DELETE FROM etl.jobs WHERE id = :id"), {"id": job_id})
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete job: {str(e)}")
+
     logger.info(f"Deleted job {job_id}")
     return None
+

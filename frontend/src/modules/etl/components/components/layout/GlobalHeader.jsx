@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Sun, Moon, ChevronRight, Menu, X, HelpCircle, User, Bot, Sparkles, Bell, Trash2, Check, AlertCircle, Info, ExternalLink, Settings, PanelLeft } from 'lucide-react';
-import { api } from "@services/api";
+import { api } from '../../../services/etlService';
 import './GlobalHeader.css';
 
 const PAGE_TITLES = {

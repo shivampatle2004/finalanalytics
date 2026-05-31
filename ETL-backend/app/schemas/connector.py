@@ -33,6 +33,7 @@ class ConnectorTestRequest(BaseModel):
     output_file_name: Optional[str] = None  # User-specified table/file name
     save_profile: bool = False
     profile_name: Optional[str] = None
+    catalog: Optional[str] = None
 
 
 class ConnectorTestResponse(BaseModel):

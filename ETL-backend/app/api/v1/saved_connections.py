@@ -55,6 +55,7 @@ async def extract_saved_connection(
     connection_id: uuid.UUID, 
     table_name: str = None,
     output_file_name: str = None,
+    catalog: str = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Trigger an extraction from a saved connection, optionally overriding the table."""
@@ -77,6 +78,7 @@ async def extract_saved_connection(
         engine=conn.engine,
         config=config,
         output_file_name=output_file_name,
+        catalog=catalog,
         save_profile=False
     )
     
