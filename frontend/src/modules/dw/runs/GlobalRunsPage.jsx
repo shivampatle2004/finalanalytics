@@ -163,6 +163,29 @@ const GlobalRunsPage = () => {
   const [jobSearch, setJobSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [timeRange, setTimeRange] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  const handleDateChange = (setter) => (e) => {
+    let val = e.target.value.replace(/[^\d]/g, '');
+    if (val.length > 12) val = val.substring(0, 12);
+    
+    let formatted = val;
+    if (val.length > 4) {
+      formatted = val.substring(0, 4) + '-' + val.substring(4);
+    }
+    if (val.length > 6) {
+      formatted = formatted.substring(0, 7) + '-' + val.substring(6);
+    }
+    if (val.length > 8) {
+      formatted = formatted.substring(0, 10) + ' ' + val.substring(8);
+    }
+    if (val.length > 10) {
+      formatted = formatted.substring(0, 13) + ':' + val.substring(10);
+    }
+    setter(formatted);
+  };
 
   const fetchRuns = useCallback(async () => {
     setLoading(true);
@@ -171,10 +194,19 @@ const GlobalRunsPage = () => {
       if (statusFilter) params.status = statusFilter;
       if (jobSearch) params.job_name = jobSearch;
       if (timeRange) params.hours = timeRange;
+      if (typeFilter) params.type = typeFilter;
+      if (startDate) {
+        const d = new Date(startDate);
+        if (!isNaN(d)) params.start_date = d.toISOString();
+      }
+      if (endDate) {
+        const d = new Date(endDate);
+        if (!isNaN(d)) params.end_date = d.toISOString();
+      }
 
       const [runsRes, statsRes] = await Promise.all([
         api.runs.list(params),
-        api.runs.stats(timeRange ? Math.ceil(parseInt(timeRange) / 24) || 7 : 14), // Default to 14 days for wider chart
+        api.runs.stats(timeRange ? Math.ceil(parseInt(timeRange) / 24) || 7 : 14, params), // Default to 14 days for wider chart
       ]);
 
       setRuns(runsRes.runs || []);
@@ -184,7 +216,7 @@ const GlobalRunsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, jobSearch, timeRange]);
+  }, [statusFilter, jobSearch, timeRange, typeFilter, startDate, endDate]);
 
   useEffect(() => { fetchRuns(); }, [fetchRuns]);
 
@@ -207,17 +239,18 @@ const GlobalRunsPage = () => {
           <FiChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--df-text-muted)]" />
         </div>
 
-        {/* Segmented Control */}
-        <div className="flex items-center rounded-[4px] border overflow-hidden" style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}>
-          <button className="px-3 py-1 text-[12px] font-medium bg-white dark:bg-gray-800 text-[var(--df-strong)] border-r" style={{ borderColor: 'var(--df-border)' }}>All</button>
-          <button className="px-3 py-1 text-[12px] font-medium text-[var(--df-text-muted)] hover:bg-[var(--df-panel)] border-r" style={{ borderColor: 'var(--df-border)' }}>Jobs</button>
-          <button className="px-3 py-1 text-[12px] font-medium text-[var(--df-accent)] bg-[#e6f0fa] dark:bg-[#1a2b40]">Pipelines</button>
-        </div>
-
-        {/* Pipeline Type */}
+        {/* Type Filter */}
         <div className="relative">
-          <select className="text-[12px] py-1 px-3 pr-7 border rounded-[4px] appearance-none focus:outline-none focus:ring-1" style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}>
-            <option>Pipeline type</option>
+          <select 
+            value={typeFilter} 
+            onChange={e => setTypeFilter(e.target.value)} 
+            className="text-[12px] py-1 px-3 pr-7 border rounded-[4px] appearance-none focus:outline-none focus:ring-1" 
+            style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}
+          >
+            <option value="">Type (All)</option>
+            <option value="Jobs">Jobs</option>
+            <option value="Pipelines">Pipelines</option>
+            <option value="ETL Pipelines">ETL Pipelines</option>
           </select>
           <FiChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--df-text-muted)]" />
         </div>
@@ -231,16 +264,6 @@ const GlobalRunsPage = () => {
           <FiChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--df-text-muted)]" />
         </div>
 
-        {/* Date Range */}
-        <div className="flex items-center text-[12px] border rounded-[4px] px-3 py-1 gap-2 focus-within:ring-1" style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}>
-          <span className="text-[var(--df-text-muted)]">Start:</span>
-          <span className="font-medium text-[var(--df-strong)]">02/08/2026, 06:00 PM</span>
-          <button className="text-[var(--df-text-muted)] hover:text-[var(--df-text)]"><FiXCircle size={10} /></button>
-          <span className="mx-1 text-[var(--df-border)]">|</span>
-          <span className="text-[var(--df-text-muted)]">End:</span>
-          <span className="font-medium text-[var(--df-strong)]">02/10/2026, 06:00 PM</span>
-          <button className="text-[var(--df-text-muted)] hover:text-[var(--df-text)]"><FiXCircle size={10} /></button>
-        </div>
 
         {/* Run Status */}
         <div className="relative">
@@ -254,20 +277,33 @@ const GlobalRunsPage = () => {
           <FiChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--df-text-muted)]" />
         </div>
 
-        {/* Error Code */}
-        <div className="relative">
-          <select className="text-[12px] py-1 px-3 pr-7 border rounded-[4px] appearance-none focus:outline-none focus:ring-1" style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}>
-            <option>Error code</option>
-          </select>
-          <FiChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--df-text-muted)]" />
-        </div>
-        
         <div className="flex-1" />
-        
-        {/* Create Button */}
-        <button className="px-3 py-1 bg-[#1d63d3] hover:bg-[#154fa8] text-white text-[12px] font-bold rounded-[4px] transition-colors flex items-center gap-1 shadow-sm">
-          Create <FiChevronDown size={12} />
-        </button>
+
+        {/* Date Range */}
+        <div className="flex items-center text-[12px] border rounded-[4px] px-3 py-1 gap-2 focus-within:ring-1" style={{ borderColor: 'var(--df-border)', backgroundColor: 'transparent' }}>
+          <span className="text-[var(--df-text-muted)]">Start:</span>
+          <input 
+            type="text" 
+            placeholder="YYYY-MM-DD HH:MM"
+            value={startDate} 
+            onChange={handleDateChange(setStartDate)} 
+            className="font-medium text-[var(--df-strong)] bg-transparent focus:outline-none w-32" 
+          />
+          {startDate && <button onClick={() => setStartDate('')} className="text-[var(--df-text-muted)] hover:text-[var(--df-text)]"><FiXCircle size={10} /></button>}
+          
+          <span className="mx-1 text-[var(--df-border)]">|</span>
+          
+          <span className="text-[var(--df-text-muted)]">End:</span>
+          <input 
+            type="text" 
+            placeholder="YYYY-MM-DD HH:MM"
+            value={endDate} 
+            onChange={handleDateChange(setEndDate)} 
+            className="font-medium text-[var(--df-strong)] bg-transparent focus:outline-none w-32" 
+          />
+          {endDate && <button onClick={() => setEndDate('')} className="text-[var(--df-text-muted)] hover:text-[var(--df-text)]"><FiXCircle size={10} /></button>}
+        </div>
+
       </div>
 
       {/* Chart & Error Summary Section */}
