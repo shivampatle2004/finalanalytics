@@ -30,6 +30,7 @@ cffi
 charset-normalizer
 click
 colorama
+connectorx
 contourpy
 cryptography
 curlify
@@ -182,6 +183,7 @@ rich
 rich-argparse
 rpds-py
 rsa
+s3fs
 s3transfer
 scikit-learn
 scipy
