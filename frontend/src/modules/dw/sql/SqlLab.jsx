@@ -63,32 +63,37 @@ const SqlLab = () => {
     if (sharedQuery && activeTabId) { updateTabContent(activeTabId, sharedQuery); setSharedQuery(null); }
   }, [sharedQuery, activeTabId, updateTabContent, setSharedQuery]);
 
-  // Smart SQL statement splitter
-  // Splits by semicolons AND by detecting new statement keywords at line starts
+  // Split on semicolons at statement boundary only (respects parentheses and quotes).
   const splitStatements = (sql) => {
-    const stmtKeywords = /^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|EXPLAIN|TRUNCATE)\b/i;
-    // First split lines
-    const lines = sql.split('\n');
     const statements = [];
-    let current = [];
+    let current = '';
+    let depth = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // Check if this line starts a new SQL statement
-      if (stmtKeywords.test(line) && current.length > 0) {
-        // Push accumulated lines as a statement
-        const stmt = current.join('\n').replace(/;\s*$/g, '').trim();
-        if (stmt) statements.push(stmt);
-        current = [line];
-      } else {
-        current.push(line);
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i];
+      const prev = i > 0 ? sql[i - 1] : '';
+
+      if (ch === "'" && !inDoubleQuote && prev !== '\\') {
+        inSingleQuote = !inSingleQuote;
+      } else if (ch === '"' && !inSingleQuote && prev !== '\\') {
+        inDoubleQuote = !inDoubleQuote;
+      } else if (!inSingleQuote && !inDoubleQuote) {
+        if (ch === '(') depth += 1;
+        else if (ch === ')') depth = Math.max(0, depth - 1);
+        else if (ch === ';' && depth === 0) {
+          const stmt = current.trim();
+          if (stmt) statements.push(stmt);
+          current = '';
+          continue;
+        }
       }
+      current += ch;
     }
-    // Push the last accumulated statement
-    if (current.length > 0) {
-      const stmt = current.join('\n').replace(/;\s*$/g, '').trim();
-      if (stmt) statements.push(stmt);
-    }
+
+    const last = current.trim();
+    if (last) statements.push(last);
     return statements;
   };
 
