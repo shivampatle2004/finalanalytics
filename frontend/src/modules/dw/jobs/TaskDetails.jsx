@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { FiPlay, FiCheckCircle, FiXCircle, FiClock, FiCode, FiBook, FiSave, FiMinusCircle, FiChevronDown } from 'react-icons/fi';
+import { FiPlay, FiCheckCircle, FiXCircle, FiClock, FiCode, FiBook, FiSave, FiMinusCircle, FiChevronDown, FiTrash2 } from 'react-icons/fi';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { workspace } from '../../../shared/services/api';
 import TaskLogViewer from './TaskLogViewer';
 
 const STATUS_CONFIG = {
@@ -15,16 +16,21 @@ const TaskDetails = ({ task, allTasks = [], onRunTask, onSaveTask, onDeleteTask 
   const [editMode, setEditMode] = useState(false);
   const [form, setForm] = useState({});
   const { items } = useWorkspace();
+  const [notebooks, setNotebooks] = useState([]);
+
+  useEffect(() => {
+    workspace.listNotebooks().then(data => setNotebooks(data || [])).catch(console.error);
+  }, []);
 
   useEffect(() => {
     if (task) {
       setForm({
         name: task.name || '', type: task.type || 'sql', query: task.query || '',
-        notebookPath: task.notebookPath || '', dependsOn: task.dependsOn || [], compute: task.compute || 'Serverless',
+        notebookPath: task.notebook_path || task.notebookPath || '', dependsOn: task.dependsOn || [], compute: task.compute || 'Serverless',
       });
       setEditMode(false);
     }
-  }, [task?.id, task?.name, task?.type, task?.query, task?.notebookPath, task?.compute]);
+  }, [task?.id, task?.name, task?.type, task?.query, task?.notebook_path, task?.notebookPath, task?.compute]);
 
   if (!task) return (
     <div className="h-full flex flex-col items-center justify-center text-center p-6" style={{ color: 'var(--df-text-muted)' }}>
@@ -64,7 +70,14 @@ const TaskDetails = ({ task, allTasks = [], onRunTask, onSaveTask, onDeleteTask 
           </div>
           {editMode ? (<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="df-input py-1 px-2 text-sm font-medium" style={{ width: 160 }} />) : (<h3 className="text-base font-medium" style={{ color: 'var(--df-strong)' }}>{task.name}</h3>)}</div>
         {!editMode ? (
-          <button onClick={() => setEditMode(true)} className="text-[11px] font-medium px-2 py-1 rounded-md transition-colors hover:bg-[var(--df-accent-soft)]" style={{ color: 'var(--df-accent)' }}>Edit</button>
+          <div className="flex gap-1.5">
+            <button onClick={() => setEditMode(true)} className="text-[11px] font-medium px-2 py-1 rounded-md transition-colors hover:bg-[var(--df-accent-soft)]" style={{ color: 'var(--df-accent)' }}>Edit</button>
+            {onDeleteTask && (
+              <button onClick={() => { if (window.confirm(`Delete task "${task.name}"?`)) onDeleteTask(task.id); }} className="text-[11px] font-medium px-2 py-1 rounded-md transition-colors hover:bg-[var(--df-danger-soft)] flex items-center gap-1" style={{ color: 'var(--df-danger)' }}>
+                <FiTrash2 size={11} /> Delete
+              </button>
+            )}
+          </div>
         ) : (
           <div className="flex gap-1.5">
             <button onClick={handleSave} className="text-[11px] font-medium px-2 py-1 rounded-md flex items-center gap-1 transition-colors hover:bg-[var(--df-success-soft)]" style={{ color: 'var(--df-success)' }}><FiSave size={11} /> Save</button>
@@ -106,12 +119,20 @@ const TaskDetails = ({ task, allTasks = [], onRunTask, onSaveTask, onDeleteTask 
             <div className="relative group">
               <FiBook className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground z-10" size={13} style={{ color: 'var(--df-text-soft)' }} />
               <select value={form.notebookPath} onChange={e => setForm({ ...form, notebookPath: e.target.value })} className="df-input text-sm appearance-none cursor-pointer w-full" style={{ paddingLeft: '32px', paddingRight: '28px', height: '32px' }}>
-                <option value="">Select a notebook...</option>{items.filter(i => i.type === 'notebook' && !i.isDeleted).map(nb => (<option key={nb.id} value={nb.id}>{nb.name}</option>))}
+                <option value="">Select a notebook...</option>{notebooks.map(nb => (<option key={nb.id} value={nb.id}>{nb.name}</option>))}
               </select>
               <FiChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" size={13} style={{ color: 'var(--df-text-soft)' }} />
             </div>
           ) : (
-            <div className="flex items-center gap-2"><FiBook size={14} style={{ color: 'var(--df-accent)' }} /><div className="text-sm font-semibold" style={{ color: 'var(--df-text)' }}>{items.find(i => i.id === task.notebookPath)?.name || task.notebookPath || '—'}</div>{task.notebookPath && (<span className="text-[10px] ml-2 font-mono" style={{ color: 'var(--df-text-muted)' }}>ID: {task.notebookPath}</span>)}</div>
+            <div className="flex items-center gap-2">
+              <FiBook size={14} style={{ color: 'var(--df-accent)' }} />
+              <div className="text-sm font-semibold" style={{ color: 'var(--df-text)' }}>
+                {notebooks.find(n => n.id === (task.notebook_path || task.notebookPath))?.name || (task.notebook_path || task.notebookPath) || '—'}
+              </div>
+              {(task.notebook_path || task.notebookPath) && (
+                <span className="text-[10px] ml-2 font-mono" style={{ color: 'var(--df-text-muted)' }}>ID: {task.notebook_path || task.notebookPath}</span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -143,7 +164,6 @@ const TaskDetails = ({ task, allTasks = [], onRunTask, onSaveTask, onDeleteTask 
       </div>
 
       {task.status === 'Pending' && onRunTask && !editMode && (<button onClick={() => onRunTask(task.id)} className="df-btn df-btn-primary text-sm w-full"><FiPlay size={14} /> Run Task</button>)}
-      {editMode && onDeleteTask && (<button onClick={() => { if (window.confirm(`Delete task "${task.name}"?`)) onDeleteTask(task.id); }} className="df-btn text-sm w-full" style={{ backgroundColor: 'var(--df-danger-soft)', color: 'var(--df-danger)', border: '1px solid transparent' }}>Delete Task</button>)}
 
       <TaskLogViewer logs={task.logs} />
     </div>
