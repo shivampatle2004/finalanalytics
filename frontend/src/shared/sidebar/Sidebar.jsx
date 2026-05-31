@@ -252,7 +252,7 @@ const Sidebar = () => {
       </button>
       <nav
         className={`flex-1 overflow-y-auto overflow-x-hidden df-scrollbar transition-all duration-300 ease-out ${
-          isExpanded ? 'px-3 space-y-6 opacity-100 visible' : 'px-0 space-y-0 opacity-0 invisible'
+          isExpanded ? 'px-3 space-y-2 opacity-100 visible' : 'px-0 space-y-0 opacity-0 invisible'
         }`}
         style={{
           paddingRight: isExpanded ? '12px' : 0,

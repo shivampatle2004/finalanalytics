@@ -20,25 +20,30 @@ class WarehouseConnector(BaseConnector):
         table_name = self.config.get("table")
         if not table_name:
             raise ValueError("Table name is required for extraction.")
-        
+
         try:
-            sync_uri = settings.async_database_url.replace("+asyncpg", "").replace("+aiosqlite", "")
+            # Strip async driver prefixes so we get a sync-compatible URI
+            sync_uri = (
+                settings.async_database_url
+                .replace("+asyncpg", "")
+                .replace("+aiosqlite", "")
+            )
             import asyncio
-            
+
             def _read():
-                from sqlalchemy import create_engine
-                engine = create_engine(sync_uri)
-                query = f"SELECT * FROM {table_name}"
-                return pl.read_database(query, connection=engine)
-            
+                # Polars 1.x: read_database_uri takes a URI string directly
+                return pl.read_database_uri(
+                    query=f"SELECT * FROM {table_name}",
+                    uri=sync_uri,
+                )
+
             df = await asyncio.to_thread(_read)
-            
+
             # Yield in chunks
-            chunk_size = 10000
-            dicts = df.to_dicts()
-            for i in range(0, len(dicts), chunk_size):
-                yield dicts[i:i + chunk_size]
-                
+            chunk_size = int(self.config.get("chunk_size", 10000))
+            for i in range(0, len(df), chunk_size):
+                yield df.slice(i, chunk_size).to_dicts()
+
         except Exception as e:
             logger.error(f"Internal Warehouse extraction failed: {e}")
             raise

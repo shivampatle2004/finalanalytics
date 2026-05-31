@@ -84,8 +84,13 @@ class PostgresConnector(BaseConnector):
         if query:
             sql = query
         elif table:
-            # If table doesn't have a schema prefix, use the configured schema
-            full_table = f"{schema}.{table}" if "." not in table and schema else table
+            # Only add schema prefix when table doesn't already have one (avoid double-prefix)
+            if "." not in table and schema and schema != "public":
+                full_table = f"{schema}.{table}"
+            elif "." not in table:
+                full_table = table
+            else:
+                full_table = table  # Already schema-qualified
             sql = f"SELECT * FROM {full_table}"
         else:
             raise ValueError("Extraction requires either a 'table' name or a 'query'.")
@@ -131,6 +136,7 @@ class PostgresConnector(BaseConnector):
         if_exists = self.config.get("if_table_exists", "append")
         uri = self._get_uri(is_async=False)
 
+        # Only add schema prefix when table_name doesn't already have one
         if "." not in table_name and schema_name:
             table_name = f"{schema_name}.{table_name}"
 
@@ -138,9 +144,34 @@ class PostgresConnector(BaseConnector):
 
         try:
             import asyncio
+            import json as _json
+
+            def _safe_serialize(val: Any) -> str | None:
+                if val is None:
+                    return None
+                if hasattr(val, "to_list"):
+                    val = val.to_list()
+                elif hasattr(val, "to_dict"):
+                    val = val.to_dict()
+                elif isinstance(val, dict):
+                    val = {k: (v.to_list() if hasattr(v, "to_list") else (v.to_dict() if hasattr(v, "to_dict") else v)) for k, v in val.items()}
+                try:
+                    return _json.dumps(val)
+                except Exception:
+                    return str(val)
+
+            # Clean up complex types (dicts/lists) so psycopg2/sqlalchemy can handle them
+            prepared_df = data
+            for col in data.columns:
+                dtype = str(data[col].dtype)
+                if "Struct" in dtype or "List" in dtype or "Object" in dtype:
+                    prepared_df = prepared_df.with_columns(
+                        pl.col(col).map_elements(_safe_serialize, return_dtype=pl.String)
+                    )
+
             # Run blocking Polars write_database in a thread to keep the event loop free
             def _write():
-                data.write_database(
+                prepared_df.write_database(
                     table_name=table_name,
                     connection=uri,
                     if_table_exists=if_exists,

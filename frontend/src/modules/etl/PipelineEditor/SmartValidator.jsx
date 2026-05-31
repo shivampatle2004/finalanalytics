@@ -158,7 +158,7 @@ export function SmartValidator({ dagDefinition, onClose, onValidated }) {
           {loading ? (
              <div className="val-loading">
                 <Spinner size={32} />
-                <p>ArithFlow AI is analyzing your DAG structure, configurations, and typing...</p>
+                <p>OneStopAnalytics AI is analyzing your DAG structure, configurations, and typing...</p>
              </div>
           ) : (
             <div className="val-results">

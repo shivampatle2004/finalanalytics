@@ -18,22 +18,21 @@ class SnowflakeConnector(BaseConnector):
         """Constructs the Snowflake connection string securely."""
         import urllib.parse
         user = urllib.parse.quote_plus(self.config.get("user", ""))
+        # URL-encode password so special chars (e.g. @, #, %) don't break the URI
         pwd = urllib.parse.quote_plus(self.config.get("password", ""))
         account = self.config.get("account", "")
-        database = self.config.get("database", "")
-        schema = self.config.get("schema", "PUBLIC")
+        database = urllib.parse.quote_plus(self.config.get("database", ""))
+        schema = urllib.parse.quote_plus(self.config.get("schema", "PUBLIC"))
         warehouse = self.config.get("warehouse", "")
         role = self.config.get("role", "")
 
         driver = "snowflake"
-        # Optional parameters
         params = []
         if warehouse:
-            params.append(f"warehouse={warehouse}")
+            params.append(f"warehouse={urllib.parse.quote_plus(warehouse)}")
         if role:
-            params.append(f"role={role}")
+            params.append(f"role={urllib.parse.quote_plus(role)}")
 
-        # The syntax is snowflake://<user_login_name>:<password>@<account_identifier>/<database_name>/<schema_name>
         uri = f"{driver}://{user}:{pwd}@{account}/{database}/{schema}"
         if params:
             uri += "?" + "&".join(params)
@@ -64,28 +63,51 @@ class SnowflakeConnector(BaseConnector):
 
     async def extract(self) -> AsyncGenerator[list[dict[str, Any]], None]:
         """
-        Extracts data in chunks. Uses Polars read_database_uri with chunked yield.
+        Extracts data in chunks. Supports either a 'query' or a 'table' name.
+        Uses safe from_dicts construction to handle mixed-type columns.
         """
         query = self.config.get("query")
-        if not query:
-            raise ValueError("Snowflake extraction requires a 'query' configuration.")
+        table = self.config.get("table")
+        schema = self.config.get("schema", "PUBLIC")
 
-        chunk_size = self.config.get("chunk_size", 10000)
-        logger.info("Starting Snowflake extraction...")
+        if query:
+            sql = query
+        elif table:
+            full_table = f'"{schema}"."{table}"' if "." not in table else f'"{table}"'
+            sql = f"SELECT * FROM {full_table}"
+        else:
+            raise ValueError("Snowflake extraction requires either a 'query' or 'table' configuration.")
+
+        chunk_size = int(self.config.get("chunk_size", 10000))
+        logger.info(f"Starting Snowflake extraction: {sql[:120]}...")
 
         import asyncio
+        import json as _json
 
         uri = self._get_uri(is_async=False)
+
+        def _safe_val(v: Any) -> Any:
+            """Stringify any non-primitive value so Polars schema stays consistent."""
+            if isinstance(v, (dict, list)):
+                try:
+                    return _json.dumps(v)
+                except Exception:
+                    return str(v)
+            return v
 
         def _extract():
             from sqlalchemy import create_engine, text
             engine = create_engine(uri)
             try:
                 with engine.connect() as conn:
-                    result = conn.execute(text(query))
-                    rows = result.fetchall()
+                    result = conn.execute(text(sql))
                     cols = list(result.keys())
-                    return pl.DataFrame([dict(zip(cols, row)) for row in rows])
+                    rows = result.fetchall()
+                    # Build row dicts and stringify complex nested types
+                    dicts = [{c: _safe_val(v) for c, v in zip(cols, row)} for row in rows]
+                    if not dicts:
+                        return pl.DataFrame()
+                    return pl.from_dicts(dicts, infer_schema_length=0)
             finally:
                 engine.dispose()
 
@@ -93,8 +115,7 @@ class SnowflakeConnector(BaseConnector):
         df = await loop.run_in_executor(None, _extract)
 
         for i in range(0, len(df), chunk_size):
-            chunk_df = df.slice(i, chunk_size)
-            yield chunk_df.to_dicts()
+            yield df.slice(i, chunk_size).to_dicts()
 
         logger.info("Snowflake extraction complete.")
 
@@ -194,6 +215,7 @@ class SnowflakeConnector(BaseConnector):
                 },
             },
             "required": ["account", "user", "password", "database", "schema", "warehouse", "output_file_name"],
+            "x-extract-required": ["query"],
         }
 
     @staticmethod

@@ -52,35 +52,108 @@ class MongoDBConnector(BaseConnector):
             uri += "&tls=true"
         return uri
 
+    @staticmethod
+    def _parse_json_field(value: Any, default: Any) -> Any:
+        """Safely parse a value that may be a JSON string or already the correct type."""
+        import json
+        if value is None:
+            return default
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return default
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(f"MongoDB: Could not parse JSON field value: {value!r}")
+                return default
+        return value
+
+    @staticmethod
+    def _serialize_doc(doc: dict) -> dict:
+        """
+        Recursively convert all BSON / non-JSON-serialisable values to
+        Python primitives so Polars can build a DataFrame without crashing.
+
+        Handled types:
+          - ObjectId          → str
+          - datetime / date   → ISO-8601 str
+          - Decimal128        → float
+          - bytes / Binary    → hex str
+          - dict / list       → recurse
+          - anything else     → str()
+        """
+        import datetime as _dt
+
+        def _coerce(v: Any) -> Any:
+            type_name = type(v).__name__
+            # ObjectId (bson)
+            if type_name == "ObjectId":
+                return str(v)
+            # Decimal128 (bson)
+            if type_name == "Decimal128":
+                return float(str(v))
+            # Python datetime / date
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                return v.isoformat()
+            # bytes / bson Binary
+            if isinstance(v, (bytes, bytearray)):
+                return v.hex()
+            # Nested dict
+            if isinstance(v, dict):
+                return {k2: _coerce(v2) for k2, v2 in v.items()}
+            # List / tuple
+            if isinstance(v, (list, tuple)):
+                return [_coerce(i) for i in v]
+            # Primitives (str, int, float, bool, None) pass through unchanged
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                return v
+            # Fallback for anything else (e.g. bson.Timestamp, bson.Regex)
+            return str(v)
+
+        return {k: _coerce(v) for k, v in doc.items()}
+
     async def extract(self) -> AsyncGenerator[list[dict[str, Any]], None]:
         from motor.motor_asyncio import AsyncIOMotorClient
 
         uri = self.config.get("connection_string") or self._build_uri()
         database = self.config.get("database", "")
         collection = self.config.get("collection", "")
-        query = self.config.get("query", {})
-        projection = self.config.get("projection")
-        sort = self.config.get("sort", [])
+        # Safely handle query/projection/sort — they may arrive as JSON strings from the form
+        query = self._parse_json_field(self.config.get("query"), {})
+        projection = self._parse_json_field(self.config.get("projection"), None)
+        sort = self._parse_json_field(self.config.get("sort"), [])
         limit = self.config.get("limit", 0)
-        chunk_size = self.config.get("chunk_size", 1000)
+        chunk_size = int(self.config.get("chunk_size", 1000))
 
         if not database or not collection:
             raise ValueError("MongoDB extract requires 'database' and 'collection' in config")
 
-        logger.info(f"Extracting from MongoDB: {database}.{collection}")
+        # Ensure query is a dict (not a leftover string)
+        if not isinstance(query, dict):
+            query = {}
+        # Ensure sort is a list — empty list means no sort
+        if not isinstance(sort, list):
+            sort = []
+        # None projection = return all fields (correct pymongo default)
+        if isinstance(projection, dict) and not projection:
+            projection = None
+
+        logger.info(f"Extracting from MongoDB: {database}.{collection} | query={query} | sort={sort}")
 
         client = AsyncIOMotorClient(uri)
         try:
             coll = client[database][collection]
-            cursor = coll.find(query, projection=projection).sort(sort)
+            cursor = coll.find(query, projection=projection)
+            if sort:
+                cursor = cursor.sort(sort)
             if limit:
-                cursor = cursor.limit(limit)
+                cursor = cursor.limit(int(limit))
 
             chunk = []
             async for doc in cursor:
-                # Convert ObjectId and other BSON types to JSON-serializable
-                doc["_id"] = str(doc["_id"])
-                chunk.append(doc)
+                # Recursively convert all BSON types (ObjectId, datetime, Decimal128, etc.)
+                chunk.append(self._serialize_doc(doc))
                 if len(chunk) >= chunk_size:
                     yield chunk
                     chunk = []

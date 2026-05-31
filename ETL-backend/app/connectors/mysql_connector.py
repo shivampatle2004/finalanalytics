@@ -74,6 +74,7 @@ class MySQLConnector(BaseConnector):
         import aiomysql
         logger.info(f"Extracting from MySQL: {sql[:100]}... (chunk={chunk_size})")
 
+        conn = None
         try:
             conn_str = self.config.get("connection_string")
             if conn_str:
@@ -98,24 +99,26 @@ class MySQLConnector(BaseConnector):
                     cursorclass=aiomysql.SSCursor,
                     ssl=ssl_ctx,
                 )
-            
+
             async with conn.cursor() as cur:
                 await cur.execute(sql)
-                
+
                 columns = [col[0] for col in cur.description]
-                
+
                 while True:
                     rows = await cur.fetchmany(chunk_size)
                     if not rows:
                         break
-                        
+
                     chunk = [dict(zip(columns, row)) for row in rows]
                     yield chunk
-                    
-            conn.close()
+
         except Exception as e:
             logger.error(f"MySQL streaming extraction failed: {e}")
             raise
+        finally:
+            if conn is not None:
+                conn.close()
 
     async def load(self, data: pl.DataFrame) -> LoadResult:
         table = self.config.get("table")
@@ -129,19 +132,45 @@ class MySQLConnector(BaseConnector):
             
             conn_str = self.config.get("connection_string")
             if conn_str:
-                uri = conn_str.replace("mysql+aiomysql://", "mysql+pymysql://")
+                # Normalise scheme: aiomysql URIs aren't valid for PyMySQL/SQLAlchemy
+                uri = conn_str.replace("mysql+aiomysql://", "mysql+pymysql://").replace("mysql://", "mysql+pymysql://")
             else:
-                user = self.config.get("username", "")
-                pwd = self.config.get("password", "")
+                user = urllib.parse.quote_plus(self.config.get("username", ""))
+                pwd = urllib.parse.quote_plus(self.config.get("password", ""))
                 host = self.config.get("host", "localhost")
                 port = self.config.get("port", 3306)
-                db = self.config.get("database", "")
+                db = urllib.parse.quote_plus(self.config.get("database", ""))
                 uri = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{db}"
 
             if_table_exists = self.config.get("if_table_exists", "append")
+
+            import json as _json
+
+            def _safe_serialize(val: Any) -> str | None:
+                if val is None:
+                    return None
+                if hasattr(val, "to_list"):
+                    val = val.to_list()
+                elif hasattr(val, "to_dict"):
+                    val = val.to_dict()
+                elif isinstance(val, dict):
+                    val = {k: (v.to_list() if hasattr(v, "to_list") else (v.to_dict() if hasattr(v, "to_dict") else v)) for k, v in val.items()}
+                try:
+                    return _json.dumps(val)
+                except Exception:
+                    return str(val)
+
+            # Clean up complex types (dicts/lists) so sqlalchemy/mysql can handle them
+            prepared_df = data
+            for col in data.columns:
+                dtype = str(data[col].dtype)
+                if "Struct" in dtype or "List" in dtype or "Object" in dtype:
+                    prepared_df = prepared_df.with_columns(
+                        pl.col(col).map_elements(_safe_serialize, return_dtype=pl.String)
+                    )
             
             def _write():
-                data.write_database(
+                prepared_df.write_database(
                     table_name=table,
                     connection=uri,
                     if_table_exists=if_table_exists,
@@ -158,11 +187,11 @@ class MySQLConnector(BaseConnector):
 
     async def discover(self) -> dict[str, Any]:
         """List all tables in the MySQL database."""
+        import aiomysql
+        conn = None
         try:
-            import aiomysql
             conn_str = self.config.get("connection_string")
             if conn_str:
-                import urllib.parse
                 url = urllib.parse.urlparse(conn_str)
                 conn = await aiomysql.connect(
                     host=url.hostname or "localhost",
@@ -181,18 +210,18 @@ class MySQLConnector(BaseConnector):
                     password=self.config.get("password", ""),
                     ssl=ssl_ctx,
                 )
-            
+
             async with conn.cursor() as cur:
                 await cur.execute("SHOW TABLES")
                 rows = await cur.fetchall()
                 return {"tables": [row[0] for row in rows]}
-            
+
         except Exception as e:
             logger.error(f"MySQL discovery failed: {e}")
             return {"tables": []}
         finally:
-            if 'conn' in locals():
-                conn.close()
+            if conn is not None:
+                conn.ensure_closed()
 
     @staticmethod
     def get_config_schema() -> dict[str, Any]:

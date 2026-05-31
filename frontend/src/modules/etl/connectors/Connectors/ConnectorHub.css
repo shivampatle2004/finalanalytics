@@ -5,13 +5,13 @@
 
 /* ── Page Container ── */
 .connector-hub-page {
-  padding: 12px 24px 24px;
+  padding: 0 16px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   height: 100%;
-  max-width: 1500px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   width: 100%;
   overflow: hidden;
 }
@@ -926,7 +926,7 @@
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-subtle);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .vault-text-btn.active {
@@ -1109,7 +1109,7 @@
   line-height: 1.2;
 }
 
-.guide-panel-header > div > span {
+.guide-panel-header>div>span {
   font-size: 0.65rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -1130,6 +1130,7 @@
 .guide-panel-body::-webkit-scrollbar {
   width: 4px;
 }
+
 .guide-panel-body::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 4px;
@@ -1386,8 +1387,13 @@
 }
 
 @keyframes diag-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pulse-loader {
@@ -1400,9 +1406,20 @@
 }
 
 @keyframes diag-pulse {
-  0% { transform: scale(0.8); opacity: 0.3; }
-  50% { transform: scale(1.2); opacity: 0.6; }
-  100% { transform: scale(0.8); opacity: 0.3; }
+  0% {
+    transform: scale(0.8);
+    opacity: 0.3;
+  }
+
+  50% {
+    transform: scale(1.2);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: scale(0.8);
+    opacity: 0.3;
+  }
 }
 
 .status-pill.pending {
@@ -1459,4 +1476,3 @@
   font-size: 0.72rem;
   color: var(--text-muted, #94a3b8);
 }
-

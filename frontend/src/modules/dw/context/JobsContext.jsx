@@ -19,40 +19,72 @@ export const JobsProvider = ({ children }) => {
   // ── INIT & FETCH ─────────────────────────────────────────────────────────
 
   const fetchJobs = useCallback(async () => {
+    let dwJobs = [];
     try {
       const res = await fetch(API_BASE);
-      if (!res.ok) throw new Error('Failed to fetch jobs');
-      const data = await res.json();
-      orchestratorErrorShown.current = false; // Reset on success
-      setJobs(prevJobs => {
-        const newData = Array.isArray(data) ? data : [];
-        if (prevJobs.length === 0) return newData;
-
-        // Smart merge: retain detailed runs and tasks if they already exist in local state
-        return newData.map(newJob => {
-          const oldJob = prevJobs.find(j => j.id === newJob.id);
-          if (oldJob) {
-            return {
-              ...newJob,
-              runs: oldJob.runs || newJob.runs,
-              tasks: oldJob.tasks || newJob.tasks,
-            };
-          }
-          return newJob;
-        });
-      });
+      if (res.ok) {
+        const data = await res.json();
+        dwJobs = Array.isArray(data) ? data : [];
+        orchestratorErrorShown.current = false;
+      } else {
+        throw new Error('Failed to fetch DW jobs');
+      }
     } catch (err) {
-      // Suppress noisy error logs when DW backend is uninitialized or missing tables during Analytics development
-      if (!err.message.includes('500') && !err.message.includes('Failed to fetch jobs')) {
-          console.error('Fetch Jobs Error:', err);
+      if (!err.message.includes('500') && !err.message.includes('Failed to fetch')) {
+        console.error('Fetch Jobs Error:', err);
       }
       if (!orchestratorErrorShown.current) {
         orchestratorErrorShown.current = true;
-        // Commenting out toast to avoid polluting the UI when dw-backend is down
-        // toast.error('Failed to connect to orchestrator');
       }
     }
-  }, [toast]);
+
+    let etlPipelines = [];
+    try {
+      const etlApiModule = await import('../../etl/services/etlService');
+      const etlRes = await etlApiModule.api.getPipelines({ limit: 200 });
+      // API returns { pipelines: [...] } shape
+      etlPipelines = Array.isArray(etlRes) ? etlRes : (etlRes?.pipelines || []);
+    } catch (err) {
+       console.error('Failed to fetch ETL pipelines', err);
+    }
+
+    const formattedEtl = (etlPipelines || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      type: 'ETL',
+      status: p.status || 'Success',
+      schedule: p.schedule_cron ? { type: 'custom', value: p.schedule_cron } : null,
+      lastRun: p.last_run_at || null,
+      owner: 'System', 
+      tasks: (p.dag_definition?.nodes || []).map(n => ({ id: n.id, name: n.data?.label, status: 'Pending' })),
+      runs: [],
+      description: p.description
+    }));
+
+    const combinedData = [...dwJobs, ...formattedEtl];
+
+    // Only update if we got actual data; don't wipe existing jobs if both backends are temporarily down
+    if (combinedData.length === 0) return;
+
+    setJobs(prevJobs => {
+      if (prevJobs.length === 0) return combinedData;
+
+      // Smart merge: keep existing details (runs/tasks) and add/update from new data
+      // Also keep any prevJobs items that might not be in combinedData (e.g., ETL backend down but DW backend up)
+      const merged = combinedData.map(newJob => {
+        const oldJob = prevJobs.find(j => j.id === newJob.id);
+        if (oldJob) {
+          return {
+            ...newJob,
+            runs: oldJob.runs || newJob.runs,
+            tasks: oldJob.tasks || newJob.tasks,
+          };
+        }
+        return newJob;
+      });
+      return merged;
+    });
+  }, []);
 
   // Load initially
   useEffect(() => {

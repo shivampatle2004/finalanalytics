@@ -142,7 +142,7 @@
   align-items: center;
   justify-content: center;
   background: var(--node-bg);
-  color: var(--node-accent);
+  color: var(--node-icon-color, var(--node-accent));
 }
 
 .dnd-node-text {

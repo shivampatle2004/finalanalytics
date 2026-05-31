@@ -552,6 +552,95 @@ def _run_transform_task(node_data: dict, input_lf: pl.LazyFrame, node_type: str)
     return apply_transform(input_lf, t_type, config)
 
 
+def _safe_json_serialize(val: Any) -> str | None:
+    """Safely stringify elements handling Polars Series/Struct wrappers."""
+    import json
+    if val is None:
+        return None
+    if hasattr(val, "to_list"):
+        val = val.to_list()
+    elif hasattr(val, "to_dict"):
+        val = val.to_dict()
+    elif isinstance(val, dict):
+        val = {k: (v.to_list() if hasattr(v, "to_list") else (v.to_dict() if hasattr(v, "to_dict") else v)) for k, v in val.items()}
+    try:
+        return json.dumps(val)
+    except TypeError:
+        return str(val)
+
+
+def _coerce_chunk(chunk) -> pl.DataFrame:
+    """Ensure a chunk is a proper Polars DataFrame with inferred types."""
+    import json as _json
+    if isinstance(chunk, pl.DataFrame):
+        return chunk
+    if isinstance(chunk, pl.LazyFrame):
+        return chunk.collect()
+    if not (isinstance(chunk, list) and chunk):
+        return pl.DataFrame()
+
+    # Attempt 1: Fast path
+    try:
+        return pl.from_dicts(chunk, infer_schema_length=None)
+    except Exception:
+        pass
+
+    # Attempt 2: Normalise mixed types
+    try:
+        all_keys = set()
+        for row in chunk:
+            if isinstance(row, dict):
+                all_keys.update(row.keys())
+
+        def _safe_val(v: Any) -> Any:
+            if isinstance(v, (dict, list)):
+                try:
+                    return _json.dumps(v)
+                except Exception:
+                    return str(v)
+            return v
+
+        key_types = {k: set() for k in all_keys}
+        for row in chunk:
+            if not isinstance(row, dict):
+                continue
+            for k in all_keys:
+                v = row.get(k)
+                if v is not None:
+                    key_types[k].add(type(v).__name__)
+
+        problem_keys = set()
+        for k, types in key_types.items():
+            if len(types) > 1 or types & {"dict", "list"}:
+                problem_keys.add(k)
+
+        normalised = []
+        for row in chunk:
+            if not isinstance(row, dict):
+                normalised.append({k: None for k in all_keys})
+                continue
+            new_row = {}
+            for k in all_keys:
+                v = row.get(k)
+                new_row[k] = _safe_val(v) if k in problem_keys else v
+            normalised.append(new_row)
+
+        return pl.from_dicts(normalised, infer_schema_length=None)
+    except Exception:
+        pass
+
+    # Attempt 3: Stringify all non-primitives
+    try:
+        stringified = [
+            {k: (str(v) if not isinstance(v, (int, float, bool, type(None))) else v)
+             for k, v in (row.items() if isinstance(row, dict) else {}.items())}
+            for row in chunk
+        ]
+        return pl.from_dicts(stringified, infer_schema_length=None)
+    except Exception:
+        return pl.DataFrame()
+
+
 async def _run_load_task(node_data: dict, input_lf: pl.LazyFrame, memory_guard: MemoryGuard, job_id: str = "unknown", layer: str = "bronze") -> int:
     """Execution of L (Loading) logic into internal or external destinations."""
     memory_guard.check()
@@ -564,12 +653,14 @@ async def _run_load_task(node_data: dict, input_lf: pl.LazyFrame, memory_guard: 
         mode = "append" if config.get("_delta_watermark") else config.get("if_table_exists", "replace")
         
         # BUG FIX: psycopg2 cannot adapt 'dict' types. 
-        # We must stringify any Struct/Object/List columns before write_database.
+        # We must stringify any Struct/Object/List columns before write_database using map_elements.
         for col in df.columns:
-            dtype = df[col].dtype
-            if dtype in (pl.Struct, pl.List, pl.Object):
-                logger.info(f"Casting complex column '{col}' ({dtype}) to String for DB compatibility")
-                df = df.with_columns(pl.col(col).cast(pl.String))
+            dtype = str(df[col].dtype)
+            if "Struct" in dtype or "List" in dtype or "Object" in dtype:
+                logger.info(f"Serializing complex column '{col}' ({dtype}) to String for DB compatibility")
+                df = df.with_columns(
+                    pl.col(col).map_elements(_safe_json_serialize, return_dtype=pl.String)
+                )
 
         await asyncio.to_thread(
             df.write_database, 
@@ -658,7 +749,10 @@ def _resolve_node_input(node_id: str, edges: list[dict], outputs: dict[str, pl.L
 
 async def _process_extraction_chunk(session, run, chunk, path, writer, current_count, config):
     try:
-        df = pl.DataFrame(chunk, strict=False) if not isinstance(chunk, pl.DataFrame) else chunk
+        df = _coerce_chunk(chunk)
+        if df.is_empty():
+            return current_count, writer
+
         df = _inject_metadata_cols(df, str(run.node_id))
 
         # Delta logic per chunk
@@ -669,8 +763,28 @@ async def _process_extraction_chunk(session, run, chunk, path, writer, current_c
             return current_count, writer
 
         arrow_table = df.to_arrow()
+        
+        # Handle schema alignment across chunks to prevent PyArrow write_table mismatch
         if writer is None:
             writer = pq.ParquetWriter(path, arrow_table.schema)
+        else:
+            if arrow_table.schema != writer.schema:
+                import pyarrow as pa
+                import pyarrow.compute as pc
+                aligned_cols = []
+                for field in writer.schema:
+                    if field.name in arrow_table.column_names:
+                        col = arrow_table.column(field.name)
+                        if col.type != field.type:
+                            try:
+                                col = pc.cast(col, field.type)
+                            except Exception:
+                                pass
+                        aligned_cols.append(col)
+                    else:
+                        null_array = pa.nulls(len(arrow_table), type=field.type)
+                        aligned_cols.append(null_array)
+                arrow_table = pa.Table.from_arrays(aligned_cols, schema=writer.schema)
 
         writer.write_table(arrow_table)
         return current_count + len(df), writer
