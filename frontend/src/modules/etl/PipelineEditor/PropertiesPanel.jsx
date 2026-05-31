@@ -747,6 +747,7 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
   const [transforms, setTransforms] = useState([]);
   const [transformSchema, setTransformSchema] = useState(null);
   const [showIncrementalTooltip, setShowIncrementalTooltip] = useState(false);
+  const [dwCatalogs, setDwCatalogs] = useState([]);
   const statusRef = useRef(null);
 
   const { data: allVaultItems } = useQuery({
@@ -770,6 +771,16 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
       });
     }
   }, [node.id, node.type, onUpdateNode]);
+
+  // Fetch DW catalogs for load → warehouse nodes
+  useEffect(() => {
+    if (node.type === 'load' && engine === 'warehouse') {
+      fetch('/dw/catalog/schemas')
+        .then(r => r.ok ? r.json() : [])
+        .then(data => setDwCatalogs(Array.isArray(data) ? data : (data?.schemas ?? [])))
+        .catch(() => setDwCatalogs([]));
+    }
+  }, [node.type, engine]);
 
 
   useEffect(() => {

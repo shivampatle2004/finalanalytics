@@ -2,7 +2,7 @@
 Global Runs API — cross-job run monitoring endpoints.
 Provides listing, filtering, stats aggregation, and detail views.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -97,7 +97,7 @@ def list_all_runs(
         params["end_date"] = end_date.replace('Z', '+00:00')
         
     if hours and not (start_date or end_date):
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         where_clauses.append("started_at >= :cutoff")
         params["cutoff"] = cutoff
         
@@ -157,10 +157,6 @@ def list_all_runs(
         "limit": limit,
         "offset": offset,
     }
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
 
 
 @router.get("/stats")
@@ -169,7 +165,7 @@ def run_stats(
     db: Session = Depends(get_jobs_db),
 ):
     """Aggregated success/failure counts grouped by date for chart display (DW + ETL)."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     
     sql = """
     WITH all_runs AS (
@@ -210,7 +206,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_jobs_db)):
     run = db.query(JobRun).filter(JobRun.id == run_id).first()
     if run:
         job = db.query(Job).filter(Job.id == run.job_id).first()
-        return serialize_global_run(run, job.name if job else "")
+        return serialize_global_run(run, str(job.name) if job and job.name else "")
         
     # If not in DW, check ETL
     sql = """

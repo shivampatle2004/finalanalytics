@@ -5,7 +5,7 @@
  * OneStopAnalytics microservices upon exit, crash, or freeze (hangs).
  */
 
-const { spawn, exec } = require('child_process');
+const { spawn, exec, execSync } = require('child_process');
 const http = require('http');
 const path = require('path');
 
@@ -24,6 +24,13 @@ const colors = {
   bgYellow: '\x1b[43m'
 };
 
+
+// ── OS Detection ──────────────────────────────────────────────────────────────
+const isWindows = process.platform === 'win32';
+const pythonExe = (dir) => isWindows
+  ? path.join(dir, 'venv', 'Scripts', 'python.exe')
+  : path.join(dir, 'venv', 'bin', 'python');
+
 // Services Configuration
 const SERVICES = {
   frontend: {
@@ -41,7 +48,7 @@ const SERVICES = {
   etl: {
     name: 'ETL-Backend',
     cwd: path.join(__dirname, 'ETL-backend'),
-    command: 'venv\\Scripts\\python.exe',
+    command: pythonExe(path.join(__dirname, 'ETL-backend')),
     args: ['-m', 'uvicorn', 'app.main:app', '--reload', '--port', '8111', '--reload-dir', 'app'],
     color: colors.green,
     healthUrl: 'http://localhost:8111/etl/health',
@@ -53,7 +60,7 @@ const SERVICES = {
   dw: {
     name: 'DW-Backend',
     cwd: path.join(__dirname, 'dw-backend'),
-    command: 'venv\\Scripts\\python.exe',
+    command: pythonExe(path.join(__dirname, 'dw-backend')),
     args: ['-m', 'uvicorn', 'app.main:app', '--reload', '--port', '8004', '--reload-dir', 'app'],
     color: colors.magenta,
     healthUrl: 'http://localhost:8004/health',
@@ -65,7 +72,7 @@ const SERVICES = {
   analytics: {
     name: 'Analytics-Backend',
     cwd: path.join(__dirname, 'Analytics-backend'),
-    command: 'venv\\Scripts\\python.exe',
+    command: pythonExe(path.join(__dirname, 'Analytics-backend')),
     args: ['-m', 'uvicorn', 'main:app', '--reload', '--port', '8010', '--reload-dir', 'routers', '--reload-dir', 'connectors', '--reload-dir', 'services', '--reload-dir', 'utils'],
     color: colors.yellow,
     healthUrl: 'http://localhost:8010/analytics/health',
@@ -75,6 +82,10 @@ const SERVICES = {
     restarting: false
   }
 };
+
+
+// ── Global State ─────────────────────────────────────────────────────────────
+let isShuttingDown = false;
 
 // De-duplication structures
 const lastLoggedLines = {};
@@ -207,10 +218,11 @@ function startService(key) {
 
   log(service.name, `[INFO] Launching service ${service.name}...`, colors.bright + service.color);
 
-  // Spawn child process in shell to run on Windows correctly
+  // Spawn child process (detached on Linux for process group management)
   service.process = spawn(service.command, service.args, {
     cwd: service.cwd,
-    shell: true,
+    shell: false,
+    detached: !isWindows,
     env: { ...process.env, FORCE_COLOR: 'true' }
   });
 
@@ -238,22 +250,30 @@ function startService(key) {
 
   // Handle crash/exit
   service.process.on('close', (code) => {
-    if (service.restarting) return;
+    if (service.restarting || isShuttingDown) return;
     log(service.name, `[ERROR] Process for ${service.name} exited unexpectedly with code ${code}`, colors.bright + colors.red);
     restartService(key);
   });
 
   service.process.on('error', (err) => {
+    if (isShuttingDown) return;
     log(service.name, `[ERROR] Process error on ${service.name}: ${err.message}`, colors.bright + colors.red);
   });
 }
 
-// Safe Process Tree Kill on Windows
+// Safe Process Tree Kill (cross-platform)
 function killProcessTree(pid, callback) {
   log('Supervisor', `[INFO] Terminating process tree for PID ${pid}...`, colors.bright + colors.red);
-  exec(`taskkill /F /T /PID ${pid}`, (err) => {
-    if (callback) callback();
-  });
+  if (isWindows) {
+    exec(`taskkill /F /T /PID ${pid}`, () => { if (callback) callback(); });
+  } else {
+    // On Linux: kill the whole process group
+    try { process.kill(-pid, 'SIGTERM'); } catch (_) {}
+    setTimeout(() => {
+      try { process.kill(-pid, 'SIGKILL'); } catch (_) {}
+      if (callback) callback();
+    }, 1500);
+  }
 }
 
 // Clean Restart Logic
@@ -327,10 +347,29 @@ function handleHealthFailure(key, reason) {
   }
 }
 
+// ── Pre-startup: Free occupied ports ─────────────────────────────────────────
+function freePort(port) {
+  return new Promise((resolve) => {
+    if (isWindows) {
+      exec(`FOR /F "tokens=5" %a IN ('netstat -ano ^| findstr :${port}') DO taskkill /F /PID %a`, () => resolve());
+    } else {
+      exec(`fuser -k ${port}/tcp 2>/dev/null || lsof -ti :${port} | xargs kill -9 2>/dev/null || true`, () => resolve());
+    }
+  });
+}
+
+async function freePorts() {
+  const ports = [8111, 8004, 8010];
+  log('Supervisor', `[INFO] Freeing ports ${ports.join(', ')} from stale processes...`, colors.yellow);
+  await Promise.all(ports.map(freePort));
+  await new Promise(r => setTimeout(r, 800)); // brief settle time
+  log('Supervisor', '[INFO] Ports cleared. Launching services...', colors.blue);
+}
+
 // ── Bootstrapping: Start all services on startup ──
 log('Supervisor', '[INFO] Initializing all microservices...', colors.bright + colors.blue);
-Object.keys(SERVICES).forEach(key => {
-  startService(key);
+freePorts().then(() => {
+  Object.keys(SERVICES).forEach(key => startService(key));
 });
 
 // Periodic Health Checker Matrix: Runs every 25 seconds (with a 15-second startup warm-up delay)
@@ -367,11 +406,13 @@ setTimeout(() => {
 
 // Graceful supervisor shutdown
 process.on('SIGINT', () => {
+  isShuttingDown = true;
   log('Supervisor', '[INFO] Shutting down supervisor. Terminating child processes...', colors.bright + colors.red);
-  
+
   const killPromises = Object.keys(SERVICES).map(key => {
     return new Promise((resolve) => {
       const service = SERVICES[key];
+      service.restarting = true; // prevent restart loop
       if (service.process && service.process.pid) {
         killProcessTree(service.process.pid, resolve);
       } else {

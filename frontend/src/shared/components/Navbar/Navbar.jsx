@@ -114,7 +114,7 @@ const Navbar = () => {
 
       // 3. Analytics Backend Alerts
       try {
-        const analyticsRes = await fetch('/analytics/api/connections').then(r => r.json());
+        const analyticsRes = await fetch('/analytics/api/connections?user_id=1').then(r => r.json());
         if (Array.isArray(analyticsRes)) {
           mergedNotifs.push({
             id: 'analytics-stats',
