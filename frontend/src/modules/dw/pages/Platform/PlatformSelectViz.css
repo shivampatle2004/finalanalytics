@@ -1,0 +1,205 @@
+/* Visualizations */
+.ps-viz {
+    height: 70px;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.02);
+    overflow: hidden;
+}
+
+.ps-mod--dw .ps-viz {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ETL Viz */
+.ps-viz--etl {
+    gap: 10px;
+    padding: 0 16px;
+}
+
+.ps-etl-node {
+    font-size: 14px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid #eee;
+}
+
+.ps-etl-line {
+    flex: 1;
+    height: 2px;
+    background: #eee;
+    position: relative;
+}
+
+.ps-etl-pulse {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 40%;
+    background: #0f52ba;
+    animation: ps-etlStep 1.5s linear infinite;
+}
+
+@keyframes ps-etlStep {
+    from {
+        left: -40%;
+    }
+
+    to {
+        left: 100%;
+    }
+}
+
+/* DW Viz */
+.ps-viz--dw {
+    gap: 10px;
+    padding: 0 20px;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.ps-dw-catalog {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-left: 1.5px solid rgba(226, 121, 154, 0.2);
+    padding-left: 8px;
+}
+
+.ps-dw-row {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.2);
+    font-family: monospace;
+}
+
+.ps-dw-row span {
+    color: #E2799A;
+}
+
+.ps-dw-row--act {
+    color: #fff;
+    opacity: 1;
+}
+
+.ps-typing-sql {
+    font-size: 10px;
+    font-family: monospace;
+    color: #fff;
+}
+
+.ps-sql-kw {
+    color: #E2799A;
+}
+
+.ps-sql-cur {
+    display: inline-block;
+    width: 5px;
+    height: 10px;
+    background: #E2799A;
+    margin-left: 2px;
+    animation: ps-blink 1s step-end infinite;
+}
+
+@keyframes ps-blink {
+    50% {
+        opacity: 0;
+    }
+}
+
+/* Analytics Viz */
+.ps-viz--analytics {
+    padding: 10px;
+    align-items: flex-end;
+}
+
+.ps-a-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+    width: 100%;
+    height: 100%;
+}
+
+.ps-a-bar {
+    flex: 1;
+    background: #7c3aed;
+    opacity: 0.3;
+    border-radius: 3px 3px 0 0;
+    min-width: 14px;
+}
+
+.ps-a-bar-1 {
+    height: 40%;
+    animation: ps-bar 2s ease infinite alternate;
+}
+
+.ps-a-bar-2 {
+    height: 70%;
+    animation: ps-bar 2.5s ease infinite alternate-reverse;
+}
+
+.ps-a-bar-3 {
+    height: 50%;
+    animation: ps-bar 1.8s ease infinite alternate;
+}
+
+.ps-a-bar-4 {
+    height: 90%;
+    animation: ps-bar 2.2s ease infinite alternate-reverse;
+}
+
+.ps-a-bar-5 {
+    height: 60%;
+    animation: ps-bar 2s ease infinite alternate;
+}
+
+@keyframes ps-bar {
+    to {
+        transform: scaleY(0.7);
+    }
+}
+
+/* Checklist */
+.ps-feats {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+    flex: 1;
+}
+
+.ps-feat {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #555;
+}
+
+.ps-mod--dw .ps-feat {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.ps-feat svg {
+    width: 15px;
+    height: 15px;
+    stroke: #22c55e;
+    flex-shrink: 0;
+}
+
+.ps-mod--dw .ps-feat svg {
+    stroke: #E2799A;
+}
+

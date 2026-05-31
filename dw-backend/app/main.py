@@ -5,7 +5,7 @@ load_dotenv(override=True)
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -231,8 +231,29 @@ app.include_router(tag_router)
 
 
 # -----------------------------
-# ❤️ Health Check
+# ❤️ Health Check & Stats
 # -----------------------------
+@app.get("/dw/dashboard-stats")
+def get_dw_dashboard_stats():
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        from app.modules.catalog.services.catalog_service import get_all_tables
+        tables = get_all_tables(db)
+        return {
+            "status": "healthy",
+            "table_count": len(tables)
+        }
+    except Exception as e:
+        print(f"Error fetching dashboard stats: {e}")
+        return {
+            "status": "unhealthy",
+            "table_count": 0,
+            "error": str(e)
+        }
+    finally:
+        db.close()
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}

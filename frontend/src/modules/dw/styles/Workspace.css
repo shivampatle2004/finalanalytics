@@ -1,0 +1,542 @@
+/* ═══════════════════════════════════════════════════════════
+   Data Warehouse Workspace — Professional Theme System
+   Unified design for Light & Dark modes
+   ═══════════════════════════════════════════════════════════ */
+
+.dw-workspace-container {
+  background-color: var(--df-bg);
+  color: var(--df-text);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── Header ── */
+.dw-header {
+  position: sticky;
+  top: 0;
+  z-index: 99;
+  background-color: var(--df-bg);
+  padding: 20px 24px 14px 20px;
+  border-bottom: 1px solid var(--df-border-light);
+  flex-shrink: 0;
+}
+
+.dw-header h1 {
+  font-family: 'Nohemi', sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--df-strong);
+  margin: 0;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dw-header p {
+  font-size: 14px;
+  color: var(--df-text-muted);
+  margin-top: 4px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.dw-header-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--df-accent-soft);
+  color: var(--df-accent);
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 20px;
+}
+
+
+.dw-breadcrumb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.dw-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.dw-title {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--df-strong);
+  margin: 0;
+}
+
+/* ── Search Bar ── */
+.dw-search-container {
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+
+.dw-search-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.dw-search-input-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+}
+
+.dw-search-input {
+  width: 100%;
+  background-color: var(--df-bg-secondary);
+  border: 1px solid var(--df-border);
+  border-radius: 12px;
+  padding: 9px 40px;
+  font-size: 14px;
+  color: var(--df-text);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.dw-search-input:focus {
+  border-color: var(--df-accent);
+  background-color: var(--df-bg);
+  box-shadow: 0 0 0 3px var(--df-accent-soft);
+}
+
+.dw-search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--df-text-muted);
+  pointer-events: none;
+}
+
+/* ── Filter Pills ── */
+.dw-filter-pills {
+  display: flex;
+  align-items: center;
+  background: var(--df-bg-secondary);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--df-border-light);
+}
+
+.dw-filter-pill {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--df-text-muted);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.dw-filter-pill:hover {
+  color: var(--df-text);
+}
+
+.dw-filter-pill.active {
+  background: var(--df-accent);
+  color: white;
+  box-shadow: 0 2px 8px var(--df-accent-soft);
+}
+
+/* ── Filter Dropdowns ── */
+.dw-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--df-border);
+  background: var(--df-bg);
+  color: var(--df-text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dw-filter-btn:hover {
+  border-color: var(--df-border-strong);
+  background: var(--df-bg-secondary);
+  color: var(--df-text);
+}
+
+.dw-filter-btn.active {
+  border-color: var(--df-accent);
+  background: var(--df-accent-soft);
+  color: var(--df-text-accent);
+}
+
+.dw-filter-btn-icon {
+  font-size: 8px;
+  opacity: 0.4;
+  margin-left: 2px;
+  transition: transform 0.2s ease;
+}
+
+.dw-filter-btn.active .dw-filter-btn-icon {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+/* ── Table / FileList ── */
+.dw-content-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 24px 32px 0;
+}
+
+.dw-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dw-table th {
+  padding: 12px 8px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--df-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--df-border-light);
+}
+
+.dw-table tr {
+  border-bottom: 1px solid var(--df-border-light);
+  transition: background 0.15s ease;
+}
+
+.dw-table tr:hover {
+  background: var(--df-sidebar-hover);
+}
+
+.dw-table td {
+  padding: 12px 8px;
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+/* ── Item Badges ── */
+.dw-type-badge {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--df-accent-soft);
+  color: var(--df-accent);
+  border: 1px solid var(--df-accent-medium);
+}
+
+[data-theme='dark'] .dw-type-badge {
+  background: rgba(15, 82, 186, 0.15);
+  border-color: rgba(15, 82, 186, 0.25);
+}
+
+/* ── Empty State ── */
+.dw-empty-container {
+  width: 100%;
+  height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--df-border);
+  border-radius: 24px;
+  background: var(--df-bg-secondary);
+  color: var(--df-text-muted);
+}
+
+.dw-breadcrumb-link {
+  color: #3b82f6;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dw-breadcrumb-link:hover {
+  text-decoration: underline;
+  opacity: 0.8;
+}
+
+[data-theme='dark'] .dw-breadcrumb-link {
+  color: #60a5fa;
+}
+
+/* ── Sidebar ── */
+.dw-sidebar-container {
+  flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--df-sidebar-bg);
+  border-right: 1px solid var(--df-border-light);
+  overflow: hidden;
+}
+
+.dw-sidebar-header {
+  padding: 24px 20px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dw-sidebar-title {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--df-text-muted);
+  margin: 0;
+  opacity: 0.5;
+}
+
+.dw-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  margin-top: 8px;
+}
+
+.dw-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  margin: 1px 0;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--df-text-soft);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+
+.dw-sidebar-item:hover {
+  background: var(--df-sidebar-hover);
+  color: var(--df-text);
+}
+
+.dw-sidebar-item.active {
+  background: var(--df-accent-soft);
+  color: var(--df-accent);
+  position: relative;
+}
+
+.dw-sidebar-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  background: var(--df-accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.dw-sidebar-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  transition: color 0.2s ease;
+}
+
+.dw-sidebar-item.active .dw-sidebar-item-icon {
+  color: var(--df-accent);
+}
+
+/* ── Buttons ── */
+.dw-btn-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: var(--df-bg);
+  border: 1px solid var(--df-border);
+  color: var(--df-strong);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.dw-btn-secondary:hover {
+  background: var(--df-sidebar-hover);
+  border-color: var(--df-border-strong);
+}
+
+.dw-btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: var(--df-accent);
+  color: white;
+  border: 1px solid var(--df-accent);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  box-shadow: 0 2px 6px var(--df-accent-soft);
+}
+
+.dw-btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 12px var(--df-accent-soft);
+}
+
+/* ── Dropdown Menus ── */
+.dw-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  background: var(--df-bg);
+  border: 1px solid var(--df-border);
+  border-radius: 16px;
+  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  padding: 8px;
+  animation: dw-fade-in 0.2s ease;
+}
+
+.dw-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--df-text-soft);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+  text-align: left;
+}
+
+.dw-dropdown-item:hover {
+  background: var(--df-bg-secondary);
+  color: var(--df-text);
+}
+
+.dw-dropdown-item.active {
+  background: var(--df-accent-soft);
+  color: var(--df-accent);
+}
+
+@keyframes dw-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Modals ── */
+.dw-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: dw-fade-in-overlay 0.3s ease;
+}
+
+.dw-modal-content {
+  width: 100%;
+  max-width: 520px;
+  background: var(--df-bg);
+  border-radius: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  animation: dw-modal-slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dw-modal-header {
+  padding: 24px 32px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dw-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--df-strong);
+  letter-spacing: -0.01em;
+}
+
+.dw-modal-body {
+  padding: 0 32px 32px;
+}
+
+.dw-modal-footer {
+  padding: 20px 32px;
+  background: var(--df-bg-secondary);
+  border-top: 1px solid var(--df-border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@keyframes dw-fade-in-overlay {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dw-modal-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

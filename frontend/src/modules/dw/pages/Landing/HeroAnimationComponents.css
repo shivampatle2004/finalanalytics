@@ -1,0 +1,131 @@
+.ha-mini-dash {
+  position: absolute; bottom: 8%; right: -2%;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 14px;
+  padding: 12px 14px;
+  z-index: 12;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.08), 0 0 30px rgba(15, 82, 186,0.06);
+  opacity: 0; transform: translateX(20px);
+  animation: haMD 0.6s 2.5s ease-out forwards;
+}
+@keyframes haMD { to { opacity: 1; transform: translateX(0); } }
+
+.ha-mini-hdr {
+  font-size: 0.6rem; font-weight: 900;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: #999; margin-bottom: 10px;
+}
+
+.ha-mini-chart {
+  display: flex; align-items: flex-end; gap: 4px; height: 50px; margin-bottom: 10px;
+}
+
+.ha-bar {
+  width: 8px; border-radius: 3px 3px 0 0;
+  background: var(--c);
+  height: 0;
+  animation: haBarGrow 0.8s var(--delay) ease-out forwards, haBarPulse 3s calc(var(--delay) + 1s) infinite ease-in-out;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--c) 40%, transparent);
+}
+
+@keyframes haBarGrow { to { height: var(--h); } }
+@keyframes haBarPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; height: calc(var(--h) - 8%); }
+}
+
+.ha-mini-stat { display: flex; align-items: baseline; gap: 6px; }
+.ha-mini-num { font-size: 1.1rem; font-weight: 1000; color: #0f52ba; letter-spacing: -0.5px; }
+.ha-mini-lbl { font-size: 0.55rem; font-weight: 800; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ───── NODES ───── */
+.ha-node {
+  position: absolute; display: flex; flex-direction: column;
+  align-items: center; gap: 8px; z-index: 5; opacity: 0;
+}
+
+.ha-halo {
+  position: absolute; top: 50%; left: 50%;
+  width: 56px; height: 56px; transform: translate(-50%, -65%);
+  border-radius: 50%; pointer-events: none;
+  animation: haHP 2.5s infinite ease-in-out;
+}
+@keyframes haHP {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(15, 82, 186,0); }
+  50% { box-shadow: 0 0 24px 10px rgba(15, 82, 186,0.18); }
+}
+
+.ha-nlbl {
+  font-size: 0.58rem; font-weight: 900;
+  text-transform: uppercase; letter-spacing: 1.2px;
+  color: #555; background: white;
+  padding: 4px 12px; border-radius: 20px;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+
+.ha-nicon {
+  width: 46px; height: 46px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 14px; padding: 8px; transition: all 0.3s;
+}
+.ha-nicon svg { width: 100%; height: 100%; }
+
+.ha-c-orange {
+  background: linear-gradient(135deg, #f9e8ee, #f3c4d3);
+  color: #0f52ba; border: 1.5px solid rgba(15, 82, 186,0.25);
+  box-shadow: 0 8px 28px rgba(15, 82, 186,0.18), 0 0 20px rgba(15, 82, 186,0.06);
+}
+.ha-c-coral {
+  background: linear-gradient(135deg, #f3e8ff, #e9d5ff);
+  color: #6D28D9; border: 1.5px solid rgba(109, 40, 217,0.2);
+  box-shadow: 0 8px 28px rgba(109, 40, 217,0.15), 0 0 20px rgba(109, 40, 217,0.05);
+}
+.ha-c-amber {
+  background: linear-gradient(135deg, #fce7f3, #fbcfe8);
+  color: #9D2B50; border: 1.5px solid rgba(157, 43, 80,0.2);
+  box-shadow: 0 8px 28px rgba(157, 43, 80,0.15), 0 0 20px rgba(157, 43, 80,0.05);
+}
+
+@keyframes haNI {
+  from { opacity: 0; transform: scale(0.3) translateY(30px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.ha-n1 { top: 5%; left: 12%; animation: haNI 0.6s 0.6s ease-out forwards, haF1 5.5s 1.2s infinite ease-in-out; }
+.ha-n2 { top: 5%; right: 12%; animation: haNI 0.6s 0.8s ease-out forwards, haF2 7s 1.4s infinite ease-in-out; }
+.ha-n3 { top: 40%; right: 2%; animation: haNI 0.6s 1s ease-out forwards, haF1 6s 1.6s infinite ease-in-out; }
+.ha-n4 { top: 40%; left: 2%; animation: haNI 0.6s 1.2s ease-out forwards, haF2 5s 1.8s infinite ease-in-out; }
+.ha-n5 { bottom: 5%; left: 18%; animation: haNI 0.6s 1.4s ease-out forwards, haF1 7.5s 2s infinite ease-in-out; }
+.ha-n6 { bottom: 5%; right: 18%; animation: haNI 0.6s 1.6s ease-out forwards, haF2 6.5s 2.2s infinite ease-in-out; }
+
+@keyframes haF1 { 0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-14px) rotate(2deg)} }
+@keyframes haF2 { 0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(12px) rotate(-2deg)} }
+
+/* ───── PARTICLES ───── */
+.ha-p { position: absolute; border-radius: 50%; z-index: 2; pointer-events: none; }
+
+.ha-p1 { width:7px;height:7px;background:#0f52ba;top:15%;left:30%;box-shadow:0 0 14px rgba(15, 82, 186,0.7);animation:haPA 4s infinite ease-in-out; }
+.ha-p2 { width:5px;height:5px;background:#6D28D9;top:50%;right:18%;box-shadow:0 0 12px rgba(109, 40, 217,0.7);animation:haPB 6s infinite ease-in-out 0.5s; }
+.ha-p3 { width:6px;height:6px;background:#E2799A;bottom:25%;left:10%;box-shadow:0 0 12px rgba(226, 121, 154,0.7);animation:haPA 5s infinite ease-in-out 1s; }
+.ha-p4 { width:4px;height:4px;background:#0f52ba;top:10%;right:35%;box-shadow:0 0 8px rgba(15, 82, 186,0.5);animation:haPB 7s infinite ease-in-out 1.5s; }
+.ha-p5 { width:6px;height:6px;background:#6D28D9;bottom:12%;right:6%;box-shadow:0 0 12px rgba(109, 40, 217,0.6);animation:haPA 5.5s infinite ease-in-out 2s; }
+.ha-p6 { width:5px;height:5px;background:#9D2B50;top:30%;left:3%;box-shadow:0 0 10px rgba(157, 43, 80,0.6);animation:haPB 6.5s infinite ease-in-out 0.8s; }
+.ha-p7 { width:4px;height:4px;background:#0f52ba;top:65%;left:42%;box-shadow:0 0 8px rgba(15, 82, 186,0.4);animation:haPA 8s infinite ease-in-out 3s; }
+.ha-p8 { width:5px;height:5px;background:#6D28D9;top:22%;right:10%;box-shadow:0 0 10px rgba(109, 40, 217,0.5);animation:haPB 5s infinite ease-in-out 1.2s; }
+.ha-p9 { width:3px;height:3px;background:#E2799A;bottom:35%;right:30%;box-shadow:0 0 8px rgba(226, 121, 154,0.5);animation:haPA 7s infinite ease-in-out 2.5s; }
+.ha-p10 { width:4px;height:4px;background:#0f52ba;top:75%;left:20%;box-shadow:0 0 8px rgba(15, 82, 186,0.4);animation:haPB 6s infinite ease-in-out 1.8s; }
+
+@keyframes haPA {
+  0%,100%{transform:translate(0,0) scale(1);opacity:0.5}
+  25%{transform:translate(14px,-20px) scale(2);opacity:1}
+  50%{transform:translate(-8px,-35px) scale(1.2);opacity:0.6}
+  75%{transform:translate(20px,-12px) scale(1.8);opacity:0.9}
+}
+@keyframes haPB {
+  0%,100%{transform:translate(0,0) scale(1);opacity:0.4}
+  33%{transform:translate(-16px,14px) scale(1.8);opacity:0.9}
+  66%{transform:translate(12px,-22px) scale(1.3);opacity:0.7}
+}

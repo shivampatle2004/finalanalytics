@@ -114,11 +114,10 @@ export const tables = {
     request(`/dw/catalog/tables/${table}/preview?schema=${schema}&limit=${limit}`),
   schema: (table, schema = 'public') =>
     request(`/dw/catalog/tables/${table}/columns?schema=${schema}`),
-  stats: (table, schema = 'public') =>
-    request(`/dw/catalog/tables/${table}/stats?schema=${schema}`),
-  tags: (schema, table) => request(`/dw/tags/tables/${schema}/${table}`),
   metadata: (schema, table) =>
     request(`/dw/table-metadata/${schema}/${table}`),
+  stats: (schema, table) =>
+    request(`/dw/table-stats/${schema}/${table}`),
   exportCSVUrl: (schema, table) =>
     `${API_BASE}/dw/export/${schema}/${table}`,
   exportJSONUrl: (schema, table) =>

@@ -22,8 +22,7 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { DataPreview } from './DataPreview';
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { SmartValidator } from './SmartValidator';
-import { PipelineLogPanel } from './PipelineLogPanel';
-import { Play, Save, Check, Loader2, Maximize2, X, Activity, ShieldCheck, Trash2, Undo2, Redo2, Copy, Scissors, Wand2, LayoutGrid, PanelLeft, Settings, Clock, ArrowLeft, FileText } from 'lucide-react';
+import { Play, Save, Check, Loader2, Maximize2, X, Activity, ShieldCheck, Trash2, Undo2, Redo2, Copy, Scissors, Wand2, LayoutGrid, PanelLeft, Settings, Clock, ArrowLeft } from 'lucide-react';
 import { api } from '../services/etlService';
 import { wsManager } from '../services/websocket';
 import { useUndoRedo } from './hooks/useUndoRedo';
@@ -107,7 +106,6 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
   const [previewNodeId, setPreviewNodeId] = useState(null);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showValidator, setShowValidator] = useState(false);
-  const [showLogPanel, setShowLogPanel] = useState(false);
   const [jobHistory, setJobHistory] = useState([]); // for Gantt
 
   // Hotkeys for Undo/Redo
@@ -598,7 +596,6 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
   };
 
   return (
-    <>
     <div className="pe-container">
       {/* ── Navbar ── */}
       <header className="pe-navbar glass">
@@ -669,13 +666,6 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
             title="Execution Timeline"
           >
             <Activity size={14} />
-          </button>
-          <button
-            className={`pe-btn-icon ${showLogPanel ? 'active' : ''}`}
-            onClick={() => setShowLogPanel(v => !v)}
-            title="Pipeline Execution Log"
-          >
-            <FileText size={14} />
           </button>
           <button className="pe-btn-icon" onClick={handlePreRunValidate} title="Validate Pipeline" disabled={isNew || isExecuting}>
             <ShieldCheck size={14} />
@@ -914,13 +904,6 @@ export function PipelineEditor({ pipelineId, onNavigate }) {
         />
       )}
     </div>
-    <PipelineLogPanel
-      pipelineId={activePipelineId}
-      nodes={nodes}
-      isOpen={showLogPanel}
-      onClose={() => setShowLogPanel(false)}
-    />
-    </>
   );
 }
 

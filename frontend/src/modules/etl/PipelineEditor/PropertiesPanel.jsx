@@ -27,7 +27,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from "../services/etlService";
-import { catalogs } from "../../../shared/services/api";
 import DynamicForm from "../components/Form/DynamicForm";
 import './PropertiesPanel.css';
 
@@ -748,7 +747,6 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
   const [transforms, setTransforms] = useState([]);
   const [transformSchema, setTransformSchema] = useState(null);
   const [showIncrementalTooltip, setShowIncrementalTooltip] = useState(false);
-  const [dwCatalogs, setDwCatalogs] = useState([]);
   const statusRef = useRef(null);
 
   const { data: allVaultItems } = useQuery({
@@ -811,18 +809,9 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
         setUploadedFiles(files);
       } catch (err) { console.error('Failed to load files', err); }
     };
-    const fetchCatalogs = async () => {
-      if (node.type === 'load') {
-        try {
-          const res = await catalogs.list();
-          setDwCatalogs(res || []);
-        } catch (err) { console.error('Failed to load catalogs', err); }
-      }
-    };
     loadMetadata();
     fetchFiles();
-    fetchCatalogs();
-  }, [node.type, pipelineId, node.id]);
+  }, [node.type]);
 
   useEffect(() => {
     const fetchSchema = async () => {
@@ -1089,8 +1078,6 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
                     }}
                     uploadedFiles={uploadedFiles}
                     vaultCredentials={allVaultItems || []}
-                    nodeType={node.type}
-                    onFileUpload={api.uploadFile}
                     fieldActions={googleTargetKey ? {
                       [googleTargetKey]: {
                         label: 'Auto-load JSON',
@@ -1116,36 +1103,66 @@ export function PropertiesPanel({ node, onUpdateNode, onPreview, onFetchPreview,
       {/* ── Fixed Bottom Actions ── */}
       {node.type === 'load' && (
         <div className="prop-section" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
-          <label className="prop-label">Target Catalog</label>
+          <label className="prop-label">Output Format</label>
           <select
             className="ui-select"
-            value={config.catalog || ''}
+            value={config.output_format || 'database'}
             onChange={(e) => onUpdateNode(node.id, {
               ...node.data,
-              config: { ...config, catalog: e.target.value }
+              config: { ...config, output_format: e.target.value }
             })}
           >
-            <option value="">Select Catalog</option>
-            {dwCatalogs.map(c => (
-              <option key={c.id} value={c.name}>{c.name}</option>
-            ))}
+            <option value="database">Database Table</option>
+            <option value="datalake">Data Lake (Bronze Parquet)</option>
+            <option value="csv">CSV File</option>
+            <option value="json">JSON File</option>
+            <option value="parquet">Parquet File</option>
           </select>
           
-          <div style={{ marginTop: '8px' }}>
-            <label className="prop-label">Target Table Name</label>
-            <input
-              className="ui-input"
-              value={config.table_name || ''}
-              placeholder="e.g. clean_transactions"
-              onChange={(e) => onUpdateNode(node.id, {
-                ...node.data,
-                config: { ...config, table_name: e.target.value }
-              })}
-            />
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-              Table will be created in Bronze/Silver schema automatically.
-            </span>
-          </div>
+          {config.output_format && config.output_format !== 'database' && config.output_format !== 'datalake' && (
+            <div style={{ marginTop: '8px' }}>
+              <label className="prop-label">Output Filename (optional)</label>
+              <input
+                className="ui-input"
+                value={config.output_filename || ''}
+                placeholder="e.g. cleaned_data"
+                onChange={(e) => onUpdateNode(node.id, {
+                  ...node.data,
+                  config: { ...config, output_filename: e.target.value }
+                })}
+              />
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                File saved to Output Results in Files page
+              </span>
+            </div>
+          )}
+          {config.output_format === 'datalake' && (
+            <div style={{ marginTop: '8px' }}>
+              <label className="prop-label">Source Name</label>
+              <input
+                className="ui-input"
+                value={config.source_name || ''}
+                placeholder="e.g. mysql"
+                onChange={(e) => onUpdateNode(node.id, {
+                  ...node.data,
+                  config: { ...config, source_name: e.target.value }
+                })}
+              />
+              <label className="prop-label" style={{ marginTop: '8px', display: 'block' }}>Dataset Name</label>
+              <input
+                className="ui-input"
+                value={config.dataset_name || ''}
+                placeholder="e.g. orders"
+                onChange={(e) => onUpdateNode(node.id, {
+                  ...node.data,
+                  config: { ...config, dataset_name: e.target.value }
+                })}
+              />
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                Saved to Data Lake Bronze Layer
+              </span>
+            </div>
+          )}
         </div>
       )}
 

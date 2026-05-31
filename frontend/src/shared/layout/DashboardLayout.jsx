@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Navbar from '../navbar/Navbar';
 import Sidebar from '../sidebar/Sidebar';
 import { useTheme } from '../context/ThemeContext';
+import { CopilotDrawer } from '../components/Layout/CopilotDrawer';
 import '../../styles/dashboard-theme.css';
 
 const DashboardContent = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const { isDark } = useTheme();
+
+  // Listen for open-copilot custom event globally
+  useEffect(() => {
+    const handleOpenCopilot = () => setCopilotOpen(true);
+    window.addEventListener('open-copilot', handleOpenCopilot);
+    return () => window.removeEventListener('open-copilot', handleOpenCopilot);
+  }, []);
 
   return (
     <div
@@ -31,6 +40,12 @@ const DashboardContent = ({ children }) => {
           {children}
         </main>
       </div>
+
+      <CopilotDrawer 
+        isOpen={copilotOpen} 
+        onClose={() => setCopilotOpen(false)} 
+        theme={isDark ? 'dark' : 'light'} 
+      />
     </div>
   );
 };

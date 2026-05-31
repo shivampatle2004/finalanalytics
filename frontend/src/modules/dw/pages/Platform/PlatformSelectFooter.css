@@ -1,0 +1,245 @@
+/* ── Buttons ── */
+.ps-mod-footer {
+    margin-top: auto;
+    padding-top: 14px;
+}
+
+.ps-btn {
+    width: 100%;
+    height: 46px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.ps-btn svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.ps-btn--sec {
+    background: #f4f4f4;
+    color: #999;
+    cursor: not-allowed;
+    border: 1px solid #eee;
+}
+
+.ps-btn--pri {
+    background: #0f52ba;
+    color: #fff;
+    box-shadow: 0 5px 15px rgba(15, 82, 186, 0.25);
+}
+
+.ps-btn--pri:hover {
+    background: #922543;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(15, 82, 186, 0.35);
+}
+
+/* ── Dropdown Polish ── */
+.ps-user-menu {
+    position: absolute;
+    right: 0;
+    top: 58px;
+    width: 220px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.12);
+    border: 1px solid #eaebef;
+    padding: 10px;
+    display: none;
+    flex-direction: column;
+    z-index: 200;
+    animation: ps-menuOpen 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+.ps-user-menu.active {
+    display: flex;
+}
+
+@keyframes ps-menuOpen {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.ps-menu-header {
+    font-size: 10px;
+    font-weight: 800;
+    color: #bbb;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    letter-spacing: 1px;
+}
+
+.ps-menu-item {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #555;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.ps-menu-item:hover {
+    background: #f8f9fa;
+    color: #0f52ba;
+}
+
+.ps-menu-divider {
+    height: 1px;
+    background: #eaebef;
+    margin: 8px 0;
+}
+
+.ps-menu-item--signout {
+    color: #f43f5e;
+}
+
+.ps-menu-item--signout:hover {
+    background: #fff1f2;
+    color: #e11d48;
+}
+
+/* ── Workflow Bar V10 ── */
+.ps-workflow-v10 {
+    margin-top: 20px;
+    background: #fff;
+    border: 1.5px solid #eaebef;
+    border-radius: 18px;
+    padding: 18px 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.ps-wf-head h4 {
+    font-size: 14px;
+    font-weight: 900;
+    color: #111;
+    margin: 0;
+}
+
+.ps-wf-stats {
+    display: flex;
+    gap: 14px;
+    margin-top: 4px;
+}
+
+.ps-wf-stats span {
+    font-size: 10px;
+    font-weight: 800;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ps-wf-steps {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+.ps-wf-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ps-wf-num {
+    font-size: 10px;
+    font-weight: 900;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(15, 82, 186, 0.06);
+    color: #0f52ba;
+}
+
+.ps-wf-txt {
+    font-size: 12px;
+    color: #555;
+    max-width: 180px;
+    line-height: 1.3;
+}
+
+.ps-wf-txt strong {
+    color: #111;
+    display: block;
+}
+
+.ps-wf-arrow {
+    color: #ddd;
+    font-weight: 300;
+    font-size: 18px;
+}
+
+/* ── Footer V10 ── */
+.ps-footer-v10 {
+    margin-top: 18px;
+    padding-bottom: 24px;
+    display: flex;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.ps-foot-inner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 10px;
+    font-weight: 800;
+    color: #ccc;
+    letter-spacing: 1.2px;
+}
+
+@keyframes ps-fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Mobile ── */
+@media (max-width: 1024px) {
+    .ps-nav--prominent {
+        padding: 12px 30px;
+    }
+
+    .ps-content {
+        padding: 20px 30px;
+    }
+}
+
+@media (max-width: 900px) {
+    .ps-grid {
+        grid-template-columns: 1fr;
+        overflow-y: auto;
+        padding-bottom: 24px;
+    }
+
+    .ps-page {
+        overflow-y: auto;
+        height: auto;
+    }
+}

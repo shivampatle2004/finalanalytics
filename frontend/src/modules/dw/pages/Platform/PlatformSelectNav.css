@@ -1,0 +1,137 @@
+/* ── Prominent Nav ── */
+.ps-nav--prominent {
+    position: relative;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 60px;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px);
+    border-bottom: 2px solid #eaebef;
+    flex-shrink: 0;
+}
+
+.ps-logo-large {
+    height: 32px;
+    transition: transform 0.3s ease;
+}
+
+.ps-logo-large:hover {
+    transform: scale(1.05);
+}
+
+.ps-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    margin-left: 60px;
+    flex: 1;
+}
+
+.ps-nav-link {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #555;
+    text-decoration: none;
+    transition: all 0.25s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ps-nav-link:hover {
+    color: #0f52ba;
+}
+
+.ps-nav-link--highlight {
+    background: rgba(15, 82, 186, 0.06);
+    padding: 8px 16px;
+    border-radius: 100px;
+    color: #0f52ba;
+    border: 1px solid rgba(15, 82, 186, 0.1);
+}
+
+.ps-nav-link--highlight:hover {
+    background: rgba(15, 82, 186, 0.1);
+    transform: translateY(-1px);
+}
+
+.ps-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+.ps-nav-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #999;
+}
+
+.ps-nav-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
+}
+
+/* User Block */
+.ps-nav-user-container {
+    position: relative;
+}
+
+.ps-nav-user {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 16px;
+    border-radius: 100px;
+    background: #fff;
+    border: 1.5px solid #eaebef;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ps-nav-user:hover {
+    border-color: #0f52ba;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.06);
+}
+
+.ps-nav-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0f52ba, #6D28D9);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ps-nav-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.ps-nav-uname {
+    font-size: 12px;
+    font-weight: 800;
+    color: #1a1a1a;
+    margin-bottom: -2px;
+}
+
+.ps-nav-urole {
+    font-size: 9px;
+    font-weight: 700;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+

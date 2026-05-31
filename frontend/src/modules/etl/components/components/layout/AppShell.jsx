@@ -62,7 +62,7 @@ export function AppShell({ currentPage, onNavigate, children, onCommandPalette, 
   // Close mobile sidebar on navigation
   const handleNavigate = (id) => {
     if (id === 'docs') {
-      window.open('#docs', '_blank');
+      window.open('/docs', '_blank');
       return;
     }
     if (id === 'copilot') {

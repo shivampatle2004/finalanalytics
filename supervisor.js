@@ -1,0 +1,362 @@
+/**
+ * OneStopAnalytics Active Process Supervisor (High-Resilience & Structured Logs)
+ * ===================================================================
+ * This script orchestrates, monitors, and automatically restarts
+ * OneStopAnalytics microservices upon exit, crash, or freeze (hangs).
+ */
+
+const { spawn, exec } = require('child_process');
+const http = require('http');
+const path = require('path');
+
+// Colors and Styles
+const colors = {
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  bgRed: '\x1b[41m',
+  bgYellow: '\x1b[43m'
+};
+
+// Services Configuration
+const SERVICES = {
+  frontend: {
+    name: 'Frontend',
+    cwd: path.join(__dirname, 'frontend'),
+    command: 'npm',
+    args: ['run', 'dev'],
+    color: colors.cyan,
+    healthUrl: 'http://localhost:5173',
+    expectedStatus: 200,
+    process: null,
+    failCount: 0,
+    restarting: false
+  },
+  etl: {
+    name: 'ETL-Backend',
+    cwd: path.join(__dirname, 'ETL-backend'),
+    command: 'venv\\Scripts\\python.exe',
+    args: ['-m', 'uvicorn', 'main:app', '--reload', '--port', '8000', '--reload-dir', 'app'],
+    color: colors.green,
+    healthUrl: 'http://localhost:8000/etl/health',
+    expectedStatus: 200,
+    process: null,
+    failCount: 0,
+    restarting: false
+  },
+  dw: {
+    name: 'DW-Backend',
+    cwd: path.join(__dirname, 'dw-backend'),
+    command: 'venv\\Scripts\\python.exe',
+    args: ['-m', 'uvicorn', 'app.main:app', '--reload', '--port', '8004', '--reload-dir', 'app'],
+    color: colors.magenta,
+    healthUrl: 'http://localhost:8004/health',
+    expectedStatus: 200,
+    process: null,
+    failCount: 0,
+    restarting: false
+  },
+  analytics: {
+    name: 'Analytics-Backend',
+    cwd: path.join(__dirname, 'Analytics-backend'),
+    command: 'venv\\Scripts\\python.exe',
+    args: ['-m', 'uvicorn', 'main:app', '--reload', '--port', '8010', '--reload-dir', 'routers', '--reload-dir', 'connectors', '--reload-dir', 'services', '--reload-dir', 'utils'],
+    color: colors.yellow,
+    healthUrl: 'http://localhost:8010/analytics/health',
+    expectedStatus: 200,
+    process: null,
+    failCount: 0,
+    restarting: false
+  }
+};
+
+// Log formatting function (Generic & Space-Saving)
+function log(serviceName, message, color = colors.reset) {
+  console.log(`${color}${message}${colors.reset}`);
+}
+
+// Log Parser to keep the output extremely quiet, clean, and professional
+function parseAndFormatLogLine(serviceName, rawLine, serviceColor) {
+  const line = rawLine.trim();
+  if (!line) return;
+
+  // 1. Filter out background health ping requests and internal DB traffic logs to prevent log spam
+  if (
+    line.includes('/etl/health') || 
+    line.includes('/health') || 
+    line.includes('/analytics/health') ||
+    line.includes('/dw/catalog/') ||
+    line.includes('/dw/workspace/') ||
+    line.includes('/dw/volumes') ||
+    line.includes('/dw/jobs') ||
+    line.includes('/dw/sql-history/') ||
+    line.includes('GET /dw/')
+  ) {
+    return;
+  }
+
+  // 2. Filter out noisy standard build/watcher logs
+  if (
+    line.includes('[vite] (client) hmr update') || 
+    line.includes('[vite] (client) page reload') ||
+    line.includes('Will watch for changes') ||
+    line.includes('Started reloader process') ||
+    line.includes('Started server process') ||
+    line.includes('Waiting for application startup') ||
+    line.includes('SLA sweep') ||
+    line.includes('SLA rules') ||
+    line.includes('MongoDB ping successful') ||
+    line.includes('Retrieved 10 items') ||
+    line.includes('Loading .env from')
+  ) {
+    return;
+  }
+
+  // 3. Skip background MongoDB/Postgres debug heartbeats
+  if (line.includes('DEBUG') && (line.includes('database') || line.includes('config') || line.includes('service') || line.includes('async_jobs'))) {
+    return;
+  }
+
+  // 4. Important Errors, Criticals, and Tracebacks
+  if (
+    line.toUpperCase().includes('ERROR') || 
+    line.toUpperCase().includes('CRITICAL') || 
+    line.includes('Traceback') || 
+    line.includes('Exception:') || 
+    line.toUpperCase().includes('FAILED')
+  ) {
+    log(serviceName, `[ERROR] ${line}`, colors.red);
+    return;
+  }
+
+  // 5. Warnings
+  if (
+    line.toUpperCase().includes('WARNING') || 
+    line.toUpperCase().includes('WARN')
+  ) {
+    log(serviceName, `[WARNING] ${line}`, colors.yellow);
+    return;
+  }
+
+  // 6. Action/State Success Indicators
+  if (
+    line.toUpperCase().includes('SUCCESS') || 
+    line.toUpperCase().includes('ESTABLISHED') || 
+    line.includes('started.') ||
+    line.includes('complete')
+  ) {
+    log(serviceName, `[SUCCESS] ${line}`, colors.green);
+    return;
+  }
+
+  // 7. Clean server active/start ports info
+  if (line.includes('Uvicorn running on')) {
+    const urlMatch = line.match(/http:\/\/[\d\.]+:(\d+)/);
+    const port = urlMatch ? urlMatch[1] : '';
+    log(serviceName, `[INFO] API Server active on port ${port}`, colors.green);
+    return;
+  }
+  if (line.includes('Local:') && line.includes('http')) {
+    log(serviceName, `[INFO] Frontend Dev Server active at http://localhost:5173/`, colors.cyan);
+    return;
+  }
+
+  // 8. General INFO output logs (with standard info text simplified)
+  let displayLine = line;
+  if (line.startsWith('INFO:')) {
+    displayLine = line.replace(/^INFO:\s+/, '');
+  }
+
+  // Skip quiet background HTTP accesses to keep the log clean
+  if (displayLine.includes('GET ') || displayLine.includes('POST ') || displayLine.includes('PUT ') || displayLine.includes('DELETE ')) {
+    return;
+  }
+
+  // Log other meaningful messages
+  log(serviceName, `[INFO] ${displayLine}`, serviceColor);
+}
+
+// Spawn Service Process
+function startService(key) {
+  const service = SERVICES[key];
+  if (service.restarting) return;
+
+  log(service.name, `[INFO] Launching service ${service.name}...`, colors.bright + service.color);
+
+  // Spawn child process in shell to run on Windows correctly
+  service.process = spawn(service.command, service.args, {
+    cwd: service.cwd,
+    shell: true,
+    env: { ...process.env, FORCE_COLOR: 'true' }
+  });
+
+  log(service.name, `[SUCCESS] Process spawned for ${service.name} (PID ${service.process.pid})`, service.color);
+
+  let stdoutBuffer = '';
+  service.process.stdout.on('data', (data) => {
+    stdoutBuffer += data.toString();
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop();
+    lines.forEach(line => {
+      parseAndFormatLogLine(service.name, line, service.color);
+    });
+  });
+
+  let stderrBuffer = '';
+  service.process.stderr.on('data', (data) => {
+    stderrBuffer += data.toString();
+    const lines = stderrBuffer.split('\n');
+    stderrBuffer = lines.pop();
+    lines.forEach(line => {
+      parseAndFormatLogLine(service.name, line, service.color);
+    });
+  });
+
+  // Handle crash/exit
+  service.process.on('close', (code) => {
+    if (service.restarting) return;
+    log(service.name, `[ERROR] Process for ${service.name} exited unexpectedly with code ${code}`, colors.bright + colors.red);
+    restartService(key);
+  });
+
+  service.process.on('error', (err) => {
+    log(service.name, `[ERROR] Process error on ${service.name}: ${err.message}`, colors.bright + colors.red);
+  });
+}
+
+// Safe Process Tree Kill on Windows
+function killProcessTree(pid, callback) {
+  log('Supervisor', `[INFO] Terminating process tree for PID ${pid}...`, colors.bright + colors.red);
+  exec(`taskkill /F /T /PID ${pid}`, (err) => {
+    if (callback) callback();
+  });
+}
+
+// Clean Restart Logic
+function restartService(key) {
+  const service = SERVICES[key];
+  if (service.restarting) return;
+  service.restarting = true;
+  service.failCount = 0;
+
+  log(service.name, `[WARNING] Initiating clean restart for ${service.name}...`, colors.bright + colors.yellow);
+
+  const cleanStart = () => {
+    service.process = null;
+    service.restarting = false;
+    startService(key);
+  };
+
+  if (service.process && service.process.pid) {
+    killProcessTree(service.process.pid, cleanStart);
+  } else {
+    cleanStart();
+  }
+}
+
+// Health Check Logic
+function checkHealth(key) {
+  return new Promise((resolve) => {
+    const service = SERVICES[key];
+    if (service.restarting || !service.process) {
+      resolve('RESTARTING');
+      return;
+    }
+
+    const url = service.healthUrl;
+    const req = http.get(url, (res) => {
+      res.resume(); // CRITICAL: consume data to release standard HTTP socket pool!
+      if (res.statusCode === service.expectedStatus || res.statusCode === 302 || res.statusCode === 401 || res.statusCode === 404) {
+        service.failCount = 0;
+        resolve('OK');
+      } else {
+        handleHealthFailure(key, `Status code: ${res.statusCode}`);
+        resolve('ERROR');
+      }
+    });
+
+    req.on('error', (err) => {
+      handleHealthFailure(key, `Offline: ${err.message}`);
+      resolve('OFFLINE');
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      handleHealthFailure(key, 'Timed out');
+      resolve('TIMEOUT');
+    });
+
+    req.setTimeout(5000);
+  });
+}
+
+function handleHealthFailure(key, reason) {
+  const service = SERVICES[key];
+  if (service.restarting) return;
+
+  service.failCount++;
+  log('HealthGuard', `[WARNING] ${service.name} failed check [${service.failCount}/3]. Reason: ${reason}`, colors.yellow);
+
+  if (service.failCount >= 3) {
+    log('HealthGuard', `[CRITICAL] ${service.name} is offline. Restarting...`, colors.red);
+    restartService(key);
+  }
+}
+
+// ── Bootstrapping: Start all services on startup ──
+log('Supervisor', '[INFO] Initializing all microservices...', colors.bright + colors.blue);
+Object.keys(SERVICES).forEach(key => {
+  startService(key);
+});
+
+// Periodic Health Checker Matrix: Runs every 25 seconds (with a 15-second startup warm-up delay)
+setTimeout(() => {
+  setInterval(async () => {
+    const results = {};
+    let allOk = true;
+    for (const key of Object.keys(SERVICES)) {
+      const status = await checkHealth(key);
+      results[key] = status;
+      if (status !== 'OK') {
+        allOk = false;
+      }
+    }
+
+    // Only log status if some service has failed to prevent log spam
+    if (!allOk) {
+      const statusMatrix = Object.keys(SERVICES).map(key => {
+        const status = results[key];
+        const service = SERVICES[key];
+        return `${service.name}: ${status}`;
+      }).join(' | ');
+      log('HealthGuard', `[WARNING] Systems Status Matrix: ${statusMatrix}`, colors.yellow);
+    }
+  }, 25000);
+}, 15000); // 15s warm-up delay
+
+// Graceful supervisor shutdown
+process.on('SIGINT', () => {
+  log('Supervisor', '[INFO] Shutting down supervisor. Terminating child processes...', colors.bright + colors.red);
+  
+  const killPromises = Object.keys(SERVICES).map(key => {
+    return new Promise((resolve) => {
+      const service = SERVICES[key];
+      if (service.process && service.process.pid) {
+        killProcessTree(service.process.pid, resolve);
+      } else {
+        resolve();
+      }
+    });
+  });
+
+  Promise.all(killPromises).then(() => {
+    log('Supervisor', '[SUCCESS] All child processes terminated safely. Goodbye.', colors.green);
+    process.exit(0);
+  });
+});

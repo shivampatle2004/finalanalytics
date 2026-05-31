@@ -1,0 +1,70 @@
+/* ═══════════════════════════════════════════
+   QueryForge Platform Select — Refined V11
+   Prominent Nav | Detailed Docs | Clear Access
+   ═══════════════════════════════════════════ */
+
+.ps-page {
+    height: 100vh;
+    width: 100%;
+    background: #faf8f6;
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #1a1a1a;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+/* ── Background Blobs ── */
+.ps-bg-blobs {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+}
+
+.ps-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.12;
+    animation: ps-float 25s infinite alternate;
+}
+
+.ps-blob-1 {
+    width: 450px;
+    height: 450px;
+    background: #0f52ba;
+    top: -100px;
+    left: -100px;
+}
+
+.ps-blob-2 {
+    width: 380px;
+    height: 380px;
+    background: #6D28D9;
+    bottom: -50px;
+    right: -50px;
+    animation-delay: -5s;
+}
+
+.ps-blob-3 {
+    width: 320px;
+    height: 320px;
+    background: #0ea5e9;
+    top: 40%;
+    left: 60%;
+    animation-delay: -10s;
+}
+
+@keyframes ps-float {
+    0% {
+        transform: translate(0, 0) scale(1);
+    }
+
+    100% {
+        transform: translate(50px, 50px) scale(1.1);
+    }
+}
+

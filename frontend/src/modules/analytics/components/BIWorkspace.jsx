@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import * as Panels from 'react-resizable-panels';
+const Panel = Panels.Panel;
+const PanelGroup = Panels.PanelGroup;
+const PanelResizeHandle = Panels.PanelResizeHandle;
+
 import { 
   Layout, Database, Home, ChevronRight, ChevronLeft, 
   Plus, Download, Share2, MoreHorizontal, Settings, Filter, 
   Search, ChevronDown, Trash2, Copy, Trash, Maximize2, Minimize2, 
   FileText, BarChart3, Link2, Calendar, RefreshCw, X
 } from 'lucide-react';
+
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';

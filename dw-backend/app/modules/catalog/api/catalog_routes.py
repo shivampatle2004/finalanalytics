@@ -12,8 +12,7 @@ from app.core.database import get_db
 from app.modules.catalog.services.catalog_service import (
     get_all_tables, get_table_columns, preview_table,
     create_catalog, list_catalogs, create_schema, list_schemas,
-    upload_file_to_table, drop_table, resolve_physical_schema,
-    get_table_stats
+    upload_file_to_table, drop_table, resolve_physical_schema
 )
 
 class CatalogCreate(BaseModel):
@@ -79,15 +78,6 @@ def table_preview(table_name: str, schema: str = "public", limit: int = 10, db: 
     """Preview the first N rows of a table."""
     try:
         data = preview_table(db, table_name, schema, limit)
-        return data
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@router.get("/tables/{table_name}/stats")
-def table_stats(table_name: str, schema: str = "public", db: Session = Depends(get_db)):
-    """Fetch deep statistics for a table."""
-    try:
-        data = get_table_stats(db, table_name, schema)
         return data
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

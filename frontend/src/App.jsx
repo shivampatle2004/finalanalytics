@@ -48,6 +48,11 @@ import GlobalRunsPage from "./modules/dw/runs/GlobalRunsPage";
 import AnalyticsHub from "./modules/analytics/dashboard/AnalyticsHub";
 import AnalyticsDashboard from "./modules/analytics/pages/AnalyticsDashboard";
 
+// ── Common Shared Pages ──────────────────────────────────────────────────────
+import { Settings } from "./modules/etl/pages/Settings/Settings";
+import { ProfilePage } from "./modules/etl/pages/Profile/ProfilePage";
+import { DocumentationPage } from "./modules/etl/pages/Documentation/DocumentationPage";
+
 function App() {
   return (
     <BrowserRouter>
@@ -119,6 +124,20 @@ function App() {
                     element={<DashboardLayout><AnalyticsDashboard /></DashboardLayout>} />
                   <Route path="/analytics/workspace/:fileId"
                     element={<DashboardLayout><AnalyticsDashboard /></DashboardLayout>} />
+
+                  {/* ── Common Shared Pages ───────────────────────── */}
+                  <Route path="/settings"
+                    element={<DashboardLayout><Settings /></DashboardLayout>} />
+                  <Route path="/profile"
+                    element={<DashboardLayout><ProfilePage /></DashboardLayout>} />
+                  <Route path="/docs"
+                    element={<DocumentationPage />} />
+                  <Route path="/docs/:id"
+                    element={<DocumentationPage />} />
+                  <Route path="/etl/docs"
+                    element={<DocumentationPage />} />
+                  <Route path="/etl/docs/:id"
+                    element={<DocumentationPage />} />
 
                   {/* ── Catch-all ─────────────────────────────────── */}
                   <Route path="*" element={<Navigate to="/dashboard" replace />} />

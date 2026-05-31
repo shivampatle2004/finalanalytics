@@ -1,0 +1,172 @@
+/* ═══════════════════════════════════════════
+   Arithwise Dashboard Theme
+   Unified design system — Light + Dark modes
+   Font: Space Grotesk · Sapphire Blue · Slate
+   ═══════════════════════════════════════════ */
+
+/* ── LIGHT THEME (default) — Clean Slate & White ── */
+:root,
+[data-theme="light"] {
+  /* ── Backgrounds ── */
+  --df-bg: #f4f7f9;
+  --df-bg-secondary: #f4f7f9;
+  --df-bg-primary: #f1f5f9;
+  --df-surface: #ffffff;
+  --df-panel: #ffffff;
+
+  /* ── Borders ── */
+  --df-border: rgba(15, 23, 42, 0.12);
+  --df-border-light: rgba(15, 23, 42, 0.07);
+
+  /* ── Typography ── */
+  --df-text: #1e293b;
+  --df-text-soft: #475569;
+  --df-text-muted: #64748b;
+  --df-strong: #282f3e;
+
+  /* ── Accent — Sapphire Blue ── */
+  --df-accent: #0f52ba;
+  --df-accent-alt: #0a3d8c;
+  --df-accent-soft: #eff6ff;
+  --df-accent-medium: rgba(15, 82, 186, 0.08);
+  --df-icon-accent: #0f52ba;
+  --df-text-accent: #0f52ba;
+  --df-gradient: #0f52ba;
+
+  /* ── Semantic ── */
+  --df-success: #10b981;
+  --df-success-soft: rgba(16, 185, 129, 0.08);
+  --df-info: #0f52ba;
+  --df-info-soft: rgba(15, 82, 186, 0.08);
+  --df-danger: #ef4444;
+  --df-danger-soft: rgba(239, 68, 68, 0.08);
+
+  /* ── Navbar / Sidebar ── */
+  --df-nav-bg: #ffffff;
+  --df-sidebar-bg: #ffffff;
+  --df-sidebar-hover: rgba(15, 82, 186, 0.05);
+  --df-sidebar-active: rgba(15, 82, 186, 0.08);
+
+  /* ── Inputs ── */
+  --df-input-bg: #ffffff;
+  --df-input-border: rgba(15, 23, 42, 0.12);
+
+  /* ── Cards ── */
+  --df-card-bg: #ffffff;
+  --df-card-border: rgba(15, 23, 42, 0.08);
+
+  /* ── Code ── */
+  --df-code-bg: #f8fafc;
+  --df-code-border: rgba(15, 23, 42, 0.08);
+
+  /* ── Table ── */
+  --df-table-header-bg: #f8fafc;
+  --df-table-hover: rgba(15, 82, 186, 0.04);
+  --df-table-border: rgba(15, 23, 42, 0.06);
+}
+
+/* ── DARK THEME — Professional Slate ── */
+[data-theme="dark"] {
+  --df-bg: #0f172a;
+  --df-bg-secondary: #0f172a;
+  --df-bg-primary: #1e293b;
+  --df-surface: #1e293b --df-panel: #1e293b;
+  --df-border: rgba(255, 255, 255, 0.10);
+  --df-border-light: rgba(255, 255, 255, 0.06);
+
+  /* ── Text ── */
+  --df-text: #f8fafc;
+  --df-text-soft: #e2e8f0;
+  --df-text-muted: #94a3b8;
+  --df-strong: #f8fafc;
+
+  /* ── Accent — Bright Blue ── */
+  --df-accent: #3b82f6;
+  --df-accent-alt: #60a5fa;
+  --df-accent-soft: rgba(59, 130, 246, 0.12);
+  --df-accent-medium: rgba(59, 130, 246, 0.20);
+  --df-icon-accent: #60a5fa;
+  --df-text-accent: #60a5fa;
+  --df-gradient: #3b82f6;
+
+  /* ── Semantic ── */
+  --df-success: #34d399;
+  --df-success-soft: rgba(52, 211, 153, 0.12);
+  --df-info: #60a5fa;
+  --df-info-soft: rgba(96, 165, 250, 0.12);
+  --df-danger: #fb7185;
+  --df-danger-soft: rgba(251, 113, 133, 0.12);
+
+  /* ── Sidebar / Nav ── */
+  --df-nav-bg: #0f172a;
+  --df-sidebar-bg: #0f172a;
+  --df-sidebar-hover: rgba(59, 130, 246, 0.12);
+  --df-sidebar-active: rgba(59, 130, 246, 0.20);
+
+  /* ── Inputs ── */
+  --df-input-bg: #1e293b;
+  --df-input-border: rgba(255, 255, 255, 0.12);
+
+  /* ── Cards ── */
+  --df-card-bg: #1e293b;
+  --df-card-border: rgba(255, 255, 255, 0.08);
+
+  /* ── Code ── */
+  --df-code-bg: #0f172a;
+  --df-code-border: rgba(255, 255, 255, 0.08);
+
+  /* ── Table ── */
+  --df-table-header-bg: #1e293b;
+  --df-table-hover: rgba(59, 130, 246, 0.06);
+  --df-table-border: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Shape & Motion ── */
+:root {
+  --df-radius-sm: 6px;
+  --df-radius-md: 8px;
+  --df-radius-lg: 12px;
+  --df-radius-xl: 16px;
+  --df-radius-full: 9999px;
+  --df-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --df-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --df-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --df-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+  --df-shadow-glow: 0 4px 20px rgba(15, 82, 186, 0.15);
+  --df-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --df-duration: 0.3s;
+  --df-duration-slow: 0.5s;
+
+  /* ── Layout ── */
+  --df-navbar-height: 64px;
+  --df-sidebar-width-collapsed: 192px;
+  --df-sidebar-width-expanded: 192px;
+  --df-content-padding: 32px;
+}
+
+/* ── Custom Professional Scrollbar ── */
+.df-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.df-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.df-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(15, 82, 186, 0.12);
+  border-radius: 2px;
+}
+
+.df-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 82, 186, 0.3);
+}
+
+[data-theme="dark"] .df-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+[data-theme="dark"] .df-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

@@ -102,8 +102,8 @@ export function CopilotDrawer({ isOpen, onClose, theme }) {
     setIsTyping(true);
 
     // Read BYOK configuration from user's secure local storage
-    const provider = localStorage.getItem('arithflow_copilot_provider') || 'groq';
-    const apiKey = localStorage.getItem('arithflow_copilot_key') || '';
+    const provider = localStorage.getItem('onestopanalytics_copilot_provider') || localStorage.getItem('arithflow_copilot_provider') || 'groq';
+    const apiKey = localStorage.getItem('onestopanalytics_copilot_key') || localStorage.getItem('arithflow_copilot_key') || '';
 
     try {
       const res = await fetch('/etl/api/v1/copilot/chat', {
@@ -129,7 +129,10 @@ export function CopilotDrawer({ isOpen, onClose, theme }) {
     } catch (err) {
       setMessages([
         ...currentMessages, 
-        { role: 'ai', content: "⚠️ Could not connect to the ArithFlow LLM backend. Please ensure GROQ_API_KEY is properly set in the `.env` file." }
+        { 
+          role: 'ai', 
+          content: `### 🤖 Connection Interrupted\n\nI'm currently unable to reach my AI service. This usually means the platform's API usage limit has been reached, or the connection key is missing.\n\n**How to get back up and running:**\n1. **Add Your Own Key:** Go to the **System Settings** page and enter your custom API key under the AI Copilot section.\n2. **Check Server Configuration:** If you're hosting this system, make sure the API key is active and correctly configured in your server settings.\n\n*Need help? Please consult the platform's documentation or reach out to your system administrator.*`
+        }
       ]);
     } finally {
       setIsTyping(false);

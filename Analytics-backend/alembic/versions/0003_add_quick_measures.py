@@ -6,6 +6,7 @@ Create Date: 2026-05-24
 
 """
 from alembic import op
+import sqlalchemy as sa
 
 revision = '0003_add_quick_measures'
 down_revision = '0002_worksheet_arch'
@@ -33,8 +34,8 @@ def upgrade() -> None:
             validation_errors JSON,
             cached_result FLOAT,
             cached_at TIMESTAMP WITH TIME ZONE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            updated_at TIMESTAMP WITH TIME ZONE,
             PRIMARY KEY (id)
         )
     """)

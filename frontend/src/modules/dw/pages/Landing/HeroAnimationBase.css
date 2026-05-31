@@ -1,0 +1,210 @@
+/* ═══════════════════════════════════
+   Hero Animation — VIBRANT DATA WAREHOUSE
+   ═══════════════════════════════════ */
+
+.ha-scene {
+  position: relative;
+  width: 110%; /* Slightly larger for better "overflow" look */
+  height: 110%;
+  min-height: 480px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  animation: haIn 1.2s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes haIn {
+  from { transform: scale(0.88) translateY(18px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* ───── BACKGROUND GLOWS ───── */
+.ha-bg-glow { position: absolute; border-radius: 50%; pointer-events: none; z-index: 0; }
+
+.ha-glow-1 {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(15, 82, 186,0.22) 0%, transparent 65%);
+  top: 10%; left: 20%;
+  animation: haGP 4s infinite alternate ease-in-out;
+}
+.ha-glow-2 {
+  width: 350px; height: 350px;
+  background: radial-gradient(circle, rgba(109, 40, 217,0.16) 0%, transparent 65%);
+  bottom: 10%; right: 15%;
+  animation: haGP 6s infinite alternate-reverse ease-in-out;
+}
+.ha-glow-3 {
+  width: 250px; height: 250px;
+  background: radial-gradient(circle, rgba(226, 121, 154,0.2) 0%, transparent 65%);
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  animation: haGP 3s infinite alternate ease-in-out 0.5s;
+}
+
+@keyframes haGP {
+  from { opacity: 0.5; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1.35); }
+}
+
+/* ───── CONNECTIONS ───── */
+.ha-connections {
+  position: absolute; width: 100%; height: 100%;
+  top: 0; left: 0; z-index: 1; pointer-events: none;
+}
+
+.ha-line {
+  stroke: url(#lg1); stroke-width: 2;
+  stroke-dasharray: 500; stroke-dashoffset: 500;
+  animation: haDL 1.5s ease-out forwards;
+}
+.ha-l1 { animation-delay: 0.2s; }
+.ha-l2 { animation-delay: 0.35s; }
+.ha-l3 { animation-delay: 0.5s; stroke: url(#lg2); }
+.ha-l4 { animation-delay: 0.65s; stroke: url(#lg2); }
+.ha-l5 { animation-delay: 0.8s; }
+.ha-l6 { animation-delay: 0.95s; }
+
+.ha-l-net {
+  stroke: rgba(15, 82, 186,0.12); stroke-width: 1;
+  stroke-dasharray: 700; stroke-dashoffset: 700;
+  animation: haDL 2.5s ease-out 1.2s forwards;
+}
+
+@keyframes haDL { to { stroke-dashoffset: 0; } }
+
+/* ───── ORBITING RINGS ───── */
+.ha-orbit {
+  position: absolute; width: 340px; height: 340px;
+  border: 1.5px dashed rgba(15, 82, 186,0.2);
+  border-radius: 50%; z-index: 4;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  animation: haOS 18s linear infinite;
+}
+.ha-orbit-2 {
+  width: 400px; height: 400px;
+  border-color: rgba(109, 40, 217,0.1);
+  animation: haOSR 25s linear infinite;
+}
+
+@keyframes haOS { from { transform: translate(-50%,-50%) rotate(0); } to { transform: translate(-50%,-50%) rotate(360deg); } }
+@keyframes haOSR { from { transform: translate(-50%,-50%) rotate(360deg); } to { transform: translate(-50%,-50%) rotate(0); } }
+
+.ha-orbit-dot {
+  position: absolute; width: 8px; height: 8px; border-radius: 50%;
+  background: #0f52ba;
+  box-shadow: 0 0 14px rgba(15, 82, 186,0.7), 0 0 28px rgba(15, 82, 186,0.3);
+  top: -4px; left: 50%;
+}
+.ha-od2 { top: auto; bottom: -4px; background: #6D28D9; box-shadow: 0 0 14px rgba(109, 40, 217,0.7); }
+.ha-od3 { top: 50%; left: auto; right: -4px; background: #E2799A; box-shadow: 0 0 14px rgba(226, 121, 154,0.7); }
+
+/* ───── LAPTOP ───── */
+.ha-laptop {
+  position: relative; z-index: 10;
+  animation: haLF 5s infinite alternate ease-in-out;
+}
+@keyframes haLF { 0% { transform: translateY(0); } 100% { transform: translateY(-10px); } }
+
+.ha-laptop-glow {
+  position: absolute; top: 50%; left: 50%;
+  width: 300px; height: 220px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(ellipse, rgba(15, 82, 186,0.2) 0%, rgba(109, 40, 217,0.08) 50%, transparent 70%);
+  pointer-events: none; z-index: -1;
+  animation: haSG 2.5s infinite alternate ease-in-out;
+}
+@keyframes haSG { from { opacity: 0.6; transform: translate(-50%,-50%) scale(1); } to { opacity: 1; transform: translate(-50%,-50%) scale(1.25); } }
+
+.ha-screen {
+  width: 280px;
+  background: linear-gradient(145deg, #1a1a2e, #16213e, #0f3460);
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  box-shadow:
+    0 30px 80px rgba(0,0,0,0.2),
+    0 0 60px rgba(15, 82, 186,0.1),
+    0 0 120px rgba(15, 82, 186,0.04),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.ha-screen-hdr {
+  display: flex; align-items: center; gap: 5px;
+  padding: 7px 12px;
+  background: rgba(0,0,0,0.35);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.ha-d { width: 7px; height: 7px; border-radius: 50%; }
+.ha-dr { background: #ff5f57; box-shadow: 0 0 6px rgba(255,95,87,0.5); }
+.ha-dy { background: #febc2e; box-shadow: 0 0 6px rgba(254,188,46,0.5); }
+.ha-dg { background: #28c840; box-shadow: 0 0 6px rgba(40,200,64,0.5); }
+
+.ha-stitle {
+  margin-left: auto; font-size: 0.55rem;
+  color: rgba(255,255,255,0.45);
+  font-weight: 600; letter-spacing: 0.5px;
+  font-family: 'SF Mono','Fira Code',monospace;
+}
+
+.ha-code {
+  padding: 10px 12px;
+  font-family: 'SF Mono','Fira Code','Consolas',monospace;
+  font-size: 0.6rem; line-height: 1.85;
+}
+
+.ha-cl {
+  opacity: 0; transform: translateX(-12px);
+  white-space: nowrap; display: flex; gap: 6px;
+}
+.ha-ln { color: rgba(255,255,255,0.12); min-width: 12px; text-align: right; font-size: 0.55rem; user-select: none; }
+
+.ha-ca1 { animation: haCT 0.35s 0.5s ease-out forwards; }
+.ha-ca2 { animation: haCT 0.35s 0.85s ease-out forwards; }
+.ha-ca3 { animation: haCT 0.35s 1.2s ease-out forwards; }
+.ha-ca4 { animation: haCT 0.35s 1.55s ease-out forwards; }
+.ha-ca5 { animation: haCT 0.35s 1.9s ease-out forwards; }
+.ha-ca6 { animation: haCT 0.35s 2.4s ease-out forwards; }
+
+@keyframes haCT { to { opacity: 1; transform: translateX(0); } }
+
+.ha-kw { color: #0f52ba; font-weight: 700; text-shadow: 0 0 10px rgba(15, 82, 186,0.4); }
+.ha-col { color: #8be9fd; }
+.ha-tbl { color: #50fa7b; text-shadow: 0 0 8px rgba(80,250,123,0.25); }
+.ha-str { color: #f1fa8c; text-shadow: 0 0 6px rgba(241,250,140,0.2); }
+.ha-num { color: #ff79c6; text-shadow: 0 0 8px rgba(255,121,198,0.3); }
+
+.ha-result {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 5px; padding: 4px 8px;
+  background: rgba(15, 82, 186,0.12);
+  border-radius: 5px; border: 1px solid rgba(15, 82, 186,0.2);
+  font-size: 0.55rem; color: #0f52ba; font-weight: 700;
+  opacity: 0; transform: translateX(-12px);
+}
+.ha-ri { font-size: 0.65rem; }
+
+.ha-cursor {
+  width: 7px; height: 13px; background: #0f52ba;
+  margin: 3px 0 6px 24px; border-radius: 1px;
+  animation: haB 0.7s infinite;
+  box-shadow: 0 0 10px rgba(15, 82, 186,0.6);
+}
+@keyframes haB { 0%,100%{opacity:1}50%{opacity:0} }
+
+.ha-base {
+  width: 320px; height: 9px;
+  background: linear-gradient(180deg, #ddd, #c0c0c0);
+  border-radius: 0 0 6px 6px;
+  margin: 0 auto; transform: translateX(-20px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.07);
+  position: relative;
+}
+.ha-base::after {
+  content: ''; position: absolute; bottom: -3px; left: 50%;
+  transform: translateX(-50%); width: 55px; height: 3px;
+  background: #b8b8b8; border-radius: 0 0 4px 4px;
+}
+
+/* ───── MINI DASHBOARD ───── */
