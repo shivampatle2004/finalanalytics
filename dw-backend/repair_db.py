@@ -1,10 +1,18 @@
-import asyncio
+import os
+from pathlib import Path
 from pymongo import MongoClient
-import sys
+from dotenv import load_dotenv
+
+# Load .env from the dw-backend directory
+load_dotenv(Path(__file__).parent / ".env")
+
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise EnvironmentError("MONGO_URI is not set in the .env file. Cannot connect to MongoDB.")
 
 def run():
     try:
-        client = MongoClient('mongodb+srv://atharva7115:r0gXXuBwXMFGphXj@cluster0.bw7ttuf.mongodb.net/?appName=Cluster0')
+        client = MongoClient(MONGO_URI)
         db = client['workspace_db']
         coll = db['workspace_items']
         
