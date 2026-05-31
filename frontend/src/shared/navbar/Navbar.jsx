@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { FiSun, FiMoon } from 'react-icons/fi';
 import { useTheme } from '../context/ThemeContext';
 import logo from '../../assets/logo.png';
-import logo1 from '../../assets/logo1.png';
+import logoDark from '../../assets/logo transparent.png';
 /* ─── Inline SVG Icons for Navbar ─── */
 const SearchIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -157,10 +157,9 @@ const Navbar = () => {
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/')}>
           <img
-            src={isDark ? logo1 : logo}
+            src={isDark ? logoDark : logo}
             alt="Arithwise"
-            className="h-8 md:h-[36px] object-contain transition-transform hover:scale-105"
-            style={{ filter: isDark ? 'brightness(2.2) contrast(1.1) drop-shadow(0 1px 3px rgba(0,0,0,0.5))' : 'none' }}
+            className="h-10 md:h-[36px] object-contain transition-transform hover:scale-105"
           />
         </div>
         <div className="h-5 w-[1px] hidden md:block" style={{ backgroundColor: 'var(--df-border)' }}></div>

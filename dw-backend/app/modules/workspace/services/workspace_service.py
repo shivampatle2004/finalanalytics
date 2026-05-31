@@ -1,11 +1,12 @@
+from bson import ObjectId
 from app.core.database import get_workspace_collection
 from app.common.utils.helper import serialize_item
-from bson import ObjectId
+from typing import Any
 
 
 # CREATE
 async def create_item(data):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     result = await coll.insert_one(data)
     print(f"DEBUG [service]: [SUCCESS] Inserted document with _id: {result.inserted_id}")
     new_item = await coll.find_one({"_id": result.inserted_id})
@@ -18,7 +19,7 @@ async def create_item(data):
 
 # GET ALL (global)
 async def get_all_items():
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     items = []
     async for item in coll.find():
         items.append(serialize_item(item))
@@ -28,7 +29,7 @@ async def get_all_items():
 
 # GET ALL NOTEBOOKS (for Jobs dropdown)
 async def get_all_notebooks():
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     query = {"type": "notebook", "isDeleted": False}
     notebooks = []
     async for item in coll.find(query):
@@ -38,7 +39,7 @@ async def get_all_notebooks():
 
 # GET SINGLE NOTEBOOK BY ID
 async def get_notebook_by_id(item_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     try:
         item = await coll.find_one({"_id": ObjectId(item_id)})
         return serialize_item(item) if item else None
@@ -48,7 +49,7 @@ async def get_notebook_by_id(item_id):
 
 # GET ITEMS BY FOLDER
 async def get_items_by_parent(parent_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     query = {"parentId": parent_id, "isDeleted": False}
     items = []
     async for item in coll.find(query):
@@ -58,7 +59,7 @@ async def get_items_by_parent(parent_id):
 
 # UPDATE
 async def update_item(item_id, data):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     await coll.update_one(
         {"_id": ObjectId(item_id)},
         {"$set": data}
@@ -69,7 +70,7 @@ async def update_item(item_id, data):
 
 # SOFT DELETE
 async def soft_delete(item_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     await coll.update_one(
         {"_id": ObjectId(item_id)},
         {"$set": {"isDeleted": True}}
@@ -78,7 +79,7 @@ async def soft_delete(item_id):
 
 # RESTORE
 async def restore_item(item_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     await coll.update_one(
         {"_id": ObjectId(item_id)},
         {"$set": {"isDeleted": False}}
@@ -87,7 +88,7 @@ async def restore_item(item_id):
 
 # PERMANENT DELETE
 async def permanent_delete(item_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     await coll.delete_one(
         {"_id": ObjectId(item_id)}
     )
@@ -95,7 +96,7 @@ async def permanent_delete(item_id):
 
 # FAVORITE TOGGLE
 async def toggle_favorite(item_id, value):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     await coll.update_one(
         {"_id": ObjectId(item_id)},
         {"$set": {"isFavorite": value}}
@@ -104,7 +105,7 @@ async def toggle_favorite(item_id, value):
 
 # CLONE
 async def clone_item(item_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     item = await coll.find_one({"_id": ObjectId(item_id)})
     if not item:
         raise Exception("Item not found")
@@ -124,7 +125,7 @@ async def clone_item(item_id):
 
 # MOVE
 async def move_item(item_id, new_parent_id):
-    coll = get_workspace_collection()
+    coll: Any = get_workspace_collection()
     await coll.update_one(
         {"_id": ObjectId(item_id)},
         {"$set": {"parentId": new_parent_id}}

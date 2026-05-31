@@ -8,19 +8,24 @@ import SqlEditor from './SqlEditor';
 import ResultsPanel from './ResultsPanel';
 import SchemaBrowser from './SchemaBrowser';
 import SaveQueryModal from './SaveQueryModal';
+import ShareModal from './ShareModal';
 import WelcomeScreen from './WelcomeScreen';
 import CatalogSelector from '../catalog/CatalogSelector';
-import { createItem } from '../services/workspaceService';
+import { createItem, updateItem } from '../services/workspaceService';
+import { useWorkspace } from '../context/WorkspaceContext';
+import { useToast } from '../../../shared/context/ToastContext';
 import { FiDatabase, FiCommand, FiSave, FiSidebar, FiShare2, FiMoreVertical, FiCheckCircle, FiMaximize2, FiMinimize2, FiGrid, FiPlay, FiSend, FiTrash2, FiDownload, FiClock, FiGitCommit, FiCopy, FiEdit2, FiMove, FiRefreshCcw, FiLink, FiTable, FiPlusSquare, FiPieChart, FiBell } from 'react-icons/fi';
 
 const SqlLab = () => {
-  const { tabs, activeTabId, setActiveTabId, addTab, removeTab, updateTabContent, updateTabResults, renameTab } = useQueryTabs();
+  const { tabs, activeTabId, setActiveTabId, addTab, removeTab, updateTabContent, updateTabResults, renameTab, setTabWorkspaceId } = useQueryTabs();
+  const { fetchItems, addItem, handleSaveContent, items, loading, handleRename: wsRename, handleDelete: wsDelete } = useWorkspace();
+  const toast = useToast();
   const { executeQuery, saveQuery, sharedQuery, setSharedQuery, catalogs, savedQueries, queryHistory } = useData();
   const { addJob } = useJobs();
   const navigate = useNavigate();
   const [saveMsg, setSaveMsg] = useState('');
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   const defaultCat = catalogs && Object.keys(catalogs)[0] ? Object.keys(catalogs)[0] : 'workspace';
   const defaultSch = catalogs && catalogs[defaultCat] ? Object.keys(catalogs[defaultCat])[0] : 'default';
@@ -35,6 +40,8 @@ const SqlLab = () => {
   }, [catalogs, selectedContext.catalog]);
 
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [editorHeightPercent, setEditorHeightPercent] = useState(50);
@@ -208,56 +215,87 @@ const SqlLab = () => {
   };
 
   const handleTablePreview = async (tableName) => { const sql = `SELECT * \nFROM ${tableName}\nLIMIT 10`; const newId = addTab(sql); if (newId) runQueryOnTab(newId, sql); };
-  const handleSave = () => { if (!activeTab?.content) return; setIsSaveModalOpen(true); };
-  const onConfirmSave = async (name, description) => {
+  
+  const handleSave = async () => {
+    if (!activeTab?.content) return;
+    if (activeTab.workspaceItemId) {
+      try {
+        await handleSaveContent(activeTab.workspaceItemId, { content: activeTab.content, name: activeTab.name });
+        setSaveMsg('Saved!');
+        setTimeout(() => setSaveMsg(''), 2000);
+      } catch (err) {
+        console.error('[SqlLab] Direct save failed:', err);
+      }
+    } else {
+      setIsSaveModalOpen(true);
+    }
+  };
+
+  const onConfirmSave = async (name) => {
     const queryName = name || `Query ${Date.now()}`;
-    // Save to saved queries list (PostgreSQL via dw-backend)
-    saveQuery(queryName, activeTab.content, description);
-    // Also save to workspace (MongoDB) so it appears in the Workspace file browser
+    renameTab(activeTabId, queryName);
     try {
-      await createItem({
+      const created = await createItem({
         name: queryName,
         type: 'sql',
         content: activeTab.content,
-        description: description || '',
         parentId: null,
         isFavorite: false,
         isDeleted: false,
         isShared: false,
         createdAt: new Date().toISOString(),
       });
+      // Instantly push into workspace sidebar — no reload needed
+      addItem(created);
+      setTabWorkspaceId(activeTabId, created.id);
     } catch (err) {
       console.error('[SqlLab] Failed to save query to workspace:', err);
     }
-    renameTab(activeTabId, queryName);
     setSaveMsg('Saved!');
     setTimeout(() => setSaveMsg(''), 2000);
   };
-  const handleShare = () => { if (!activeTab?.content) return; navigator.clipboard.writeText(activeTab.content); setSaveMsg('Copied to clipboard!'); setTimeout(() => setSaveMsg(''), 2000); };
+
+  const autoSaveTimerRef = useRef(null);
+  useEffect(() => {
+    if (!activeTab?.workspaceItemId || activeTab.workspaceItemId === 'undefined' || !activeTab?.content) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await handleSaveContent(activeTab.workspaceItemId, { content: activeTab.content, name: activeTab.name });
+        setSaveMsg('Auto-saved');
+        setTimeout(() => setSaveMsg(''), 1500);
+      } catch (err) {
+        console.error('[SqlLab] Auto-save failed:', err);
+      }
+    }, 2000);
+    return () => clearTimeout(autoSaveTimerRef.current);
+  }, [activeTab?.content, activeTab?.workspaceItemId, handleSaveContent, activeTab?.name]);
+
+  const handleShare = () => { setIsShareModalOpen(true); };
   const handleLoadQuery = (name, content) => { updateTabContent(activeTabId, content); renameTab(activeTabId, name); setSaveMsg('Query loaded!'); setTimeout(() => setSaveMsg(''), 1500); };
 
-  // Handle creation from modal
   const handleCreateNew = (type) => {
-    if (type === 'sql') {
-      addTab('', 'sql');
-    } else if (type === 'notebook') {
-      addTab('', 'notebook');
-    } else if (type === 'alert') {
-      addTab('', 'alert');
-    }
+    if (type === 'sql') addTab('', 'sql');
+    else if (type === 'notebook') addTab('', 'notebook');
+    else if (type === 'alert') addTab('', 'alert');
+    else addTab('', 'sql');
   };
 
-  // Keyboard shortcut for Cmd+K
+  // Watch for deleted items in the workspace and close their tabs
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsCreateModalOpen(true);
+    if (loading || !items) return;
+
+    tabs.forEach(tab => {
+      if (tab.workspaceItemId && tab.workspaceItemId !== 'undefined') {
+        const item = items.find(i => i.id === tab.workspaceItemId);
+        if (!item || item.isDeleted) {
+          removeTab({ stopPropagation: () => {} }, tab.id);
+          toast.info(`Notebook "${tab.name}" was deleted from workspace and closed.`);
+        }
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, loading]);
 
   const handleFormat = () => {
     if (!activeTab?.content) return;
@@ -279,155 +317,191 @@ const SqlLab = () => {
 
         <div className="flex-1 flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--df-bg-secondary)' }}>
           <div className="px-4" style={{ backgroundColor: 'var(--df-surface)', borderBottom: '1px solid var(--df-border)' }}>
-            <QueryTabs 
-              tabs={tabs} 
-              activeTabId={activeTabId} 
-              onTabChange={setActiveTabId} 
-              onTabAdd={() => addTab()} 
-              onTabClose={removeTab} 
+            <QueryTabs
+              tabs={tabs}
+              activeTabId={activeTabId}
+              onTabChange={setActiveTabId}
+              onTabAdd={() => addTab()}
+              onTabClose={removeTab}
               onTabRename={renameTab}
-              isCreateModalOpen={isCreateModalOpen}
-              onOpenCreateModal={() => setIsCreateModalOpen(true)}
-              onCloseCreateModal={() => setIsCreateModalOpen(false)}
-              onCreateNew={handleCreateNew}
             />
           </div>
 
           {/* Toolbar — below tabs, above editor — only shown when a tab is active */}
           {activeTab && (
-          <div className="flex items-center justify-between px-3 py-1.5 z-[100] relative" style={{ borderBottom: '1px solid var(--df-border)', backgroundColor: 'var(--df-surface)' }}>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className="p-1.5 rounded-lg transition-all hover:bg-[var(--df-bg-primary)]"
-                style={{ color: isSidebarOpen ? 'var(--df-icon-accent)' : 'var(--df-text-soft)' }}
-              >
-                <FiSidebar size={16} />
-              </button>
-
-              <div className="h-5 w-px bg-[var(--df-border)] opacity-30"></div>
-
-              {/* Run Button — single icon, smart execution */}
-              <button
-                onClick={handleExecute}
-                className="flex items-center justify-center px-3.5 py-1.5 rounded-lg bg-[var(--df-accent)] text-white shadow-sm hover:brightness-110 active:scale-95 transition-all"
-                title="Run Query (selected text or full query)"
-              >
-                <FiPlay size={14} className="fill-current" />
-              </button>
-
-              {/* Download — only visible when results exist */}
-              {activeTab?.results?.results?.columns && (
+            <div className="flex items-center justify-between px-3 py-1.5 z-[100] relative" style={{ borderBottom: '1px solid var(--df-border)', backgroundColor: 'var(--df-surface)' }}>
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={handleDownloadResults}
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                   className="p-1.5 rounded-lg transition-all hover:bg-[var(--df-bg-primary)]"
-                  style={{ color: 'var(--df-text-soft)' }}
-                  title="Download Results as CSV"
+                  style={{ color: isSidebarOpen ? 'var(--df-icon-accent)' : 'var(--df-text-soft)' }}
                 >
-                  <FiDownload size={14} />
+                  <FiSidebar size={16} />
                 </button>
-              )}
 
+                <div className="h-5 w-px bg-[var(--df-border)] opacity-30"></div>
 
-              {activeTab?.results?.executionTime && (
-                <>
-                  <div className="h-5 w-px bg-[var(--df-border)] opacity-30"></div>
-                  <div className="flex items-center gap-3 px-2.5 py-1 rounded-lg text-[11px] font-medium" style={{ color: 'var(--df-text-soft)' }}>
-                    <span className="flex items-center gap-1"><span className="opacity-50">⏱</span> {activeTab.results.executionTime}</span>
-                    <span className="w-px h-2.5 bg-gray-500 opacity-20"></span>
-                    <span className="flex items-center gap-1"><span className="opacity-50">📊</span> {activeTab.results.results?.row_count || 0} rows</span>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              {saveMsg && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider animate-in fade-in slide-in-from-right-2 duration-300" style={{ backgroundColor: 'var(--df-success-soft)', color: 'var(--df-success)' }}>
-                  <FiCheckCircle size={10} />{saveMsg}
-                </div>
-              )}
-
-
-              <button onClick={handleFormat} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] font-semibold transition-all hover:bg-[var(--df-bg-primary)] text-[var(--df-text-soft)]">
-                <FiCommand size={13} /> Format
-              </button>
-
-              <button
-                onClick={() => setIsFocusMode(!isFocusMode)}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] font-semibold transition-all ${isFocusMode ? 'bg-[var(--df-accent-soft)] text-[var(--df-accent)]' : 'hover:bg-[var(--df-bg-primary)] text-[var(--df-text-soft)]'}`}
-              >
-                {isFocusMode ? <FiMinimize2 size={13} /> : <FiMaximize2 size={13} />}
-                {isFocusMode ? 'Exit Focus' : 'Focus'}
-              </button>
-
-              <div className="h-5 w-px bg-[var(--df-border)] opacity-30"></div>
-
-              <button onClick={handleShare} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] font-semibold transition-all hover:bg-[var(--df-bg-primary)] text-[var(--df-info)]">
-                <FiShare2 size={13} /> Share
-              </button>
-
-              <button onClick={handleSave} className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--df-bg-primary)] border border-[var(--df-border)] text-[12px] font-bold transition-all hover:border-[var(--df-accent)] hover:text-[var(--df-accent)]">
-                <FiSave size={13} /> Save
-              </button>
-
-              <div className="relative">
-                <button onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)} className="p-1.5 rounded-lg hover:bg-[var(--df-bg-primary)] transition-all" style={{ color: isMoreMenuOpen ? 'var(--df-accent)' : 'var(--df-text-soft)' }}>
-                  <FiMoreVertical size={16} />
+                {/* Run Button — single icon, smart execution */}
+                <button
+                  onClick={handleExecute}
+                  className="flex items-center justify-center px-3.5 py-1.5 rounded-lg bg-[var(--df-accent)] text-white shadow-sm hover:brightness-110 active:scale-95 transition-all"
+                  title="Run Query (selected text or full query)"
+                >
+                  <FiPlay size={14} className="fill-current" />
                 </button>
-                {isMoreMenuOpen && (
+
+                {/* Download — only visible when results exist */}
+                {activeTab?.results?.results?.columns && (
+                  <button
+                    onClick={handleDownloadResults}
+                    className="p-1.5 rounded-lg transition-all hover:bg-[var(--df-bg-primary)]"
+                    style={{ color: 'var(--df-text-soft)' }}
+                    title="Download Results as CSV"
+                  >
+                    <FiDownload size={14} />
+                  </button>
+                )}
+
+
+                {activeTab?.results?.executionTime && (
                   <>
-                    <div className="fixed inset-0 z-20" onClick={() => setIsMoreMenuOpen(false)}></div>
-                    <div className="absolute right-0 top-full mt-1 w-56 rounded-xl bg-[var(--df-card-bg)] border border-[var(--df-border)] shadow-2xl z-30 py-1 flex flex-col">
-                      <button onClick={handleShare} className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }}>
-                        <FiShare2 size={13} className="opacity-70" /> Share...
-                      </button>
-                      <button onClick={() => { handleRunAsJob(activeTab?.content); setIsMoreMenuOpen(false); }} className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }}>
-                        <FiClock size={13} className="opacity-70" /> Schedule...
-                      </button>
-
-                      <div className="h-px bg-[var(--df-border)] my-1 border-opacity-50"></div>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiEdit2 size={13} className="opacity-70" /> Rename...
-                      </button>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiMove size={13} className="opacity-70" /> Move...
-                      </button>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-red-500/10 text-red-400 flex items-center gap-2.5 transition-colors" onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiTrash2 size={13} className="opacity-70" /> Move to trash
-                      </button>
-
-                      <div className="h-px bg-[var(--df-border)] my-1 border-opacity-50"></div>
-
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiRefreshCcw size={13} className="opacity-70" /> Revert changes
-                      </button>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiLink size={13} className="opacity-70" /> Copy legacy query ID
-                      </button>
-
-                      <div className="h-px bg-[var(--df-border)] my-1 border-opacity-50"></div>
-
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiTable size={13} className="opacity-70" /> Create or modify table...
-                      </button>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center justify-between transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <span className="flex items-center gap-2.5"><FiPlusSquare size={13} className="opacity-70" /> Add data</span>
-                        <FiShare2 size={12} className="opacity-50" />
-                      </button>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <FiPieChart size={13} className="opacity-70" /> Add to dashboard
-                      </button>
-                      <button className="w-full px-4 py-1.5 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center justify-between transition-colors mb-1" style={{ color: 'var(--df-text)' }} onClick={() => setIsMoreMenuOpen(false)}>
-                        <span className="flex items-center gap-2.5"><FiBell size={13} className="opacity-70" /> Create alert</span>
-                        <span className="text-[9px] px-1.5 rounded bg-gray-500/20 opacity-70">Preview</span>
-                      </button>
+                    <div className="h-5 w-px bg-[var(--df-border)] opacity-30"></div>
+                    <div className="flex items-center gap-3 px-2.5 py-1 rounded-lg text-[11px] font-medium" style={{ color: 'var(--df-text-soft)' }}>
+                      <span className="flex items-center gap-1"><span className="opacity-50">⏱</span> {activeTab.results.executionTime}</span>
+                      <span className="w-px h-2.5 bg-gray-500 opacity-20"></span>
+                      <span className="flex items-center gap-1"><span className="opacity-50">📊</span> {activeTab.results.results?.row_count || 0} rows</span>
                     </div>
                   </>
                 )}
               </div>
+
+              <div className="flex items-center gap-2">
+                {saveMsg && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider animate-in fade-in slide-in-from-right-2 duration-300" style={{ backgroundColor: 'var(--df-success-soft)', color: 'var(--df-success)' }}>
+                    <FiCheckCircle size={10} />{saveMsg}
+                  </div>
+                )}
+
+                {/* Share — ghost outline button */}
+                <button
+                  onClick={handleShare}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-all hover:bg-[var(--df-accent-soft)]"
+                  style={{ color: 'var(--df-text-accent)', borderColor: 'color-mix(in srgb, var(--df-text-accent) 35%, transparent)', backgroundColor: 'transparent' }}
+                  title="Copy query to clipboard"
+                >
+                  <FiShare2 size={13} /> Share
+                </button>
+
+                {/* Save — filled accent button */}
+                <button
+                  onClick={handleSave}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold text-white transition-all hover:brightness-110 active:scale-95 shadow-sm"
+                  style={{ background: 'linear-gradient(135deg, var(--df-accent), color-mix(in srgb, var(--df-accent) 80%, #000))' }}
+                  title="Save query to workspace"
+                >
+                  <FiSave size={13} /> Save
+                </button>
+
+                <div className="relative">
+                  <button onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)} className="p-1.5 rounded-lg hover:bg-[var(--df-bg-primary)] transition-all" style={{ color: isMoreMenuOpen ? 'var(--df-icon-accent)' : 'var(--df-text-soft)' }}>
+                    <FiMoreVertical size={16} />
+                  </button>
+                  {isMoreMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setIsMoreMenuOpen(false)}></div>
+                      <div className="absolute right-0 top-full mt-1 w-48 rounded-xl bg-[var(--df-card-bg)] border border-[var(--df-border)] shadow-2xl z-30 py-1 flex flex-col">
+                        {/* Schedule */}
+                        <button
+                          onClick={() => { handleRunAsJob(activeTab?.content); setIsMoreMenuOpen(false); }}
+                          className="w-full px-4 py-2 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors"
+                          style={{ color: 'var(--df-text)' }}
+                        >
+                          <FiClock size={13} className="opacity-70" /> Schedule...
+                        </button>
+
+                        <div className="h-px bg-[var(--df-border)] mx-2 my-1"></div>
+
+                        {/* Rename */}
+                        <button
+                          onClick={() => {
+                            setRenameValue(activeTab?.name || '');
+                            setIsRenaming(true);
+                            setIsMoreMenuOpen(false);
+                          }}
+                          className="w-full px-4 py-2 text-left text-[12px] font-medium hover:bg-[var(--df-sidebar-hover)] flex items-center gap-2.5 transition-colors"
+                          style={{ color: 'var(--df-text)' }}
+                        >
+                          <FiEdit2 size={13} className="opacity-70" /> Rename...
+                        </button>
+
+                        <div className="h-px bg-[var(--df-border)] mx-2 my-1"></div>
+
+                        {/* Move to trash */}
+                        <button
+                          onClick={async () => {
+                            setIsMoreMenuOpen(false);
+                            if (!activeTab?.workspaceItemId || activeTab.workspaceItemId === 'undefined') {
+                              // Not saved to workspace — just close the tab
+                              removeTab({ stopPropagation: () => {} }, activeTabId);
+                              return;
+                            }
+                            const item = items.find(i => i.id === activeTab.workspaceItemId);
+                            if (item) await wsDelete(item);
+                          }}
+                          className="w-full px-4 py-2 text-left text-[12px] font-medium hover:bg-red-500/10 flex items-center gap-2.5 transition-colors"
+                          style={{ color: 'var(--df-danger)' }}
+                        >
+                          <FiTrash2 size={13} className="opacity-70" /> Move to trash
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Inline rename overlay */}
+                {isRenaming && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setIsRenaming(false)}>
+                    <div className="rounded-2xl p-6 w-80 shadow-2xl flex flex-col gap-4" style={{ backgroundColor: 'var(--df-card-bg)', border: '1px solid var(--df-border)' }} onClick={e => e.stopPropagation()}>
+                      <p className="text-[14px] font-semibold" style={{ color: 'var(--df-text)' }}>Rename</p>
+                      <input
+                        autoFocus
+                        className="rounded-lg px-3 py-2 text-[13px] outline-none w-full"
+                        style={{ backgroundColor: 'var(--df-input-bg)', border: '1.5px solid var(--df-input-border)', color: 'var(--df-text)' }}
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && renameValue.trim()) {
+                            renameTab(activeTabId, renameValue.trim());
+                            if (activeTab?.workspaceItemId && activeTab.workspaceItemId !== 'undefined') {
+                              const item = items.find(i => i.id === activeTab.workspaceItemId);
+                              if (item) await wsRename(item, renameValue.trim());
+                            }
+                            setIsRenaming(false);
+                          }
+                          if (e.key === 'Escape') setIsRenaming(false);
+                        }}
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => setIsRenaming(false)} className="px-4 py-1.5 rounded-lg text-[12px]" style={{ color: 'var(--df-text-muted)', backgroundColor: 'var(--df-bg-secondary)' }}>Cancel</button>
+                        <button
+                          onClick={async () => {
+                            if (!renameValue.trim()) return;
+                            renameTab(activeTabId, renameValue.trim());
+                            if (activeTab?.workspaceItemId && activeTab.workspaceItemId !== 'undefined') {
+                              const item = items.find(i => i.id === activeTab.workspaceItemId);
+                              if (item) await wsRename(item, renameValue.trim());
+                            }
+                            setIsRenaming(false);
+                          }}
+                          className="px-4 py-1.5 rounded-lg text-[12px] font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg, var(--df-accent), color-mix(in srgb, var(--df-accent) 80%, #000))' }}
+                        >Rename</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
           )}
 
           <div id="editor-results-container" className="flex-1 flex flex-col pt-4 px-2 gap-0 overflow-hidden min-h-0" style={{ backgroundColor: 'var(--df-bg-secondary)' }}>
@@ -464,6 +538,7 @@ const SqlLab = () => {
         </div>
       </div>
       <SaveQueryModal isOpen={isSaveModalOpen} onClose={() => setIsSaveModalOpen(false)} onSave={onConfirmSave} initialName={activeTab?.name || ''} />
+      <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} title={activeTab?.name || 'Query'} />
     </div>
   );
 };

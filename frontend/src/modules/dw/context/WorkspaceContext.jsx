@@ -123,15 +123,16 @@ export const WorkspaceProvider = ({ children }) => {
   }, []);
 
   const handleSaveContent = useCallback(async (id, data) => {
+    if (!id || id === 'undefined') {
+      console.warn('[WorkspaceContext] handleSaveContent called with invalid id:', id);
+      return;
+    }
     try {
-      let updatePayload = (typeof data === 'object' && data.cells) ? { cells: data.cells, language: data.language, engine: data.engine } : { content: data };
+      const updatePayload = typeof data === 'string' ? { content: data } : data;
       await api.updateItem(id, updatePayload);
-      setItems(prev => prev.map(i => {
-        if (i.id !== id) return i;
-        return (typeof data === 'object' && data.cells) ? { ...i, cells: data.cells, language: data.language, engine: data.engine } : { ...i, content: data };
-      }));
+      setItems(prev => prev.map(i => i.id === id ? { ...i, ...updatePayload } : i));
       if (activeItem && activeItem.id === id) {
-        setActiveItem(prev => (typeof data === 'object' && data.cells) ? { ...prev, cells: data.cells, language: data.language, engine: data.engine } : { ...prev, content: data });
+        setActiveItem(prev => ({ ...prev, ...updatePayload }));
       }
     } catch (err) { console.error('[WorkspaceContext] Save content failed:', err); }
   }, [activeItem]);
@@ -169,11 +170,16 @@ export const WorkspaceProvider = ({ children }) => {
     } catch (err) { console.error('[WorkspaceContext] Move failed:', err); }
   }, []);
 
+  // Optimistically push a new item into the list (used by SqlLab after createItem)
+  const addItem = useCallback((item) => {
+    setItems(prev => [...prev, item]);
+  }, []);
+
   return (
     <WorkspaceContext.Provider value={{
       items, currentFolderId, activeItem, loading, error, setCurrentFolderId, setActiveItem,
       handleNavigate, handleOpen, handleCreate, handleRename, handleDelete, handleRestore, handlePermanentDelete,
-      handleToggleFavorite, handleSaveContent, handleEmptyTrash, handleRestoreAll, handleClone, handleMove, fetchItems,
+      handleToggleFavorite, handleSaveContent, handleEmptyTrash, handleRestoreAll, handleClone, handleMove, fetchItems, addItem,
     }}>
       {children}
     </WorkspaceContext.Provider>

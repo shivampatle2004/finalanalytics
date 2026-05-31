@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from app.core.config import settings, MONGO_URI, DB_NAME, COLLECTION_NAME
+from typing import Any, Optional
 
 # ── Postgres / SQLAlchemy Configuration ──────────────────────────────────────
 engine = create_engine(
@@ -31,9 +32,9 @@ client = None
 db = None
 workspace_collection = None
 
-def get_workspace_collection():
+def get_workspace_collection() -> AsyncIOMotorCollection:
     global workspace_collection
-    return workspace_collection
+    return workspace_collection # type: ignore
 
 async def verify_connection():
     """Ping MongoDB to confirm we can reach Atlas. Called at app startup."""

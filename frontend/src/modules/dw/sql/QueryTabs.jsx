@@ -1,13 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FiX, FiPlus, FiDatabase, FiBook, FiBell } from 'react-icons/fi';
-import CreateNewModal from './CreateNewModal';
 
-const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTabRename, isCreateModalOpen, onOpenCreateModal, onCloseCreateModal, onCreateNew }) => {
+const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTabRename }) => {
   const [editingTabId, setEditingTabId] = useState(null);
   const [editValue, setEditValue] = useState('');
-  const [anchorRect, setAnchorRect] = useState(null);
   const inputRef = useRef(null);
-  const addButtonRef = useRef(null);
 
   useEffect(() => {
     if (editingTabId !== null && inputRef.current) {
@@ -29,14 +26,6 @@ const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTab
     setEditingTabId(null);
   };
 
-  const handleAddClick = () => {
-    if (onOpenCreateModal) {
-      onOpenCreateModal();
-    } else {
-      onTabAdd();
-    }
-  };
-
   const getTabIcon = (tab) => {
     if (tab.type === 'notebook') return <FiBook size={13} />;
     if (tab.type === 'alert') return <FiBell size={13} />;
@@ -56,9 +45,9 @@ const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTab
             className={`group flex items-center gap-1.5 px-3 py-2 min-w-[120px] max-w-[240px] cursor-pointer transition-all duration-200 relative ${isActive ? 'z-[1]' : ''}`}
             style={{
               backgroundColor: isActive ? 'var(--df-card-bg)' : 'transparent',
-              color: isActive ? 'var(--df-accent)' : 'var(--df-text-muted)',
+              color: isActive ? 'var(--df-text-accent)' : 'var(--df-text-muted)',
               fontWeight: isActive ? 500 : 400,
-              borderBottom: isActive ? '2px solid var(--df-accent)' : '2px solid transparent',
+              borderBottom: isActive ? '2px solid var(--df-icon-accent)' : '2px solid transparent',
             }}
           >
             {/* Tab Icon */}
@@ -84,8 +73,8 @@ const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTab
                   style={{
                     color: 'var(--df-strong)',
                     backgroundColor: 'var(--df-bg-primary)',
-                    border: '1.5px solid var(--df-accent)',
-                    boxShadow: '0 0 0 2px color-mix(in srgb, var(--df-accent) 20%, transparent)',
+                    border: '1.5px solid var(--df-text-accent)',
+                    boxShadow: '0 0 0 2px color-mix(in srgb, var(--df-text-accent) 20%, transparent)',
                   }}
                 />
               ) : (
@@ -106,9 +95,9 @@ const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTab
               onClick={(e) => onTabClose(e, tab.id)}
               className={`p-0.5 rounded-sm transition-all duration-150 flex-shrink-0 ${isActive ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-60 hover:!opacity-100'
                 }`}
-              style={{ color: isActive ? 'var(--df-accent)' : 'var(--df-text-muted)' }}
+              style={{ color: isActive ? 'var(--df-icon-accent)' : 'var(--df-text-muted)' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--df-accent-soft)'; e.currentTarget.style.color = 'var(--df-icon-accent)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = isActive ? 'var(--df-accent)' : 'var(--df-text-muted)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = isActive ? 'var(--df-icon-accent)' : 'var(--df-text-muted)'; }}
             >
               <FiX size={14} />
             </button>
@@ -118,34 +107,20 @@ const QueryTabs = ({ tabs, activeTabId, onTabChange, onTabAdd, onTabClose, onTab
 
       <div className="relative flex-shrink-0">
         <button
-          ref={addButtonRef}
           type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            // Capture exact rect at click time — most reliable approach
-            const rect = e.currentTarget.getBoundingClientRect();
-            setAnchorRect({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height });
-            if (onOpenCreateModal) onOpenCreateModal();
-            else onTabAdd();
+            onTabAdd();
           }}
           className="mx-1 p-1.5 rounded-md transition-all duration-200 hover:scale-105 cursor-pointer"
           style={{ color: 'var(--df-text-soft)', zIndex: 10, position: 'relative' }}
           onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--df-icon-accent)'; e.currentTarget.style.backgroundColor = 'var(--df-accent-soft)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--df-text-soft)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-          title="Create New (Cmd+K)"
+          title="Create New Query"
         >
           <FiPlus size={16} />
         </button>
-
-        {isCreateModalOpen && (
-          <CreateNewModal
-            isOpen={isCreateModalOpen}
-            onClose={onCloseCreateModal}
-            onCreate={onCreateNew}
-            anchorRect={anchorRect}
-          />
-        )}
       </div>
     </div>
   );
