@@ -270,23 +270,10 @@ class ExecutionEngine:
 
     def _execute_sql_postgres(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute SQL directly against PostgreSQL using SQLAlchemy."""
+        from app.modules.sql.services.query_parser import rewrite_three_level_names
+
         schema = context.get("schema", "public")
-        
-        # ── Unity Catalog Style Rewriting ──
-        # Detect catalog.schema.table and rewrite to catalog_schema.table for PG physical schema
-        table_pattern = r"(?:FROM|JOIN)\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){2})"
-        matches = re.findall(table_pattern, query, re.IGNORECASE)
-        processed_query = query
-        for full_path in set(matches):
-            parts = full_path.split(".")
-            # Map catalog.schema to physical schema catalog_schema
-            physical_name = f"{parts[0]}_{parts[1]}.{parts[2]}"
-            processed_query = re.sub(
-                r"\b" + re.escape(full_path) + r"\b",
-                physical_name,
-                processed_query,
-                flags=re.IGNORECASE
-            )
+        processed_query = rewrite_three_level_names(query)
 
         start = time.time()
         db = SessionLocal()
