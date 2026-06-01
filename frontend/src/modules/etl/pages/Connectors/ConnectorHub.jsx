@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Search, Settings2, CheckCircle, AlertTriangle, X, Play,
   Zap, LayoutGrid, Database, FileText, Globe, Cloud,
@@ -694,6 +694,7 @@ function GuidePanel({ engine, schema, connector }) {
    DetailPanel — The configuration overlay sidebar
    ═══════════════════════════════════════════════════════════ */
 function DetailPanel({ connector, onClose }) {
+  const queryClient = useQueryClient();
   const [formData, setFormData] = useState({});
   const [testResult, setTestResult] = useState(null);
   const [guideOpen, setGuideOpen] = useState(false);
@@ -729,7 +730,8 @@ function DetailPanel({ connector, onClose }) {
   const validateForm = () => {
     if (!schema?.required) return true;
     for (const req of schema.required) {
-      if (!formData[req]) {
+      // Don't validate output_file_name here, as we bypass it in some endpoints
+      if (req !== 'output_file_name' && !formData[req]) {
         const fieldName = schema.properties?.[req]?.title || req;
         setTestResult({ success: false, message: `Missing required field: ${fieldName}` });
         return false;
@@ -753,7 +755,7 @@ function DetailPanel({ connector, onClose }) {
       });
     },
     onSuccess: (res) => {
-      setTestResult(res);
+      let finalMessage = res.message || "Connection tested successfully";
       
       // Auto-save to Vault if connection is successful and save_to_vault is checked
       if (res.success && formData.save_to_vault) {
@@ -767,11 +769,14 @@ function DetailPanel({ connector, onClose }) {
           engine: connector.engine,
           config: cleanConfig
         }).then(() => {
-          console.log("Credentials saved to Vault successfully");
+          queryClient.invalidateQueries({ queryKey: ['vault'] });
+          setTestResult(prev => prev ? { ...prev, message: prev.message + " (Saved to Vault)" } : prev);
         }).catch(err => {
           console.error("Failed to save to Vault:", err);
         });
       }
+      
+      setTestResult({ ...res, message: finalMessage });
       
       // Auto-discover if connection is successful
       if (res.success) {
@@ -852,7 +857,7 @@ function DetailPanel({ connector, onClose }) {
       });
     },
     onSuccess: (res) => {
-      setTestResult(res);
+      let finalMessage = res.message || "Extraction started successfully";
       
       // Auto-save to Vault if extraction is successful and save_to_vault is checked
       if (res.success && formData.save_to_vault) {
@@ -866,11 +871,14 @@ function DetailPanel({ connector, onClose }) {
           engine: connector.engine,
           config: cleanConfig
         }).then(() => {
-          console.log("Credentials saved to Vault successfully");
+          queryClient.invalidateQueries({ queryKey: ['vault'] });
+          setTestResult(prev => prev ? { ...prev, message: prev.message + " (Saved to Vault)" } : prev);
         }).catch(err => {
           console.error("Failed to save to Vault:", err);
         });
       }
+      
+      setTestResult({ ...res, message: finalMessage });
       
       if (res.success && res.table_name) {
         setTimeout(() => { window.location.hash = 'tables'; }, 1500);

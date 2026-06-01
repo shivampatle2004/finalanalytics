@@ -148,13 +148,24 @@ const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions, onFi
     onChange({ ...data, [key]: value });
   };
 
-  const properties = Object.entries(schema.properties);
+  // Sort properties to ensure save_to_vault and vault_credential_name are always at the end
+  const properties = Object.entries(schema.properties).sort(([keyA], [keyB]) => {
+    const getWeight = (key) => {
+      if (key === 'save_to_vault') return 100;
+      if (key === 'vault_credential_name') return 101;
+      return 0;
+    };
+    return getWeight(keyA) - getWeight(keyB);
+  });
 
   return (
     <div className="dynamic-form">
       {properties.map(([key, prop]) => {
         // Skip output_file_name if nodeType is not 'load'
         if (key === 'output_file_name' && nodeType !== 'load') return null;
+        
+        // Hide vault_credential_name if save_to_vault is false
+        if (key === 'vault_credential_name' && !data['save_to_vault']) return null;
 
         const isRequired = schema.required?.includes(key);
         const value = data[key] !== undefined ? data[key] : (prop.default || '');
