@@ -134,7 +134,10 @@ app = FastAPI(
     title="Data Warehouse API",
     description="Backend API for Data Warehouse — Catalog, SQL Query Engine & Workspace",
     version="1.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
 )
 
 # -----------------------------
