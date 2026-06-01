@@ -181,22 +181,24 @@ const DynamicForm = ({ schema, data, onChange, uploadedFiles, fieldActions, onFi
 
         return (
           <div key={key} className={`df-field${isFullWidth ? ' df-full' : ''}`}>
-            <div className="df-label-row">
-              <label className="df-label">
-                {prop.title || key} {isRequired && <span className="req-dot"></span>}
-              </label>
-              {action && (
-                <button 
-                  type="button" 
-                  className="df-action-btn"
-                  onClick={action.onClick}
-                  title={action.label}
-                >
-                  {action.icon}
-                  <span>{action.label}</span>
-                </button>
-              )}
-            </div>
+            {prop.type !== 'boolean' && (
+              <div className="df-label-row">
+                <label className="df-label">
+                  {prop.title || key} {isRequired && <span className="req-dot"></span>}
+                </label>
+                {action && (
+                  <button 
+                    type="button" 
+                    className="df-action-btn"
+                    onClick={action.onClick}
+                    title={action.label}
+                  >
+                    {action.icon}
+                    <span>{action.label}</span>
+                  </button>
+                )}
+              </div>
+            )}
 
 
 

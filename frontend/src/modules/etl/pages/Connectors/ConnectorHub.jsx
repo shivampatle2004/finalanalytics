@@ -520,6 +520,14 @@ function VaultSection({ engine, onLoad, currentConfig }) {
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
           >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--border-light)', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Shield size={10} /> SAVED CREDENTIALS
+              </span>
+              <button onClick={() => setVaultOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '2px', display: 'flex' }} title="Close">
+                <X size={12} />
+              </button>
+            </div>
             {isLoading ? (
               <div className="vault-loading">Decrypting...</div>
             ) : !vaultItems?.length ? (
