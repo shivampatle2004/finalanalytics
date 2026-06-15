@@ -35,8 +35,6 @@ import {
     Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
     Treemap, ComposedChart, Sankey, RadialBarChart, RadialBar, LabelList
 } from 'recharts';
-import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from 'react-simple-maps';
-import { geoCentroid } from 'd3-geo';
 import CustomVisualRenderer from './CustomVisualRenderer';
 import useVisualRegistryStore from '../store/visualRegistryStore';
 import SmartNarrativeVisual from './SmartNarrativeVisual';
@@ -44,6 +42,7 @@ import PowerAutomateVisual from './PowerAutomateVisual';
 import QnaVisual from './QnaVisual';
 import InfluencersVisual from './InfluencersVisual';
 import PowerAppsVisual from './PowerAppsVisual';
+import MapVisual from './MapVisual';
 import {
     VIBRANT_PALETTE,
     buildCategoryColorMap,
@@ -1158,7 +1157,7 @@ const resolveMeasureMetadata = (fieldName, measuresList, forceFallback = false) 
     return null;
 };
 
-const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection = null, onClick, onUpdate, onSelectVisual, onApplyCrossFilter, onClearCrossFilter, isExporting = false, hideInternalStats = false, hideChartTitle = false, isDragging = false, showZoomControls = false, zoomToolbarContainer = null, reportTheme = 'theme_default', reportNoFill = false, isViewOnly = false, reportCrossFilterRevision = '', legendHeaderSlotId = null, measures = [] }) => {
+const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection = null, onClick, onUpdate, onSelectVisual, onApplyCrossFilter, onClearCrossFilter, isExporting = false, hideInternalStats = false, hideChartTitle = false, isDragging = false, showZoomControls = false, zoomToolbarContainer = null, reportTheme = 'theme_default', reportNoFill = false, isViewOnly = false, reportCrossFilterRevision = '', legendHeaderSlotId = null, measures = [], schema = [] }) => {
     const { isDark: globalIsDark } = useTheme();
     const isFocusView = Boolean(zoomToolbarContainer);
     const isCompactLayout = Boolean(zoomToolbarContainer || hideChartTitle);
@@ -5473,150 +5472,18 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     </div>
                 );
             case 'map':
-                {
-                    const worldGeoUrl = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
-
-                    const normalizeGeoLabel = (label) =>
-                        String(label || '')
-                            .toLowerCase()
-                            .replace(/[^a-z0-9\s]/g, ' ')
-                            .replace(/\s+/g, ' ')
-                            .trim();
-
-                    // A few common aliases so "USA" and friends still match world-atlas names.
-                    const aliases = {
-                        usa: 'united states of america',
-                        us: 'united states of america',
-                        uk: 'united kingdom',
-                        uae: 'united arab emirates',
-                        russia: 'russian federation',
-                        'south korea': 'korea republic of',
-                        'north korea': 'korea democratic peoples republic of',
-                        vietnam: 'viet nam'
-                    };
-
-                    // Parse a "lat,lon" string if your data has coordinates.
-                    const parseLatLon = (raw) => {
-                        const match = String(raw || '')
-                            .trim()
-                            .match(/^(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)$/);
-                        if (!match) return null;
-                        const lat = Number(match[1]);
-                        const lon = Number(match[3]);
-                        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-                        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-                        return { lat, lon };
-                    };
-
-                    // Deterministic fallback when values can't be geocoded.
-                    const pseudoCoordsFromName = (name) => {
-                        let hash = 0;
-                        const s = String(name || '');
-                        for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash) + s.charCodeAt(i);
-                        const seed = Math.abs(hash);
-                        // [-180,180], [-55,75] tends to look better on mercator
-                        const lon = -180 + (seed % 360);
-                        const lat = -55 + (Math.floor(seed / 97) % 130);
-                        return { lon, lat };
-                    };
-
-                    const toNumeric = (v) => {
-                        const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, ''));
-                        return Number.isFinite(n) ? n : 0;
-                    };
-
-                    const rawPoints = Array.isArray(chartData) ? chartData.slice(0, 20) : [];
-                    const values = rawPoints.map((p) => toNumeric(p.value));
-                    const maxMapValue = Math.max(...values, 1);
-
-                    return (
-                        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: chartFillBackground, borderRadius: chartNoFill ? 0 : 6 }}>
-                            <ComposableMap
-                                projection="geoMercator"
-                                projectionConfig={{ scale: 140 }}
-                                style={{ width: '100%', height: '100%' }}
-                            >
-                                <ZoomableGroup center={[0, 20]} zoom={1} minZoom={0.8} maxZoom={4}>
-                                    <Geographies geography={worldGeoUrl}>
-                                        {({ geographies }) => {
-                                            const geoByName = {};
-                                            for (const geo of geographies) {
-                                                const rawName = geo?.properties?.name || geo?.properties?.NAME || '';
-                                                const key = normalizeGeoLabel(rawName);
-                                                if (key && !geoByName[key]) geoByName[key] = geo;
-                                            }
-
-                                            const mapPoints = rawPoints.map((entry, index) => {
-                                                const name = String(entry?.name || `Point ${index + 1}`);
-                                                const ll = parseLatLon(name);
-                                                const normalized = normalizeGeoLabel(name);
-                                                const aliasNormalized = aliases[normalized] || normalized;
-                                                const matchedGeo = aliasNormalized ? geoByName[aliasNormalized] : null;
-                                                const centroid = matchedGeo ? geoCentroid(matchedGeo) : null;
-
-                                                if (ll) {
-                                                    return { name, value: toNumeric(entry.value), lon: ll.lon, lat: ll.lat, color: palette[index % palette.length], mapped: true };
-                                                }
-
-                                                if (centroid && Number.isFinite(centroid[0]) && Number.isFinite(centroid[1])) {
-                                                    return { name, value: toNumeric(entry.value), lon: centroid[0], lat: centroid[1], color: palette[index % palette.length], mapped: true };
-                                                }
-
-                                                const fallback = pseudoCoordsFromName(name);
-                                                return { name, value: toNumeric(entry.value), lon: fallback.lon, lat: fallback.lat, color: palette[index % palette.length], mapped: false };
-                                            });
-
-                                            const mappedCount = mapPoints.filter((p) => p.mapped).length;
-                                            const fallbackCount = mapPoints.length - mappedCount;
-
-                                            return (
-                                                <>
-                                                    {geographies.map((geo) => (
-                                                        <Geography
-                                                            key={geo.rsmKey}
-                                                            geography={geo}
-                                                            fill="#e5e7eb"
-                                                            stroke="#cbd5e1"
-                                                            strokeWidth={0.4}
-                                                            style={{
-                                                                default: { outline: 'none' },
-                                                                hover: { outline: 'none', fill: '#dbeafe' },
-                                                                pressed: { outline: 'none' }
-                                                            }}
-                                                        />
-                                                    ))}
-
-                                                    {mapPoints.map((p, i) => {
-                                                        const radius = 3 + (Math.max(0, p.value) / maxMapValue) * 9;
-                                                        return (
-                                                            <Marker key={`${p.name}-${i}`} coordinates={[p.lon, p.lat]}>
-                                                                <circle r={radius + 2} fill={p.color} opacity={0.2} />
-                                                                <circle r={radius} fill={p.color} stroke="#fff" strokeWidth={1.2}>
-                                                                    <title>{`${p.name}: ${formatNumber(p.value)}${p.mapped ? '' : ' (approx)'}`}</title>
-                                                                </circle>
-                                                            </Marker>
-                                                        );
-                                                    })}
-
-                                                    {/* Corner legend */}
-                                                    <foreignObject x="12" y="12" width="220" height="40">
-                                                        <div style={{ fontSize: 11, color: '#64748b', background: 'rgba(255,255,255,0.85)', padding: '4px 8px', borderRadius: 4 }}>
-                                                            Map: {mappedCount} mapped{fallbackCount > 0 ? `, ${fallbackCount} approx` : ''}
-                                                        </div>
-                                                    </foreignObject>
-                                                </>
-                                            );
-                                        }}
-                                    </Geographies>
-                                </ZoomableGroup>
-                            </ComposableMap>
-                            {/* Center label (small) */}
-                            <div style={{ position: 'absolute', bottom: 10, left: 12, fontSize: 11, color: '#94a3b8' }}>
-                                {rawPoints.length} points shown
-                            </div>
-                        </div>
-                    );
-                }
+                return (
+                    <MapVisual
+                        fileId={fileId}
+                        graphDefinition={graphDefinition}
+                        measures={measures}
+                        schema={schema}
+                        isViewOnly={isViewOnly}
+                        onUpdate={onUpdate}
+                        onApplyCrossFilter={onApplyCrossFilter}
+                        onClearCrossFilter={onClearCrossFilter}
+                    />
+                );
             case 'sunburst':
                 return (
                     <PieChart>

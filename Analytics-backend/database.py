@@ -226,9 +226,10 @@ def init_db():
                         ETLWorkflowNode, ETLWorkflowEdge, ETLTransformRule, ETLSchedule,
                         ETLJob, ETLJobStep, ETLJobLog, ETLDataQualityCheck, AuditLog, UserRole, ConnectorCatalog,
                         PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig, RLSRole, RLSRule,
-                        SemanticMeasure, SemanticMeasureVersion)
+                        SemanticMeasure, SemanticMeasureVersion, Story, StoryPoint)
 
     try:
+        from map_model import MapData, GeocodingCache
         Base.metadata.create_all(bind=engine)
         print("Database tables verified/created successfully!")
         _ensure_remote_connection_profile_columns()

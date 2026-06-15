@@ -11,8 +11,9 @@ from pathlib import Path
 from database import SessionLocal, init_db
 import models, schemas
 from auth_utils import get_password_hash, verify_password
-from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, modeling, rls, ai_insights, api_connections, report_refresh, data_management, queries, calculated_tables
+from routers import files, graphs, smart, sql, etl, db as remote_db, connections as saved_connections, visuals, automate, modular_connectors, data_vault, reports, modeling, rls, ai_insights, api_connections, report_refresh, data_management, queries, calculated_tables, stories
 from routers.worksheets import router as worksheets_router, files_router as ws_files_router
+from routers import map_router
 import asyncio
 import sys
 from services.modeling_service import change_detection_poller
@@ -95,6 +96,8 @@ analytics_router.include_router(report_refresh.router)
 analytics_router.include_router(data_management.router)
 analytics_router.include_router(queries.router)
 analytics_router.include_router(calculated_tables.router)
+analytics_router.include_router(map_router.router)
+analytics_router.include_router(stories.router)
  
 # Initialize DB on startup
 @app.on_event("startup")
@@ -114,6 +117,17 @@ def startup_event():
  
     try:
         init_db()
+        
+        # Seed map data if empty
+        db = SessionLocal()
+        try:
+            from services.map_service import MapService
+            MapService.seed_data_if_empty(db)
+        except Exception as seed_ex:
+            print(f"WARNING: Seed map data failed: {seed_ex}")
+        finally:
+            db.close()
+
         # Create demo user
         db = SessionLocal()
         try:
