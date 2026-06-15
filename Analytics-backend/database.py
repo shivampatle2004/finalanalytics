@@ -229,6 +229,7 @@ def init_db():
                         SemanticMeasure, SemanticMeasureVersion)
 
     try:
+        from map_model import MapData, GeocodingCache
         Base.metadata.create_all(bind=engine)
         print("Database tables verified/created successfully!")
         _ensure_remote_connection_profile_columns()
