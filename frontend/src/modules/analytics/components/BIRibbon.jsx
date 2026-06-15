@@ -9,7 +9,7 @@ import {
     Share2,
     Search, User, Monitor, FilePlus, Layout, MessageSquare, Activity, GitBranch, FileText,
     Image, MousePointer2, TrendingUp, Square, Circle, Minus, Triangle, ArrowRight,
-    Users, Eye, Lock, Globe, Settings, Play, BookOpen, ExternalLink, Terminal, Cpu, Info, Palette,
+    Users, Eye, Lock, Globe, Settings, Play, BookOpen, ExternalLink, Terminal, Cpu, Info, Palette, Camera,
     Calendar, RefreshCw, UserCheck, Languages, Binary, FileJson, Smartphone, Layers, Timer, Filter, Bookmark, Link2, Tag, X,
     Archive, FileText as FileTextIcon,
     Sparkles, Brain, AlertTriangle, Target, Lightbulb, Compass, Download, MessageCircle, FileBarChart, Moon, Sun
@@ -589,6 +589,22 @@ const BIRibbon = ({
                     label="New page"
                     onClick={() => act('new_page')}
                     tooltip="Add a new page to this report"
+                />
+            </Group>
+
+            {/* ── Story Mode ── */}
+            <Group label="Story">
+                <RibbonBtn
+                    icon={<BookOpen size={20} />}
+                    label="Create Story"
+                    onClick={() => act('story_mode')}
+                    tooltip="Create a guided analytical narrative (Tableau Story Points)"
+                />
+                <RibbonBtn
+                    icon={<Camera size={20} />}
+                    label="Add Dashboard Snap"
+                    onClick={() => act('add_dashboard_snap')}
+                    tooltip="Capture current dashboard layout view and add it to the story"
                 />
             </Group>
 

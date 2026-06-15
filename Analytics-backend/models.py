@@ -1282,3 +1282,80 @@ class CalculatedTableColumn(Base):
 
     calculated_table = relationship("CalculatedTable", back_populates="columns")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STORY MODE MODELS — Tableau-style analytical narrative system
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Story(Base):
+    """
+    A named collection of Story Points forming a guided analytical narrative.
+    Supports presentation mode, PDF export, and PPTX export.
+    """
+    __tablename__ = "stories"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    tags = Column(JSON, default=list)             # ["Sales", "Q1", "Executive"]
+    theme = Column(String(50), default="default") # default | dark | minimal | branded
+    is_published = Column(Boolean, default=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    points = relationship("StoryPoint", back_populates="story",
+                          cascade="all, delete-orphan",
+                          order_by="StoryPoint.sort_order")
+
+    def __repr__(self):
+        return f"<Story(name='{self.name}', file='{self.file_id}')>"
+
+
+class StoryPoint(Base):
+    """
+    One slide / narrative frame within a Story.
+    Captures a complete dashboard state: filters, drill-down, visual selections,
+    active page, slicer values, and a free-text narrative.
+    """
+    __tablename__ = "story_points"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    story_id = Column(String, ForeignKey("stories.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    narrative = Column(Text, nullable=True)       # Rich text narration shown in presentation
+
+    sort_order = Column(Integer, nullable=False, default=0)
+
+    # Dashboard context
+    dashboard_id = Column(String, nullable=True)  # file_id or dashboard identifier
+    page_id = Column(String, nullable=True)        # which report page
+    bookmark_id = Column(String, nullable=True)    # optional linked bookmark
+
+    # Captured analytical state
+    filters = Column(JSON, default=list)           # [{ column, operator, value }]
+    slicers = Column(JSON, default=dict)           # { column: selectedValues }
+    drill_state = Column(JSON, default=dict)       # { visualId: { level, path } }
+    visual_selections = Column(JSON, default=dict) # { visualId: { selectedData } }
+    active_visuals = Column(JSON, default=list)    # [graphId, ...]
+
+    # Snapshot for offline/export use
+    snapshot_url = Column(Text, nullable=True)     # base64 or URL
+    snapshot_data = Column(JSON, default=dict)     # serialised chart data per visual
+
+    # Presentation options
+    transition = Column(String(50), default="fade") # fade | slide | zoom | none
+    duration = Column(Integer, default=3000)         # auto-advance ms (0 = manual)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    story = relationship("Story", back_populates="points")
+
+    def __repr__(self):
+        return f"<StoryPoint(title='{self.title}', story='{self.story_id}', order={self.sort_order})>"

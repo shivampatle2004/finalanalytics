@@ -5,7 +5,7 @@ import {
     LayoutGrid, ScatterChart, ArrowDownRight, Filter, Radar, Aperture, Compass,
     Hash, Grid, Circle, Sliders, Share2, Map as MapIcon, Sun, Boxes, Layout, Table, BarChart, CreditCard,
     Gauge, GitCommit, GitCompare, Copy, ChevronDown, Palette, Settings2, Code,
-    AlertTriangle, SlidersHorizontal, Maximize2, Plus, Trash2, RotateCcw, Tag
+    AlertTriangle, SlidersHorizontal, Maximize2, Plus, Trash2, RotateCcw, Tag, BookOpen
 } from 'lucide-react';
 import { formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 import useVisualRegistryStore from '../store/visualRegistryStore';
@@ -37,7 +37,8 @@ const BIVisualizationsPane = ({
     onApplyReportBackgroundFill,
     onApplyReportBackgroundReset,
     isViewOnly = false,
-    measures = []
+    measures = [],
+    onAddToStory
 }) => {
     const [viewMode, setViewMode] = useState('build'); // 'build', 'format', 'general'
     const [isSelectorCollapsed, setIsSelectorCollapsed] = useState(false);
@@ -619,6 +620,17 @@ const BIVisualizationsPane = ({
                                 >
                                     <Plus size={15} strokeWidth={2} />
                                     <span className="bi-visual-action-tip">Add to report</span>
+                                </button>
+                            )}
+                            {onAddToStory && (
+                                <button
+                                    type="button"
+                                    className="bi-visual-action-btn bi-visual-action-btn--story"
+                                    onClick={() => onAddToStory(selectedVisual)}
+                                    aria-label="Add to story"
+                                >
+                                    <BookOpen size={15} strokeWidth={2} />
+                                    <span className="bi-visual-action-tip">Add to story</span>
                                 </button>
                             )}
                             {!isViewOnly && onDeleteVisual && (

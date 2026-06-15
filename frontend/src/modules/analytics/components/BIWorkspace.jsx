@@ -49,6 +49,7 @@ import dataManagementApi from '../services/dataManagementApi';
 import { MarkDateTableModal, ChangeDetectionModal } from './ModelingModals';
 import ManageRolesPanel from './ManageRolesPanel';
 import PublishReportModal from './PublishReportModal';
+import StoryModePage from '../pages/StoryModePage';
 import ViewAsModal, { RLSActiveBanner } from './ViewAsModal';
 import { RLSProvider, useRLS } from '../context/RLSContext';
 import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE, PIE_DONUT_DEFAULT_SIZE, TEXT_BOX_DEFAULT_SIZE } from '../constants/visualDefaults';
@@ -420,6 +421,157 @@ const BIWorkspace = ({
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showPaginatedReportModal, setShowPaginatedReportModal] = useState(false);
+  const [showStoryMode, setShowStoryMode] = useState(false);
+  const captureFullDashboardSnapshot = async () => {
+    try {
+      const containerEl = reportRef.current;
+      if (containerEl) {
+        // Temporarily deselect visual to hide outline in snapshot
+        const selectedEl = containerEl.querySelector('.bi-visual-card.selected');
+        if (selectedEl) selectedEl.classList.remove('selected');
+
+        const handles = containerEl.querySelectorAll('.bi-resize-handle');
+        handles.forEach(h => h.style.display = 'none');
+
+        const headers = containerEl.querySelectorAll('.bi-header-right');
+        headers.forEach(h => h.style.display = 'none');
+
+        // Wait a tiny bit for layout adjustment to complete
+        await new Promise(resolve => setTimeout(resolve, 80));
+
+        const canvas = await html2canvas(containerEl, {
+          backgroundColor: '#ffffff',
+          scale: 2,
+          logging: false,
+          useCORS: true
+        });
+
+        // Restore layout styles
+        if (selectedEl) selectedEl.classList.add('selected');
+        handles.forEach(h => h.style.display = '');
+        headers.forEach(h => h.style.display = '');
+
+        return canvas.toDataURL('image/png');
+      }
+    } catch (err) {
+      console.error('Failed to capture full dashboard snapshot:', err);
+    }
+    return null;
+  };
+
+  const handleCaptureDashboardSnap = async () => {
+    setShowStoryMode(true);
+    // Wait for visualizations to render / finish animating
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    const snapshotUrl = await captureFullDashboardSnapshot();
+    
+    try {
+      const pending = JSON.parse(sessionStorage.getItem('osa_story_pending_add') || '[]');
+      const dateStr = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      pending.push({
+        id: `sp-snap-${Date.now()}`,
+        title: `Dashboard Snap - ${dateStr}`,
+        dashboardId: fileId,
+        page_id: activePageId || null,
+        filters: filters || [],
+        slicers: {},
+        drill_state: {},
+        visual_selections: {},
+        active_visuals: graphs.map(g => g.id),
+        snapshot_url: snapshotUrl,
+      });
+      sessionStorage.setItem('osa_story_pending_add', JSON.stringify(pending));
+    } catch (_) {}
+  };
+
+  const handleAddToStory = async (graph, snapshotUrl = null) => {
+    setShowStoryMode(true);
+    let finalSnapshotUrl = snapshotUrl;
+    if (!finalSnapshotUrl) {
+      try {
+        const cardEl = document.querySelector(`[data-visual-id="${graph.id}"]`);
+        if (cardEl) {
+          const handles = cardEl.querySelectorAll('.bi-resize-handle');
+          handles.forEach(h => h.style.display = 'none');
+          
+          // Wait for any animations to finish (e.g., 800ms)
+          await new Promise(resolve => setTimeout(resolve, 800));
+
+          const canvas = await html2canvas(cardEl, {
+            backgroundColor: null,
+            scale: 2,
+            logging: false,
+            useCORS: true
+          });
+          finalSnapshotUrl = canvas.toDataURL('image/png');
+          
+          handles.forEach(h => h.style.display = '');
+        }
+      } catch (err) {
+        console.error('Failed to capture snapshot in handleAddToStory:', err);
+      }
+    }
+    try {
+      const pending = JSON.parse(sessionStorage.getItem('osa_story_pending_add') || '[]');
+      pending.push({
+        id: graph.id,
+        title: graph.options?.title || graph.graph_type || 'Visual',
+        visualType: (graph.graph_type || 'bar').toLowerCase(),
+        dashboardId: fileId,
+        page_id: activePageId || null,
+        filters: filters || [],
+        slicers: {},
+        drill_state: {},
+        visual_selections: {},
+        active_visuals: [graph.id],
+        snapshot_url: finalSnapshotUrl,
+        graphDefinition: {
+          graph_type: graph.graph_type,
+          x_axis: graph.x_axis,
+          y_axis: graph.y_axis,
+          options: graph.options || {},
+          file_id: fileId,
+        },
+      });
+      sessionStorage.setItem('osa_story_pending_add', JSON.stringify(pending));
+    } catch (_) {}
+  };
+
+  const handleCreateStoryPointFromBookmark = async (bookmark) => {
+    setShowStoryMode(true);
+    const state = bookmark.state || {};
+    const capturedFilters = state.filters || filters || [];
+    const normalizedFilters = Array.isArray(capturedFilters)
+      ? capturedFilters
+      : Object.values(capturedFilters).flatMap(f => Array.isArray(f) ? f : [f]).filter(Boolean);
+    
+    // Apply the bookmark state to render it on the screen
+    applyReportBookmark(bookmark);
+    
+    // Wait for the visualizations to update and finish animating
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    const snapshotUrl = await captureFullDashboardSnapshot();
+
+    try {
+      const pending = JSON.parse(sessionStorage.getItem('osa_story_pending_add') || '[]');
+      pending.push({
+        id: `sp-bm-${Date.now()}`,
+        title: bookmark.name || 'Story Point from Bookmark',
+        dashboardId: fileId,
+        page_id: state.page || activePageId || null,
+        bookmark_id: bookmark.id,
+        filters: normalizedFilters,
+        slicers: state.slicers || {},
+        drill_state: state.drill || {},
+        visual_selections: state.selectedData ? { selectedData: state.selectedData } : {},
+        active_visuals: state.graphSnapshots ? state.graphSnapshots.map(g => g.id) : graphs.map(g => g.id),
+        snapshot_url: snapshotUrl,
+      });
+      sessionStorage.setItem('osa_story_pending_add', JSON.stringify(pending));
+    } catch (_) {}
+  };
   const [reportElements, setReportElements] = useState([]);
   const [isSqlConnecting, setIsSqlConnecting] = useState(false);
   const [sqlError, setSqlError] = useState('');
@@ -2697,6 +2849,13 @@ const BIWorkspace = ({
       case 'paginated_report':
         setShowPaginatedReportModal(true);
         break;
+      case 'story_mode':
+        setShowStoryMode(true);
+        break;
+      case 'add_dashboard_snap': {
+        await handleCaptureDashboardSnap();
+        break;
+      }
       case 'ai_influencers':
         addCustomVisual('influencers', {
           title: 'Key influencers',
@@ -5167,6 +5326,7 @@ const BIWorkspace = ({
                               dragOverItemIndex={dragOverItemIndex}
                               onButtonAction={handleButtonAction}
                               onDeselectVisual={() => setActiveVisualId(null)}
+                              onAddToStory={handleAddToStory}
                               showGridlines={showGridlines && !isViewOnly}
                               snapToGrid={snapToGrid}
                               isViewOnly={isViewOnly}
@@ -5287,6 +5447,14 @@ const BIWorkspace = ({
                                         <div key={bm.id} className={`bi-pane-list-row ${activeBookmarkId === bm.id ? 'active' : ''}`}>
                                           <button type="button" className="bi-pane-link" onClick={() => applyReportBookmark(bm)}>{bm.name}</button>
                                           <div className="bi-pane-actions-inline">
+                                            <button
+                                              type="button"
+                                              className="bi-pane-link"
+                                              onClick={() => handleCreateStoryPointFromBookmark(bm)}
+                                              title="Add to Story Point"
+                                            >
+                                              Add to Story
+                                            </button>
                                             <button
                                               type="button"
                                               className="bi-pane-link"
@@ -5569,6 +5737,7 @@ const BIWorkspace = ({
                         onAddVisual={isViewOnly ? undefined : handleAddVisual}
                         onDeleteVisual={isViewOnly ? undefined : handleDeleteVisual}
                         onAddToReport={handleAddToReport}
+                        onAddToStory={handleAddToStory}
                         onExpandVisual={handleExpandVisual}
                         isViewOnly={isViewOnly}
                         measures={measures}
@@ -5591,6 +5760,7 @@ const BIWorkspace = ({
                         onDeleteMeasure={isViewOnly ? undefined : handleDeleteMeasure}
                         onArchiveMeasure={isViewOnly ? undefined : handleArchiveMeasure}
                         onDeprecateMeasure={isViewOnly ? undefined : handleDeprecateMeasure}
+                        onCaptureDashboard={handleCaptureDashboardSnap}
                       />
                     </Panel>
                   </>
@@ -5679,6 +5849,29 @@ const BIWorkspace = ({
         userId={userId}
         availableGraphs={graphs}
       />
+
+      {/* Story Mode overlay */}
+      {showStoryMode && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: '#faf3ff', overflow: 'hidden', display: 'flex', flexDirection: 'column'
+        }}>
+          <StoryModePage
+            fileId={fileId}
+            userId={userId}
+            currentDashboardState={{
+              filters: filters,
+              slicers: {},
+              drillState: {},
+              visualSelections: {},
+              activeVisuals: graphs.map(g => g.id),
+              activePage: activePageId,
+              fileId,
+            }}
+            onClose={() => setShowStoryMode(false)}
+          />
+        </div>
+      )}
       <MarkDateTableModal
         isOpen={showMarkDateTableModal}
         onClose={() => setShowMarkDateTableModal(false)}
