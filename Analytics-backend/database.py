@@ -226,7 +226,7 @@ def init_db():
                         ETLWorkflowNode, ETLWorkflowEdge, ETLTransformRule, ETLSchedule,
                         ETLJob, ETLJobStep, ETLJobLog, ETLDataQualityCheck, AuditLog, UserRole, ConnectorCatalog,
                         PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig, RLSRole, RLSRule,
-                        SemanticMeasure, SemanticMeasureVersion)
+                        SemanticMeasure, SemanticMeasureVersion, Story, StoryPoint)
 
     try:
         from map_model import MapData, GeocodingCache

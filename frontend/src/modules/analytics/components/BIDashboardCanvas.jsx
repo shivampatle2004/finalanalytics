@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import html2canvas from 'html2canvas';
 import DynamicChart from './DynamicChart';
 import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE, PIE_DONUT_DEFAULT_SIZE, TEXT_BOX_DEFAULT_SIZE } from '../constants/visualDefaults';
 import { useGlobalFilters } from '../context/FilterContext';
@@ -93,6 +94,7 @@ const BIDashboardCanvas = ({
     focusedGraphId: focusedGraphIdProp,
     onFocusGraph,
     onCloseFocusGraph,
+    onAddToStory,
 }) => {
     const [internalFocusedGraphId, setInternalFocusedGraphId] = React.useState(null);
     const focusedGraphId = focusedGraphIdProp !== undefined ? focusedGraphIdProp : internalFocusedGraphId;
@@ -104,6 +106,45 @@ const BIDashboardCanvas = ({
             setInternalFocusedGraphId(id);
         }
     }, [onFocusGraph, onCloseFocusGraph]);
+
+    const [capturingGraphId, setCapturingGraphId] = React.useState(null);
+
+    const handleAddToStoryClick = async (e, graph) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (capturingGraphId) return;
+        
+        setCapturingGraphId(graph.id);
+        let snapshotUrl = null;
+        try {
+            const cardEl = document.querySelector(`[data-visual-id="${graph.id}"]`);
+            if (cardEl) {
+                const handles = cardEl.querySelectorAll('.bi-resize-handle');
+                handles.forEach(h => h.style.display = 'none');
+                
+                // Wait for any animations to finish (e.g., 800ms)
+                await new Promise(resolve => setTimeout(resolve, 800));
+
+                const canvas = await html2canvas(cardEl, {
+                    backgroundColor: null,
+                    scale: 2,
+                    logging: false,
+                    useCORS: true
+                });
+                snapshotUrl = canvas.toDataURL('image/png');
+                
+                handles.forEach(h => h.style.display = '');
+            }
+        } catch (err) {
+            console.error('Failed to capture snapshot:', err);
+        } finally {
+            setCapturingGraphId(null);
+        }
+        
+        if (onAddToStory) {
+            onAddToStory(graph, snapshotUrl);
+        }
+    };
     const [focusZoomToolbarHost, setFocusZoomToolbarHost] = React.useState(null);
     const [isDraggingOverCanvas, setIsDraggingOverCanvas] = React.useState(false);
     const dragCounterRef = React.useRef(0);
@@ -880,6 +921,46 @@ const BIDashboardCanvas = ({
                                             />
                                         </div>
                                     )}
+                                    <div className="bi-header-right" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', zIndex: 10 }}>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleAddToStoryClick(e, graph)}
+                                            disabled={capturingGraphId === graph.id}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                cursor: capturingGraphId === graph.id ? 'not-allowed' : 'pointer',
+                                                padding: '4px',
+                                                borderRadius: '4px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                color: '#7a1e3a',
+                                                transition: 'background 0.15s, color 0.15s',
+                                                opacity: capturingGraphId === graph.id ? 0.6 : 1
+                                            }}
+                                            onMouseEnter={(e) => { if (capturingGraphId !== graph.id) e.currentTarget.style.background = '#f5e6ec'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                                            title={capturingGraphId === graph.id ? "Capturing..." : "Add to Story"}
+                                        >
+                                            {capturingGraphId === graph.id ? (
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', animation: 'bi-spin 1s linear infinite' }}>
+                                                    <line x1="12" y1="2" x2="12" y2="6"></line>
+                                                    <line x1="12" y1="18" x2="12" y2="22"></line>
+                                                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+                                                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+                                                    <line x1="2" y1="12" x2="6" y2="12"></line>
+                                                    <line x1="18" y1="12" x2="22" y2="12"></line>
+                                                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+                                                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+                                                </svg>
+                                            ) : (
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5V5A2.5 2.5 0 0 1 6.5 2.5H20v14H6.5M12 6v6m-3-3h6"/>
+                                                </svg>
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                             <div
