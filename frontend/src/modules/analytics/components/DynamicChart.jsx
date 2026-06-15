@@ -237,13 +237,15 @@ const measureSlotCharCapacity = (slotWidthPx, fontSize) => {
     return Math.max(1, Math.floor((slotWidthPx * 0.95) / charPx));
 };
 
-const formatXAxisTick = (val, fullLabels = false, _tickMaxLen = 12, _charsPerSlot = 0, slotWidthPx = 0, fontSize = TICK_FONT_PX) => {
+const formatXAxisTick = (val, fullLabels = false, _tickMaxLen = 12, _charsPerSlot = 0, slotWidthPx = 0, fontSize = TICK_FONT_PX, angle = 0) => {
     const str = String(val ?? '');
     if (fullLabels || str.includes(' | ')) return str;
 
-    const slotChars = slotWidthPx > 0
-        ? measureSlotCharCapacity(slotWidthPx, fontSize)
-        : Math.max(1, Math.floor(Number(_charsPerSlot) || Number(_tickMaxLen) || 12));
+    const slotChars = (angle === -90)
+        ? _tickMaxLen
+        : (slotWidthPx > 0
+            ? measureSlotCharCapacity(slotWidthPx, fontSize)
+            : Math.max(1, Math.floor(Number(_charsPerSlot) || Number(_tickMaxLen) || 12)));
 
     if (str.length <= slotChars) return str;
     if (slotChars < 2) return str;
@@ -377,7 +379,7 @@ const extractChartRows = (payload) => {
 /** Above this category count, x-axis labels are thinned (API / high-cardinality charts). */
 const DENSE_X_AXIS_CATEGORY_CAP = 28;
 
-const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode = false, chartWidth = 0, focusView = false, dashboardCard = false } = {}) => {
+const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode = false, chartWidth = 0, focusView = false, dashboardCard = false, graphType = '' } = {}) => {
     const names = (Array.isArray(chartData) ? chartData : []).map((d) => String(d?.name ?? ''));
     const count = names.length;
     const emptyLayout = {
@@ -414,7 +416,7 @@ const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode =
         charsPerSlot = Math.max(charsPerSlot, Math.min(maxLen, 14));
     }
 
-    const fullLabels = !hasComposite && !isHighCardinality && charsPerSlot >= maxLen;
+    let fullLabels = !hasComposite && !isHighCardinality && charsPerSlot >= maxLen;
     let tickMaxLen = fullLabels ? maxLen : Math.min(maxLen, charsPerSlot);
     let displayLen = useAngledDashboard ? Math.min(maxLen, 16) : tickMaxLen;
 
@@ -440,20 +442,35 @@ const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode =
         if (angle !== 0) textAnchor = 'end';
     }
 
+    const isColumnScroll = count > 10 && ['column', 'stackedColumn', 'histogram'].includes(graphType);
+    if (isColumnScroll) {
+        angle = -90;
+        textAnchor = 'end';
+        fontSize = focusView ? 9 : 8;
+        tickMaxLen = 12;
+        displayLen = 12;
+        fullLabels = false;
+    }
+
     const tickPad = focusView ? 10 : (dashboardCard ? 9 : 7);
     let height = angle === 0
         ? fontSize + tickPad
         : estimateAngledTickHeight(displayLen, angle, fontSize);
-    const maxHeight = focusView
-        ? 64
-        : (useAngledDashboard ? 48 : (compactMode ? 40 : (hasComposite ? 64 : 52)));
+    const maxHeight = isColumnScroll
+        ? (focusView ? 90 : 75)
+        : (focusView
+            ? 64
+            : (useAngledDashboard ? 48 : (compactMode ? 40 : (hasComposite ? 64 : 52))));
     height = Math.min(maxHeight, Math.max(angle === 0 ? fontSize + (focusView ? 8 : (dashboardCard ? 7 : 6)) : 20, height));
 
     const tickMargin = angle ? Math.min(4, Math.max(1, Math.round(height * 0.04))) : (focusView ? 2 : 1);
     let interval = 0;
     let minTickGap = 0;
 
-    if (isHighCardinality) {
+    if (isColumnScroll) {
+        interval = 0;
+        minTickGap = 0;
+    } else if (isHighCardinality) {
         angle = 0;
         textAnchor = 'middle';
         fontSize = dashboardCard ? 7 : Math.min(fontSize, 8);
@@ -1418,6 +1435,48 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         reportCrossFilterRevision,
     ]);
 
+    const renderedChartData = useMemo(() => {
+        let chartData = Array.isArray(processedChartData) ? [...processedChartData] : [];
+        const opts = graphDefinition.options || {};
+
+        // Page/report filters
+        const reportPageFilters = [
+            ...(Array.isArray(opts.reportFilters) ? opts.reportFilters : []),
+            ...(Array.isArray(opts.pageFilters) ? opts.pageFilters : []),
+        ].filter((f) => f && f.field && f.operator && f.operator !== 'all');
+
+        if (reportPageFilters.length > 0) {
+            chartData = chartData.filter((row) => {
+                return reportPageFilters.every((f) => {
+                    const candidate =
+                        row?.[f.field] ??
+                        (f.field === graphDefinition.x_axis ? row?.name : undefined) ??
+                        (f.field === graphDefinition.y_axis || f.field === 'value' ? row?.value : undefined);
+                    if (candidate == null) return false;
+                    const cStr = String(candidate).toLowerCase();
+                    const vStr = String(f.value ?? '').toLowerCase();
+                    if (f.operator === 'equals') return cStr === vStr;
+                    if (f.operator === 'contains') return cStr.includes(vStr);
+                    if (f.operator === 'gt') return Number(candidate) > Number(f.value);
+                    if (f.operator === 'lt') return Number(candidate) < Number(f.value);
+                    return true;
+                });
+            });
+        }
+
+        if (opts.sort === 'asc') chartData.sort((a, b) => a.value - b.value);
+        if (opts.sort === 'desc') chartData.sort((a, b) => b.value - a.value);
+
+        const isBarFamilyType = ['bar', 'column', 'stackedColumn', 'histogram'].includes(graphDefinition.graph_type);
+        if (isBarFamilyType) {
+            const maxCategories = isFocusView ? 100 : 15;
+            if (chartData.length > maxCategories) {
+                chartData = chartData.slice(0, maxCategories);
+            }
+        }
+        return chartData;
+    }, [processedChartData, graphDefinition.graph_type, graphDefinition.options, graphDefinition.x_axis, graphDefinition.y_axis, isFocusView]);
+
     useEffect(() => {
         setPieHoverSegment(null);
     }, [crossFiltersFetchKey, graphDefinition.id, processedChartData, crossFilterRefreshing]);
@@ -1597,6 +1656,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             chartWidth: plotWidth,
             focusView: isFocusView,
             dashboardCard: isDashboardCanvas,
+            graphType: graphDefinition.graph_type,
         });
     }, [
         graphDefinition.graph_type,
@@ -2855,7 +2915,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             ? (isMicro ? '32%' : (isSmall ? '40%' : '50%'))
             : 0;
         const formatNumber = (num, mode = 'compact', seriesName = null) => {
-            const seriesMeasure = seriesName 
+            const seriesMeasure = seriesName
                 ? resolveMeasureMetadata(seriesName, measures, false)
                 : matchedMeasure;
             if (seriesMeasure) {
@@ -3042,33 +3102,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         }
 
         // Prepare and Sort Data (only for array data charts)
-        let chartData = Array.isArray(processedChartData) ? [...processedChartData] : [];
-        // Page/report filters only — visual + cross filters already applied in processedChartData.
-        const reportPageFilters = [
-            ...(Array.isArray(opts.reportFilters) ? opts.reportFilters : []),
-            ...(Array.isArray(opts.pageFilters) ? opts.pageFilters : []),
-        ].filter((f) => f && f.field && f.operator && f.operator !== 'all');
-
-        if (reportPageFilters.length > 0) {
-            chartData = chartData.filter((row) => {
-                return reportPageFilters.every((f) => {
-                    const candidate =
-                        row?.[f.field] ??
-                        (f.field === graphDefinition.x_axis ? row?.name : undefined) ??
-                        (f.field === graphDefinition.y_axis || f.field === 'value' ? row?.value : undefined);
-                    if (candidate == null) return false;
-                    const cStr = String(candidate).toLowerCase();
-                    const vStr = String(f.value ?? '').toLowerCase();
-                    if (f.operator === 'equals') return cStr === vStr;
-                    if (f.operator === 'contains') return cStr.includes(vStr);
-                    if (f.operator === 'gt') return Number(candidate) > Number(f.value);
-                    if (f.operator === 'lt') return Number(candidate) < Number(f.value);
-                    return true;
-                });
-            });
-        }
-        if (opts.sort === 'asc') chartData.sort((a, b) => a.value - b.value);
-        if (opts.sort === 'desc') chartData.sort((a, b) => b.value - a.value);
+        let chartData = renderedChartData;
 
         const isHierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
         const plotWidth = resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
@@ -3078,6 +3112,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             chartWidth: plotWidth,
             focusView: isFocusView,
             dashboardCard: isDashboardCanvas,
+            graphType: graphDefinition.graph_type,
         });
         const yAxisDomain = chartData.length > 0 && chartData.every((d) => Number(d?.value ?? 0) >= 0)
             ? [0, 'auto']
@@ -3114,7 +3149,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
 
         const tooltipFormatter = (value, name, props) => {
             const seriesMeasure = resolveMeasureMetadata(name, measures, false);
-            const val = seriesMeasure 
+            const val = seriesMeasure
                 ? formatCustomMeasureValue(value, seriesMeasure)
                 : formatNumber(value, 'full', name);
             const percentage = totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) + '%' : null;
@@ -3545,6 +3580,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     xLayout.charsPerSlot,
                                     xLayout.slotWidth,
                                     xLayout.fontSize,
+                                    xLayout.angle,
                                 )}
                             />
                         )}
@@ -3713,6 +3749,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     xLayout.charsPerSlot,
                                     xLayout.slotWidth,
                                     xLayout.fontSize,
+                                    xLayout.angle,
                                 )}
                                 label={!isMicro ? { value: opts.xLabel || graphDefinition.x_axis, position: 'insideBottom', offset: -10, fontSize: 10, fill: axisTitleColor, fontWeight: 600 } : undefined}
                             />
@@ -3774,6 +3811,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     xLayout.charsPerSlot,
                                     xLayout.slotWidth,
                                     xLayout.fontSize,
+                                    xLayout.angle,
                                 )}
                                 label={!isMicro ? { value: opts.xLabel || graphDefinition.x_axis, position: 'insideBottom', offset: -10, fontSize: 10, fill: axisTitleColor, fontWeight: 600 } : undefined}
                             />
@@ -5079,7 +5117,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     const cols = Math.min(3, chartData.length);
                     const itemScale = scale * 0.95;
                     return (
-                        <div 
+                        <div
                             className="kpi-comparison-grid"
                             style={{
                                 display: 'grid',
@@ -5097,9 +5135,9 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 const displayVal = formatCustomMeasureValue(entry.value, solved);
                                 const entryLabel = solved.displayName || entry.name;
                                 const entryDesc = solved.description || '';
-                                
+
                                 return (
-                                    <div 
+                                    <div
                                         key={idx}
                                         style={{
                                             display: 'flex',
@@ -5115,7 +5153,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                             overflow: 'hidden'
                                         }}
                                     >
-                                        <div 
+                                        <div
                                             style={{
                                                 fontSize: `${Math.max(9, Math.min(13, Math.round(10 * itemScale)))}px`,
                                                 fontWeight: 600,
@@ -5129,7 +5167,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                         >
                                             {entryLabel}
                                         </div>
-                                        <div 
+                                        <div
                                             style={{
                                                 color: palette[idx % palette.length] || mainColor,
                                                 fontSize: `${Math.max(16, Math.min(28, Math.round(20 * itemScale)))}px`,
@@ -5142,7 +5180,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                         >
                                             {displayVal}
                                         </div>
-                                        <div 
+                                        <div
                                             style={{
                                                 fontSize: `${Math.max(8, Math.min(11, Math.round(9 * itemScale)))}px`,
                                                 color: isDark ? '#64748b' : '#94a3b8',
@@ -5169,25 +5207,25 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 const quickMeasureName = opts.measureName || opts.title || quickMeasureField?.template_id;
                 const isPercentageMeasure = /percent|percentage|growth|mom|qoq|cagr|over_month|over_quarter/.test(quickTemplateId)
                     || /%\s*$|\*\s*100/.test(String(opts.measureFormula || ''));
-                
+
                 const kpiLabel = opts.xLabel || (matchedMeasure ? matchedMeasure.display_name : null) || quickMeasureName || graphDefinition.x_axis || 'Metric';
                 const showKpiFilter = graphDefinition.options?.showLegend !== false && rawLegendValues.length > 1;
                 const kpiCompact = !showZoomControls;
-                
+
                 const kpiValue = isQuickMeasureKpi && chartData.length === 1
                     ? chartData[0].value
                     : totalValue;
-                
+
                 const displayKpiValue = matchedMeasure
                     ? formatCustomMeasureValue(kpiValue, matchedMeasure)
                     : (isPercentageMeasure && typeof kpiValue === 'number'
                         ? formatPercentNumber(kpiValue)
                         : formatNumber(kpiValue));
-                
+
                 const kpiDesc = matchedMeasure?.description || (isQuickMeasureKpi ? 'Quick Measure calculation' : 'No description available');
 
                 return (
-                    <div 
+                    <div
                         className={`kpi-card-visual${kpiCompact ? ' kpi-card-visual--compact' : ''}`}
                         style={{
                             display: 'flex',
@@ -5207,7 +5245,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         <div className="kpi-card-visual-body" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', width: '100%' }}>
                             {/* Header: Display Name */}
                             <div className="kpi-card-visual-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span 
+                                <span
                                     className="kpi-card-visual-kicker"
                                     style={{
                                         fontSize: `${Math.max(11, Math.min(16, Math.round(12 * scale)))}px`,
@@ -5235,12 +5273,12 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     </div>
                                 )}
                             </div>
-                            
+
                             {/* Main Value: Formatted Result */}
                             <div className="kpi-card-visual-metrics" style={{ margin: '8px 0', flex: 1, display: 'flex', alignItems: 'center' }}>
-                                <div 
-                                    className="kpi-card-visual-value" 
-                                    style={{ 
+                                <div
+                                    className="kpi-card-visual-value"
+                                    style={{
                                         color: mainColor || (isDark ? '#3b82f6' : '#1d4ed8'),
                                         fontSize: `${Math.max(20, Math.min(54, Math.round(32 * scale)))}px`,
                                         fontWeight: 700,
@@ -5251,10 +5289,10 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     {displayKpiValue}
                                 </div>
                             </div>
-                            
+
                             {/* Footer: Description */}
-                            <div 
-                                className="kpi-card-visual-footer" 
+                            <div
+                                className="kpi-card-visual-footer"
                                 title={kpiDesc}
                                 style={{
                                     fontSize: `${Math.max(9, Math.min(13, Math.round(10 * scale)))}px`,
@@ -5822,7 +5860,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             }
 
             return (
-                <div 
+                <div
                     className="chart-wrapper chart-wrapper--state"
                     style={{
                         display: 'flex',
@@ -5834,7 +5872,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         boxSizing: 'border-box'
                     }}
                 >
-                    <div 
+                    <div
                         className="bi-smart-empty-card"
                         style={{
                             display: 'flex',
@@ -5854,7 +5892,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             userSelect: 'none'
                         }}
                     >
-                        <div 
+                        <div
                             style={{
                                 display: 'flex',
                                 alignItems: 'center',
@@ -5869,7 +5907,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         >
                             {icon}
                         </div>
-                        <h4 
+                        <h4
                             style={{
                                 margin: '0 0 8px 0',
                                 fontSize: '14px',
@@ -5879,7 +5917,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         >
                             {title}
                         </h4>
-                        <p 
+                        <p
                             style={{
                                 margin: 0,
                                 fontSize: '11px',
@@ -6211,13 +6249,36 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: 0 }}>
                                 {renderChart()}
                             </div>
-                        ) : (
-                            <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: '100%' }}>
-                                <ResponsiveContainer width="100%" height="100%">
-                                    {renderChart()}
-                                </ResponsiveContainer>
-                            </div>
-                        )}
+                        ) : (() => {
+                            const isScrollableBarFamily = ['column', 'stackedColumn', 'histogram'].includes(graphDefinition.graph_type);
+                            const hasScroll = isScrollableBarFamily && Array.isArray(renderedChartData) && renderedChartData.length > 10;
+                            const barSlotWidth = isFocusView ? 65 : 45;
+                            const dynamicChartWidth = hasScroll ? `${renderedChartData.length * barSlotWidth}px` : '100%';
+                            return (
+                                <div
+                                    style={{
+                                        width: canZoom ? `${zoomLevel * 100}%` : '100%',
+                                        height: canZoom ? `${zoomLevel * 100}%` : '100%',
+                                        minWidth: '100%',
+                                        minHeight: '100%',
+                                        overflowX: hasScroll ? 'auto' : 'hidden',
+                                        overflowY: 'hidden',
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            width: canZoom ? `${zoomLevel * 100}%` : dynamicChartWidth,
+                                            minWidth: '100%',
+                                            height: '100%',
+                                        }}
+                                    >
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            {renderChart()}
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                     {xAxisFooterTitle ? (
                         <div

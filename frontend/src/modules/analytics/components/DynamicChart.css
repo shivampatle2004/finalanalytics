@@ -429,7 +429,7 @@
     flex-direction: column;
 }
 
-.chart-wrapper--compact:not(.chart-wrapper--pie-donut) .chart-zoom-viewport > div {
+.chart-wrapper--compact:not(.chart-wrapper--pie-donut) .chart-zoom-viewport>div {
     flex: 1;
     min-height: 0;
     height: 100%;
@@ -1645,231 +1645,233 @@
 
 .dark-theme .chart-zoom-btn,
 .dark-theme .chart-zoom-reset {
-  background-color: var(--bg-primary);
-  border-color: var(--border-primary);
-  color: var(--text-secondary);
+    background-color: var(--bg-primary);
+    border-color: var(--border-primary);
+    color: var(--text-secondary);
 }
 
 .dark-theme .chart-zoom-btn:hover:not(:disabled),
 .dark-theme .chart-zoom-reset:hover:not(:disabled) {
-  background-color: var(--bg-tertiary);
-  border-color: var(--text-muted);
-  color: var(--text-primary);
+    background-color: var(--bg-tertiary);
+    border-color: var(--text-muted);
+    color: var(--text-primary);
 }
 
 .dark-theme .chart-zoom-value {
-  color: var(--text-secondary);
+    color: var(--text-secondary);
 }
 
 .dark-theme .metric-card-visual,
 .dark-theme .kpi-card-visual {
-  background: linear-gradient(165deg, var(--bg-elevated) 0%, var(--bg-primary) 100%);
-  border-color: var(--border-primary);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    background: linear-gradient(165deg, var(--bg-elevated) 0%, var(--bg-primary) 100%);
+    border-color: var(--border-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .dark-theme .metric-card-visual-kicker,
 .dark-theme .kpi-card-visual-kicker {
-  color: var(--text-muted);
+    color: var(--text-muted);
 }
 
 .dark-theme .metric-card-visual-heading,
 .dark-theme .kpi-card-visual-stat-value {
-  color: var(--text-primary);
+    color: var(--text-primary);
 }
 
 .dark-theme .metric-card-visual-metric,
 .dark-theme .kpi-card-visual-value {
-  color: var(--text-primary);
+    color: var(--text-primary);
 }
 
 .dark-theme .metric-card-visual-spark-empty {
-  background-color: var(--bg-primary);
-  border-color: var(--border-primary);
-  color: var(--text-muted);
+    background-color: var(--bg-primary);
+    border-color: var(--border-primary);
+    color: var(--text-muted);
 }
 
 .dark-theme .sparkline-bar-track {
-  background: var(--bg-tertiary);
+    background: var(--bg-tertiary);
 }
 
 .dark-theme .chart-axis-title--x {
-  color: var(--text-muted);
+    color: var(--text-muted);
 }
 
 .dark-theme .pie-donut-hover-tooltip {
-  background: #ffffff;
-  border-color: #cbd5e1;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    background: #ffffff;
+    border-color: #cbd5e1;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .dark-theme .sc-legend-panel {
-  border-left-color: var(--border-primary);
+    border-left-color: var(--border-primary);
 }
 
 .dark-theme .sc-legend-panel-toggle {
-  background: var(--bg-secondary);
-  border-bottom-color: var(--border-primary);
-  color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-bottom-color: var(--border-primary);
+    color: var(--text-secondary);
 }
 
 .dark-theme .sc-legend-panel-toggle:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
 }
 
 .dark-theme .sc-legend-search {
-  background-color: var(--bg-primary);
-  border-bottom-color: var(--border-primary);
-  color: var(--text-primary);
+    background-color: var(--bg-primary);
+    border-bottom-color: var(--border-primary);
+    color: var(--text-primary);
 }
 
 .dark-theme .sc-legend-search::placeholder {
-  color: var(--text-muted);
+    color: var(--text-muted);
 }
 
 .dark-theme .sc-legend-item:hover {
-  background-color: var(--bg-tertiary);
+    background-color: var(--bg-tertiary);
 }
 
 .dark-theme .sc-legend-name {
-  color: var(--text-secondary);
+    color: var(--text-secondary);
 }
 
 .dark-theme .sc-legend-val {
-  color: var(--text-muted);
+    color: var(--text-muted);
 }
 
 .dark-theme .sc-controls-bar {
-  color: var(--text-secondary);
-  background: #0C0C10 !important;
-  border-bottom-color: rgba(148, 163, 184, 0.18);
+    color: var(--text-secondary);
+    background: #0C0C10 !important;
+    border-bottom-color: rgba(148, 163, 184, 0.18);
 }
 
 .dark-theme .sc-controls-bar--focus .sc-controls-legend .legend-compact-meta {
-  color: var(--text-muted);
+    color: var(--text-muted);
 }
 
 .dark-theme .sc-toggle {
-  color: var(--text-secondary);
+    color: var(--text-secondary);
 }
 
 .dark-theme .sc-toggle input[type="checkbox"] {
-  background: rgba(15, 23, 42, 0.6);
-  border-color: rgba(148, 163, 184, 0.45);
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(148, 163, 184, 0.45);
 }
 
 .dark-theme .sc-toggle input[type="checkbox"]:checked {
-  background: #6366f1;
-  border-color: #6366f1;
+    background: #6366f1;
+    border-color: #6366f1;
 }
 
 .dark-theme .sc-slider-label {
-  border-left-color: rgba(148, 163, 184, 0.25);
+    border-left-color: rgba(148, 163, 184, 0.25);
 }
 
 .dark-theme .sc-slider {
-  background: rgba(148, 163, 184, 0.35);
+    background: rgba(148, 163, 184, 0.35);
 }
 
 .dark-theme .sc-slider::-moz-range-track {
-  background: rgba(148, 163, 184, 0.35);
+    background: rgba(148, 163, 184, 0.35);
 }
 
 .dark-theme .pie-donut-callout polyline,
 .dark-theme .pie-donut-callout line {
-  stroke: #64748b;
+    stroke: #64748b;
 }
 
 .dark-theme .pie-donut-callout polyline.pie-donut-callout__line--others,
 .dark-theme .pie-donut-callout line.pie-donut-callout__line--others {
-  stroke: #94a3b8;
+    stroke: #94a3b8;
 }
 
 .dark-theme .sc-info {
-  color: var(--text-muted);
+    color: var(--text-muted);
 }
 
 /* ── Paginated Legend & Highlighted States ── */
 .sc-legend-item {
-  transition: opacity 0.2s ease, background-color 0.2s ease;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
 }
 
 .sc-legend-item--selected {
-  background: var(--bg-tertiary);
-  font-weight: 700;
-  border-left: 2px solid var(--accent-primary, #6366f1);
-  padding-left: 4px; /* offset the border */
+    background: var(--bg-tertiary);
+    font-weight: 700;
+    border-left: 2px solid var(--accent-primary, #6366f1);
+    padding-left: 4px;
+    /* offset the border */
 }
 
 .sc-legend-item--dimmed {
-  opacity: 0.35;
+    opacity: 0.35;
 }
 
 .sc-legend-pagination button:hover:not(:disabled) {
-  background: var(--bg-tertiary) !important;
-  border-color: var(--border-secondary) !important;
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-secondary) !important;
 }
 
 /* ── Radar Chart Active Ticks & Ticks ── */
 .radar-axis-tick {
-  transition: fill 0.2s ease, font-size 0.2s ease, font-weight 0.2s ease;
+    transition: fill 0.2s ease, font-size 0.2s ease, font-weight 0.2s ease;
 }
 
 .radar-axis-tick--selected {
-  font-weight: 750;
-  fill: var(--text-primary, #ffffff) !important;
+    font-weight: 750;
+    fill: var(--text-primary, #ffffff) !important;
 }
 
 .radar-axis-tick--hovered {
-  font-weight: 700;
-  fill: var(--text-secondary, #e2e8f0) !important;
+    font-weight: 700;
+    fill: var(--text-secondary, #e2e8f0) !important;
 }
 
 .radar-active-dot {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .radar-tooltip-capsule {
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
-  animation: radar-tooltip-fadein 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
+    animation: radar-tooltip-fadein 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes radar-tooltip-fadein {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    from {
+        opacity: 0;
+        transform: translateY(2px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* Dark theme specific overrides for LegendPanel & Ticks */
 .dark-theme .sc-legend-item--selected {
-  background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 /* ── Table visual ────────────────────────────────────────────────────── */
 .bi-table-visual-scroll {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
 .bi-table-visual {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 .bi-table-visual th {
-  text-align: inherit;
+    text-align: inherit;
 }
 
 .bi-table-visual-row {
-  cursor: default;
+    cursor: default;
 }
 
 .bi-table-visual--fixed-cols {
-  width: max-content;
+    width: max-content;
 }
 
 /* ─── Axis and Graph Labels Visibility in Dark Mode ─── */

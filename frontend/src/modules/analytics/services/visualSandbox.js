@@ -52,7 +52,7 @@ const defaultRadarScript = (id, name, icon) => `
 `;
 
 export const PREINSTALLED_VISUALS = [
-    evaluateVisualScript(defaultRadarScript("com.microsoft.powerbi.visuals.radar_chart", "Radar Chart", ""), "Radar Chart")
+    // evaluateVisualScript(defaultRadarScript("com.microsoft.powerbi.visuals.radar_chart", "Radar Chart", ""), "Radar Chart")
 ];
 
 export const fetchAndEvaluateVisual = async (scriptUrl, metadata) => {
