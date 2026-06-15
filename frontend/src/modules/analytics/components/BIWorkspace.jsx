@@ -505,21 +505,62 @@ const BIWorkspace = ({
   const handleAddToReport = useCallback((graph) => {
     if (!graph) return;
 
-    const graphId = graph.id != null && String(graph.id).trim() !== '' ? graph.id : null;
+    const rawType = (graph.graph_type || 'bar').toLowerCase();
+    const title =
+      graph.options?.title ||
+      (graph.graph_type ? graph.graph_type.replace(/_/g, ' ') : '') ||
+      'Untitled';
+
+    // Build the same element shape that addGraphToReport() inside PaginatedReportModal
+    // produces — this ensures the chart renders with the correct type in the report.
     const element = {
-      id: newReportSlotId(),
-      graphId,
-      type: graph.graph_type,
-      title: graph.options?.title || graph.graph_type,
-      x_axis: graph.x_axis,
-      y_axis: graph.y_axis,
-      config: graph.options || {},
-      cached_data: graph.cached_data
+      id: graph.id,
+      title,
+      visualType: rawType,
+      dashboardId: graph.dashboardId || null,
+      graphDefinition: {
+        graph_type: graph.graph_type,
+        x_axis: graph.x_axis,
+        y_axis: graph.y_axis,
+        aggregation: graph.aggregation,
+        fileId: graph.file_id || graph.fileId || null,
+        file_id: graph.file_id || graph.fileId || null,
+        options: {
+          title: graph.options?.title,
+          dimension_fields: graph.options?.dimension_fields || [],
+          measure_fields: graph.options?.measure_fields || [],
+          filters: graph.options?.filters || [],
+          drillPath: graph.options?.drillPath || [],
+          drillLevelIndex: graph.options?.drillLevelIndex || 0,
+          expandModeActive: graph.options?.expandModeActive || false,
+          sorting: graph.options?.sorting || null,
+          color_scheme: graph.options?.color_scheme || null,
+        },
+      },
+      reportConfig: {
+        mode: 'current_state',
+        topN: 20,
+        bottomN: 10,
+        groupRemaining: true,
+        sortOrder: 'desc',
+        pageLayout: 'full_page',
+        oneChartPerPage: true,
+        includeDataTable: false,
+        includeSummaryMetrics: false,
+        landscapeMode: false,
+        categoryThreshold: 20,
+      },
     };
 
-    setReportElements((prev) => [...prev, element]);
+    setReportElements((prev) => {
+      // Avoid duplicates — same behaviour as addGraphToReport inside the modal
+      if (prev.some((e) => e.id === graph.id)) return prev;
+      return [...prev, element];
+    });
 
-    alert(`"${element.title}" added to report. Open Insert > Paginated Report to generate PDF.`);
+    // Open the modal immediately so the user sees the config panel,
+    // same experience as clicking + from inside the modal.
+    setShowPaginatedReportModal(true);
   }, []);
 
   const handleDeleteVisual = useCallback((id) => {
