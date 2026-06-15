@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { ThemeContext } from '../../shared/context/ThemeContext'
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import './App.css'
 import './styles/theme.css'
@@ -135,9 +136,11 @@ function App() {
     console.log('✅ [Logout] Auth and route cleared, user will see login page');
   }
 
-  const [isDarkMode, setIsDarkMode] = useState(
+  const themeContext = useContext(ThemeContext)
+  const [isLocalDarkMode, setLocalDarkMode] = useState(
     localStorage.getItem('theme') === 'dark' || false
   )
+  const isDarkMode = themeContext ? themeContext.isDark : isLocalDarkMode
   const effectiveIsAuthenticated = isAuthenticated || !!userId
 
   // Keep legacy sessions usable: if userId exists, ensure auth flag is also persisted.
@@ -152,9 +155,13 @@ function App() {
    * Toggle between light and dark theme
    */
   const toggleTheme = () => {
-    const newTheme = !isDarkMode
-    setIsDarkMode(newTheme)
-    localStorage.setItem('theme', newTheme ? 'dark' : 'white')
+    if (themeContext) {
+      themeContext.toggleTheme()
+    } else {
+      const newTheme = !isLocalDarkMode
+      setLocalDarkMode(newTheme)
+      localStorage.setItem('theme', newTheme ? 'dark' : 'white')
+    }
   }
 
   return (

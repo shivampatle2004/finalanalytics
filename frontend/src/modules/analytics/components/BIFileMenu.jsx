@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './BIFileMenu.css';
 
-const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
+const BIFileMenu = ({ onClose, onAction, fileName, userId, isDarkMode }) => {
     const [activeSection, setActiveSection] = useState('home');
     const [recommendedTab, setRecommendedTab] = useState('recent');
     const [filterKeyword, setFilterKeyword] = useState('');
@@ -25,7 +25,7 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
         const loadRecentFiles = async () => {
             if (userId) {
                 try {
-                    const response = await fetch(`/api/files/user/${userId}`);
+                    const response = await fetch(`/analytics/api/files/user/${userId}`);
                     if (response.ok) {
                         const data = await response.json();
                         setRecentFiles(data);
@@ -89,7 +89,7 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
         e.stopPropagation();
         if (window.confirm(`Are you sure you want to delete "${file.fileName}"? This will permanently remove all associated data and visualizations.`)) {
             try {
-                const response = await fetch(`/api/files/${file.id}`, {
+                const response = await fetch(`/analytics/api/files/${file.id}`, {
                     method: 'DELETE',
                 });
                 if (response.ok) {
@@ -287,7 +287,7 @@ const BIFileMenu = ({ onClose, onAction, fileName, userId }) => {
     };
 
     return (
-        <div className="bi-file-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className={`bi-file-overlay ${isDarkMode ? 'dark-theme' : ''}`} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
             <div className="bi-file-panel">
                 {/* Left Sidebar */}
                 <div className="bi-file-sidebar">

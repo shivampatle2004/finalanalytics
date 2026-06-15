@@ -10,7 +10,7 @@ const SQLForm = ({ userId, onUploadSuccess, onConnectionSuccess }) => {
     // Fetch existing connections
     useEffect(() => {
         if (userId) {
-            fetch(`/api/sql/connections/${userId}`)
+            fetch(`/analytics/api/sql/connections/${userId}`)
                 .then(res => res.json())
                 .then(data => setConnections(data))
                 .catch(err => console.error("Error fetching connections:", err));
@@ -60,7 +60,7 @@ const SQLForm = ({ userId, onUploadSuccess, onConnectionSuccess }) => {
         formData.append('user_id', userId);
 
         try {
-            const response = await fetch('/api/sql/upload', {
+            const response = await fetch('/analytics/api/sql/upload', {
                 method: 'POST',
                 body: formData,
             });
@@ -91,7 +91,7 @@ const SQLForm = ({ userId, onUploadSuccess, onConnectionSuccess }) => {
         });
 
         try {
-            const response = await fetch('/api/sql/connect', {
+            const response = await fetch('/analytics/api/sql/connect', {
                 method: 'POST',
                 body: formData,
             });

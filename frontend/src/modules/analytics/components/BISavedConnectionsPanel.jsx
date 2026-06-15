@@ -221,8 +221,8 @@ export default function BISavedConnectionsPanel({
     setLoading(true);
     try {
       const [dbRes, apiRes] = await Promise.all([
-        fetch(`/api/connections?user_id=${encodeURIComponent(userId)}`),
-        fetch('/api/rest/connections'),
+        fetch(`/analytics/api/connections?user_id=${encodeURIComponent(userId)}`),
+        fetch('/analytics/api/rest/connections'),
       ]);
       const dbData = await dbRes.json().catch(() => ({}));
       const apiData = await apiRes.json().catch(() => ({}));
@@ -261,6 +261,14 @@ export default function BISavedConnectionsPanel({
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    const onApiSaved = () => {
+      load();
+    };
+    window.addEventListener('analytics-api-connection-saved', onApiSaved);
+    return () => window.removeEventListener('analytics-api-connection-saved', onApiSaved);
   }, [load]);
 
   useEffect(() => {
@@ -314,7 +322,7 @@ export default function BISavedConnectionsPanel({
 
   const handleReportDownload = useCallback(async (fileId, fileName) => {
     try {
-      const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/download`);
+      const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/download`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Download failed');
       const fname = data.fileName || fileName || 'download';
@@ -348,7 +356,7 @@ export default function BISavedConnectionsPanel({
     async (fileId) => {
       if (!window.confirm('Delete this report file? This cannot be undone.')) return;
       try {
-        const res = await fetch(`/api/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+        const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
         if (!res.ok) throw new Error('Delete failed');
         if (detailPanelProfileId) await loadActivity(detailPanelProfileId);
         closeReportMenu();
@@ -407,7 +415,7 @@ export default function BISavedConnectionsPanel({
     (fileId, fileName) => {
       if (!fileId) return;
       const q = fileName ? `?fileName=${encodeURIComponent(fileName)}` : '';
-      navigate(`/workspace/${encodeURIComponent(fileId)}${q}`);
+      navigate(`/analytics/workspace/${encodeURIComponent(fileId)}${q}`);
     },
     [navigate]
   );
@@ -443,7 +451,7 @@ export default function BISavedConnectionsPanel({
     setConnectingId(profileId);
     setError('');
     try {
-      const res = await fetch(`/api/connections/connect/${encodeURIComponent(profileId)}`, {
+      const res = await fetch(`/analytics/api/connections/connect/${encodeURIComponent(profileId)}`, {
         method: 'POST',
       });
       const data = await res.json().catch(() => ({}));
@@ -470,7 +478,7 @@ export default function BISavedConnectionsPanel({
     setConnectingId(connectionId);
     setError('');
     try {
-      const res = await fetch(`/api/rest/connections/${encodeURIComponent(connectionId)}/refresh`, {
+      const res = await fetch(`/analytics/api/rest/connections/${encodeURIComponent(connectionId)}/refresh`, {
         method: 'POST',
       });
       const data = await res.json().catch(() => ({}));
@@ -487,7 +495,7 @@ export default function BISavedConnectionsPanel({
     setDisconnectingId(profileId);
     setError('');
     try {
-      const res = await fetch(`/api/connections/disconnect/${encodeURIComponent(profileId)}`, {
+      const res = await fetch(`/analytics/api/connections/disconnect/${encodeURIComponent(profileId)}`, {
         method: 'POST',
       });
       const data = await res.json().catch(() => ({}));
@@ -511,7 +519,7 @@ export default function BISavedConnectionsPanel({
 
   const toggleFavorite = async (profileId, current) => {
     try {
-      const res = await fetch(`/api/connections/${encodeURIComponent(profileId)}/favorite`, {
+      const res = await fetch(`/analytics/api/connections/${encodeURIComponent(profileId)}/favorite`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_favorite: !current }),
@@ -526,7 +534,7 @@ export default function BISavedConnectionsPanel({
   const handleDelete = async (profileId) => {
     if (!window.confirm('Delete this saved connection?')) return;
     try {
-      const res = await fetch(`/api/connections/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+      const res = await fetch(`/analytics/api/connections/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Delete failed');
       if (detailPanelProfileId === profileId) {
         setDetailPanelProfileId(null);
@@ -540,7 +548,7 @@ export default function BISavedConnectionsPanel({
   const handleDeleteApiConnection = async (connectionId) => {
     if (!window.confirm('Delete this saved API connection?')) return;
     try {
-      const res = await fetch(`/api/rest/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' });
+      const res = await fetch(`/analytics/api/rest/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Delete failed');
       await load();
@@ -553,14 +561,14 @@ export default function BISavedConnectionsPanel({
     setConnectingId(connectionId);
     setError('');
     try {
-      const res = await fetch(`/api/rest/connections/${encodeURIComponent(connectionId)}/materialize`, {
+      const res = await fetch(`/analytics/api/rest/connections/${encodeURIComponent(connectionId)}/materialize`, {
         method: 'POST',
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not open dataset');
       const id = data.file_id;
       const name = data.file_name || 'API Dataset';
-      navigate(`/workspace/${encodeURIComponent(id)}?fileName=${encodeURIComponent(name)}`);
+      navigate(`/analytics/workspace/${encodeURIComponent(id)}?fileName=${encodeURIComponent(name)}`);
     } catch (e) {
       setError(e.message || 'Could not open dataset');
     } finally {
@@ -584,7 +592,7 @@ export default function BISavedConnectionsPanel({
     const pwd = fd.get('password');
     if (pwd && String(pwd).length > 0) body.password = String(pwd);
     try {
-      const res = await fetch(`/api/connections/${encodeURIComponent(editing.id)}`, {
+      const res = await fetch(`/analytics/api/connections/${encodeURIComponent(editing.id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

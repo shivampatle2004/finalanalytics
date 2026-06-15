@@ -209,7 +209,7 @@ def generate_report_pdf(
                 # We use execute_paginated_select with a large limit for paginated report
                 data = execute_paginated_select(
                     connection_id="", # typically left empty if profile_id used
-                    query=query,
+                    sql=query,
                     limit=10000,
                     offset=0,
                     profile_id=connection_id,
@@ -283,7 +283,7 @@ def generate_report_pdf(
             try:
                 data = execute_paginated_select(
                     connection_id="",
-                    query=query,
+                    sql=query,
                     limit=10000,
                     offset=0,
                     profile_id=connection_id,

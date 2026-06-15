@@ -35,7 +35,7 @@ const TASK_META = {
   rootCause: { label: 'Root cause', icon: Target },
   summary: { label: 'Summary', icon: Compass },
   nextSteps: { label: 'Next steps', icon: Lightbulb },
-  story: { label: 'Story', icon: Activity },
+  story: { label: 'Stories', icon: Activity },
   ask: { label: 'Ask', icon: MessageSquare },
 };
 
@@ -113,16 +113,28 @@ function textsSimilar(a, b) {
 }
 
 /** Which blocks to show per tab — avoids duplicate Summary + Narrative on Explain */
+function getInsightLines(result) {
+  const raw = result?.narrative || result?.summary || '';
+  if (!raw) return [];
+  const headline = result?.headline || '';
+  return String(raw)
+    .split('\n')
+    .map((ln) => ln.trim())
+    .filter(Boolean)
+    .filter((ln) => !textsSimilar(ln, headline));
+}
+
 function getSectionPlan(task, result) {
   const hasTrends = Array.isArray(result?.trends) && result.trends.length > 0;
   const hasAnomalies = Array.isArray(result?.anomalies) && result.anomalies.length > 0;
   const hasDrivers = Array.isArray(result?.rootCauseDrivers) && result.rootCauseDrivers.length > 0;
   const hasRecs = Array.isArray(result?.recommendations) && result.recommendations.length > 0;
   const hasRoot = Boolean(result?.rootCause);
-  const hasStats = Boolean(result?.stats);
+  const hasStats = Boolean(result?.stats?.count);
+  const insightLines = getInsightLines(result);
+  const hasBody = insightLines.length > 0;
 
   const headline = Boolean(result?.headline);
-  const narrative = Boolean(result?.narrative);
   const summary = Boolean(result?.summary);
 
   const plan = {
@@ -138,43 +150,43 @@ function getSectionPlan(task, result) {
   switch (task) {
     case 'trend':
       plan.headline = headline;
-      plan.trends = hasTrends;
       plan.stats = hasStats;
-      if (!hasTrends && summary) plan.body = true;
+      plan.trends = hasTrends;
+      plan.body = !hasTrends && hasBody;
       break;
     case 'anomalies':
       plan.headline = headline;
       plan.anomalies = hasAnomalies;
-      if (!hasAnomalies && summary) plan.body = true;
+      plan.body = !hasAnomalies && hasBody;
       break;
     case 'rootCause':
       plan.headline = headline;
       plan.rootCause = hasRoot || hasDrivers;
-      if (!hasRoot && summary) plan.body = true;
+      plan.body = !hasRoot && hasBody;
       break;
     case 'summary':
       plan.headline = headline;
-      plan.body = summary && !textsSimilar(result.summary, result.headline);
+      plan.body = hasBody;
       break;
     case 'nextSteps':
       plan.recommendations = hasRecs;
-      plan.body = !hasRecs && summary;
+      plan.body = !hasRecs && hasBody;
       break;
     case 'story':
-      plan.headline = false;
-      plan.body = narrative || summary;
+      plan.body = hasBody || Boolean(summary);
       plan.trends = hasTrends;
       plan.anomalies = hasAnomalies;
+      plan.stats = hasStats;
       break;
     case 'explain':
     default:
       plan.headline = headline;
-      plan.body = narrative || (summary && !textsSimilar(result.summary, result.headline));
+      plan.stats = hasStats;
+      plan.body = hasBody;
       plan.trends = hasTrends;
       plan.anomalies = hasAnomalies;
       plan.rootCause = hasRoot || hasDrivers;
       plan.recommendations = hasRecs;
-      plan.stats = hasStats;
       break;
   }
 
@@ -235,6 +247,7 @@ export default function BIAIInsightsPanel({
   const modeWrapRef = useRef(null);
 
   const meta = TASK_META[task] || TASK_META.explain;
+  const TaskIcon = meta.icon;
   const modeMeta = useMemo(() => MODE_LIST.find((m) => m.id === mode) || MODE_LIST[0], [mode]);
   const activeModeLabel = result?.mode || modeMeta.label;
 
@@ -242,6 +255,8 @@ export default function BIAIInsightsPanel({
     () => (result ? getSectionPlan(task, result) : null),
     [task, result],
   );
+
+  const insightLines = useMemo(() => (result ? getInsightLines(result) : []), [result]);
 
   useEffect(() => {
     if (!open) return;
@@ -309,8 +324,6 @@ export default function BIAIInsightsPanel({
   if (!open) return null;
 
   const showChat = task === 'ask' || task === 'chat';
-  const TaskIcon = meta.icon;
-  const bodyText = result?.narrative || result?.summary;
 
   return (
     <>
@@ -324,9 +337,7 @@ export default function BIAIInsightsPanel({
       >
         <header className="bi-ai-header">
           <div className="bi-ai-header-left">
-            <div className="bi-ai-header-glyph" aria-hidden>
-              <Sparkles size={15} />
-            </div>
+            <Sparkles size={18} strokeWidth={2} className="bi-ai-header-icon" aria-hidden />
             <div className="bi-ai-header-text">
               <h2 id="bi-ai-panel-title" className="bi-ai-header-title">AI Insights</h2>
               <p className="bi-ai-header-sub">
@@ -429,14 +440,14 @@ export default function BIAIInsightsPanel({
 
           {hasSelectedVisual && !loading && !error && result && !showChat && sectionPlan && (
             <div className="bi-ai-result">
-              <div className="bi-ai-result-meta">
-                <span className="bi-ai-result-task">
-                  <TaskIcon size={13} />
-                  {meta.label}
-                  {result.title ? ` · ${result.title}` : ''}
-                </span>
-                <span className="bi-ai-mode-chip">{activeModeLabel}</span>
-              </div>
+              {sectionPlan.stats && result.stats && (
+                <section className="bi-ai-stats-row">
+                  <StatPill label="Total" value={fmt(result.stats.total)} />
+                  <StatPill label="Avg" value={fmt(result.stats.avg)} />
+                  <StatPill label="Max" value={fmt(result.stats.max)} />
+                  <StatPill label="Points" value={result.stats.count ?? '—'} />
+                </section>
+              )}
 
               {sectionPlan.headline && result.headline && (
                 <section className="bi-ai-hero">
@@ -444,28 +455,29 @@ export default function BIAIInsightsPanel({
                 </section>
               )}
 
-              {sectionPlan.body && bodyText && (
+              {sectionPlan.body && insightLines.length > 0 && (
                 <section className="bi-ai-block">
-                  <h4 className="bi-ai-block-title">
-                    {task === 'story' ? 'Story' : task === 'summary' ? 'Summary' : 'Insight'}
-                  </h4>
-                  <MarkdownBlock text={bodyText} />
+                  <h4 className="bi-ai-block-title">Insight</h4>
+                  <ul className="bi-ai-insight-list">
+                    {insightLines.map((line, i) => (
+                      <li key={i}><MarkdownBlock text={line} /></li>
+                    ))}
+                  </ul>
                 </section>
               )}
 
               {sectionPlan.trends && (
                 <section className="bi-ai-block">
-                  <h4 className="bi-ai-block-title"><TrendingUp size={12} /> Trends</h4>
+                  <h4 className="bi-ai-block-title">Trends</h4>
                   <ul className="bi-ai-trend-list">
                     {result.trends.map((t, i) => (
                       <li key={i} className={`bi-ai-trend-item bi-ai-trend-item--${t.direction || 'flat'}`}>
-                        <span className="bi-ai-trend-pct">
-                          {t.pct_change != null ? `${t.pct_change > 0 ? '+' : ''}${t.pct_change}%` : '—'}
-                        </span>
-                        <div>
-                          <div className="bi-ai-trend-label">{t.label}</div>
-                          <div className="bi-ai-trend-sum">{t.summary}</div>
-                        </div>
+                        {t.pct_change != null && (
+                          <span className="bi-ai-trend-pct">
+                            {t.pct_change > 0 ? '+' : ''}{t.pct_change}%
+                          </span>
+                        )}
+                        <span className="bi-ai-trend-sum">{t.summary}</span>
                       </li>
                     ))}
                   </ul>
@@ -474,7 +486,7 @@ export default function BIAIInsightsPanel({
 
               {sectionPlan.anomalies && (
                 <section className="bi-ai-block">
-                  <h4 className="bi-ai-block-title"><AlertTriangle size={12} /> Anomalies</h4>
+                  <h4 className="bi-ai-block-title">Anomalies</h4>
                   <ul className="bi-ai-anom-list">
                     {result.anomalies.map((a, i) => (
                       <li key={i} className={`bi-ai-anom-item bi-ai-anom-item--${a.direction || 'spike'}`}>
@@ -496,7 +508,7 @@ export default function BIAIInsightsPanel({
 
               {sectionPlan.rootCause && (
                 <section className="bi-ai-block">
-                  <h4 className="bi-ai-block-title"><Target size={12} /> Root cause</h4>
+                  <h4 className="bi-ai-block-title">Root cause</h4>
                   {result.rootCause && <MarkdownBlock text={result.rootCause} />}
                   {result.rootCauseDrivers?.length > 0 && (
                     <ul className="bi-ai-driver-list">
@@ -525,7 +537,7 @@ export default function BIAIInsightsPanel({
 
               {sectionPlan.recommendations && (
                 <section className="bi-ai-block">
-                  <h4 className="bi-ai-block-title"><Lightbulb size={12} /> Recommendations</h4>
+                  <h4 className="bi-ai-block-title">Recommendations</h4>
                   <ol className="bi-ai-recs">
                     {result.recommendations.map((r, i) => (
                       <li key={i}><MarkdownBlock text={r} /></li>
@@ -534,19 +546,6 @@ export default function BIAIInsightsPanel({
                 </section>
               )}
 
-              {sectionPlan.stats && result.stats && (
-                <section className="bi-ai-block bi-ai-block--stats">
-                  <h4 className="bi-ai-block-title">At a glance</h4>
-                  <div className="bi-ai-stat-grid">
-                    <StatPill label="Total" value={fmt(result.stats.total)} />
-                    <StatPill label="Average" value={fmt(result.stats.avg)} />
-                    <StatPill label="Min" value={fmt(result.stats.min)} />
-                    <StatPill label="Max" value={fmt(result.stats.max)} />
-                    <StatPill label="Median" value={fmt(result.stats.median)} />
-                    <StatPill label="Points" value={result.stats.count ?? '—'} />
-                  </div>
-                </section>
-              )}
             </div>
           )}
 

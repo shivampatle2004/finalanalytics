@@ -7,6 +7,7 @@ import DataPreviewPanel from '../components/DataPreviewPanel'
 import DataTransformationPanel from '../components/DataTransformationPanel'
 import ChartCustomizer from '../components/ChartCustomizer'
 import DataService from '../services/dataService'
+import PaginatedReportModal from '../components/PaginatedReportModal'
 import * as XLSX from 'xlsx'
 import './Dashboard.css'
 
@@ -114,6 +115,8 @@ function Dashboard({ userName, userId }) {
   const [showDataPreview, setShowDataPreview] = useState(false) // Toggle data preview display
   const [showTransformPanel, setShowTransformPanel] = useState(false);
   const [showChartDataTable, setShowChartDataTable] = useState(false);
+  const [showPaginatedReportModal, setShowPaginatedReportModal] = useState(false);
+  const [reportElements, setReportElements] = useState([]);
 
   const ITEMS_PER_PAGE = 7;
   const paginatedActivity = historyItems.slice(historyPage * ITEMS_PER_PAGE, (historyPage + 1) * ITEMS_PER_PAGE);
@@ -130,12 +133,12 @@ function Dashboard({ userName, userId }) {
         console.log(`DEBUG: Fetching dashboard data for user ${userId}...`);
 
         // 1. Fetch user files
-        const filesRes = await fetch(`/api/files/user/${userId}`);
+        const filesRes = await fetch(`/analytics/api/files/user/${userId}`);
         const filesData = filesRes.ok ? await filesRes.json() : [];
         setReports(filesData);
 
         // 2. Fetch user activity
-        const activityRes = await fetch(`/api/files/user/${userId}/activity`);
+        const activityRes = await fetch(`/analytics/api/files/user/${userId}/activity`);
         const activityData = activityRes.ok ? await activityRes.json() : [];
         setHistoryItems(activityData);
 
@@ -159,7 +162,7 @@ function Dashboard({ userName, userId }) {
 
     const fetchSchema = async () => {
       try {
-        const res = await fetch(`/api/files/${chart.fileId}/schema`);
+        const res = await fetch(`/analytics/api/files/${chart.fileId}/schema`);
         if (res.ok) {
           const schemaData = await res.json();
           setActiveSchema(schemaData);
@@ -198,7 +201,7 @@ function Dashboard({ userName, userId }) {
     }, ...prev]);
 
     setTimeout(() => {
-      fetch(`/api/files/user/${userId}/activity`)
+      fetch(`/analytics/api/files/user/${userId}/activity`)
         .then(res => res.json())
         .then(data => setHistoryItems(data));
     }, 2000);
@@ -246,6 +249,28 @@ function Dashboard({ userName, userId }) {
     setCharts(prev => prev.map(c => c.id === id ? { ...c, options: newConfig } : c));
   };
 
+  const handleAddFocusedToReport = (chart) => {
+    if (!chart) return;
+    const rawType = (chart.type || 'bar').toLowerCase();
+    const el = {
+      id: chart.id,
+      title: chart.title || 'Untitled Visual',
+      type: rawType === 'table' ? 'table' : rawType,
+      x_axis: chart.xAxis || '',
+      y_axis: chart.yAxis || '',
+      limit: '15',
+      sort: 'none',
+      captureMode: 'snapshot',
+    };
+
+    setReportElements(prev => {
+      if (prev.some(e => e.id === chart.id)) return prev;
+      return [...prev, el];
+    });
+
+    setShowPaginatedReportModal(true);
+  };
+
   const handleClearAllCharts = () => {
     if (window.confirm("Remove all active visualizations?")) {
       setCharts([]);
@@ -257,7 +282,7 @@ function Dashboard({ userName, userId }) {
     if (!window.confirm("Are you sure you want to remove this dataset? This will also delete associated visualizations.")) return;
 
     try {
-      const response = await fetch(`/api/files/${fileId}`, {
+      const response = await fetch(`/analytics/api/files/${fileId}`, {
         method: 'DELETE',
       });
       if (response.ok) {
@@ -289,7 +314,7 @@ function Dashboard({ userName, userId }) {
 
     try {
       const { fileId, fileName } = detailedReportData;
-      const res = await fetch(`/api/files/${fileId}/download`);
+      const res = await fetch(`/analytics/api/files/${fileId}/download`);
       if (!res.ok) throw new Error("Failed to fetch file");
 
       const response = await res.json();
@@ -434,7 +459,7 @@ function Dashboard({ userName, userId }) {
 
   const handleExportReport = async (fileId, fileName) => {
     try {
-      const res = await fetch(`/api/files/${fileId}/download`);
+      const res = await fetch(`/analytics/api/files/${fileId}/download`);
       if (!res.ok) throw new Error("Failed to download file");
 
       const response = await res.json();
@@ -465,6 +490,17 @@ function Dashboard({ userName, userId }) {
       alert("Error exporting: " + err.message);
     }
   }
+
+  const focusedChart = charts.find(c => c.id === activeChartId);
+  const activeReport = focusedChart ? reports.find(r => r.id === focusedChart.fileId) : null;
+  const mockDataset = {
+    columns: activeSchema?.columns || activeSchema || [],
+    rows: dataset?.rows || [],
+    metadata: {
+      fileId: focusedChart?.fileId,
+      totalRows: dataset?.rows?.length || activeReport?.recordCount || 0
+    }
+  };
 
   if (isLoading && reports.length === 0) {
     return (
@@ -680,6 +716,14 @@ function Dashboard({ userName, userId }) {
 
                                       <div className="viz-actions-group">
                                         <button
+                                          className="btn-action-pill"
+                                          onClick={() => handleAddFocusedToReport(focusedChart)}
+                                          style={{ color: '#7a1e3a', fontWeight: 'bold' }}
+                                        >
+                                          <span style={{ fontSize: '1.1rem', marginRight: '4px' }}>+</span>
+                                          ADD TO REPORT
+                                        </button>
+                                        <button
                                           className={`btn-action-pill ${isCustomizing ? 'active' : ''}`}
                                           onClick={() => setIsCustomizing(!isCustomizing)}
                                         >
@@ -694,7 +738,7 @@ function Dashboard({ userName, userId }) {
                                     </div>
                                   </div>
 
-                                  <div className="viz-content-render-focused-v2">
+                                  <div className="viz-content-render-focused-v2" data-visual-id={focusedChart.id}>
                                     <Chart
                                       type={focusedChart.type}
                                       data={focusedChart.data}
@@ -947,6 +991,17 @@ function Dashboard({ userName, userId }) {
           </div>
         </main>
       )}
+
+      <PaginatedReportModal
+        isOpen={showPaginatedReportModal}
+        onClose={() => setShowPaginatedReportModal(false)}
+        fileId={focusedChart?.fileId || (activeReport?.id)}
+        dataset={mockDataset}
+        fileName={activeReport?.fileName}
+        reportElements={reportElements}
+        onReportElementsChange={setReportElements}
+        availableGraphs={charts}
+      />
 
       <SmartVisualizationModal
         isOpen={showBuilder}

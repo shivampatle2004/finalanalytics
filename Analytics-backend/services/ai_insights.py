@@ -130,6 +130,14 @@ def _series_from_ctx(ctx: Dict[str, Any]) -> Tuple[List[str], List[float], Optio
     values: List[float] = []
     value_field: Optional[str] = None
 
+    dims = ctx.get("dimensions") or []
+    measures = ctx.get("measures") or []
+    dim_key = str(dims[0]) if dims else None
+    meas_key = None
+    if measures:
+        m0 = measures[0]
+        meas_key = str(m0.get("column") if isinstance(m0, dict) else m0)
+
     raw = ctx.get("data")
     if isinstance(raw, list) and raw:
         for d in raw:
@@ -137,10 +145,17 @@ def _series_from_ctx(ctx: Dict[str, Any]) -> Tuple[List[str], List[float], Optio
                 continue
             lbl = d.get("label") or d.get("category") or d.get("name") or d.get("x")
             val = d.get("value") if "value" in d else d.get("y")
+            if lbl is None and dim_key and dim_key in d:
+                lbl = d.get(dim_key)
+            if val is None and meas_key and meas_key in d:
+                val = d.get(meas_key)
+                value_field = meas_key
             if val is None:
                 # Find first numeric field that isn't the label
                 for k, v in d.items():
                     if k in ("label", "category", "name", "x"):
+                        continue
+                    if dim_key and k == dim_key:
                         continue
                     n = _safe_num(v)
                     if n is not None:
@@ -150,6 +165,9 @@ def _series_from_ctx(ctx: Dict[str, Any]) -> Tuple[List[str], List[float], Optio
             if lbl is None:
                 # First non-numeric value as label
                 for k, v in d.items():
+                    if dim_key and k == dim_key:
+                        lbl = v
+                        break
                     if _safe_num(v) is None:
                         lbl = v
                         break
@@ -617,6 +635,8 @@ class AIInsightsService:
         narrative = _llm_polish(payload, ctx, _mode(mode), "Explain this chart")
         if narrative:
             payload["narrative"] = narrative
+        elif payload.get("summary"):
+            payload["narrative"] = payload["summary"]
         return payload
 
     # — Trend only —

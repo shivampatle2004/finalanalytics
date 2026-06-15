@@ -404,17 +404,18 @@
    DARK THEME STYLES FOR FILE MENU
    ═══════════════════════════════════════════════════════════════════════════ */
 
+.dark-theme.bi-file-overlay,
 .dark-theme .bi-file-overlay {
-    background-color: rgba(0, 0, 0, 0.45);
+    background-color: rgba(0, 0, 0, 0.45) !important;
 }
 
 .dark-theme .bi-file-panel {
-    background-color: var(--bg-secondary);
+    background-color: #0C0C10 !important;
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
 }
 
 .dark-theme .bi-file-sidebar {
-    background-color: var(--bg-primary);
+    background-color: #0C0C10 !important;
     border-right: 1px solid var(--border-primary);
 }
 
@@ -459,7 +460,7 @@
 }
 
 .dark-theme .bi-file-content {
-    background-color: var(--bg-secondary);
+    background-color: #0C0C10 !important;
 }
 
 .dark-theme .bi-section-chevron {

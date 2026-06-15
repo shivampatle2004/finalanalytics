@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 class ModelEngine:
     _model_df_cache = {}
     _model_df_cache_lock = threading.Lock()
-    _MODEL_DF_CACHE_TTL_SECONDS = 90
+    _MODEL_DF_CACHE_TTL_SECONDS = 600
     _MODEL_DF_CACHE_MAX_SIZE = 20
 
     @staticmethod
@@ -66,6 +66,17 @@ class ModelEngine:
                 oldest_key = min(ModelEngine._model_df_cache, key=lambda k: ModelEngine._model_df_cache[k][0])
                 ModelEngine._model_df_cache.pop(oldest_key, None)
             ModelEngine._model_df_cache[cache_key] = (now, df)
+
+    @staticmethod
+    def clear_cache_for_file(file_id: str) -> int:
+        """Drop in-memory model dataframe cache entries tied to a file id."""
+        removed = 0
+        with ModelEngine._model_df_cache_lock:
+            keys = [k for k in ModelEngine._model_df_cache if f'"base_file_id": "{file_id}"' in k]
+            for k in keys:
+                ModelEngine._model_df_cache.pop(k, None)
+                removed += 1
+        return removed
 
     @staticmethod
     def get_model_cache_status(file_id: str, db) -> Dict[str, Any]:

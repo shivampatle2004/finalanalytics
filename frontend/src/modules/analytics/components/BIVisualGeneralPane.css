@@ -172,3 +172,54 @@
 .bi-general-pane .bi-format-placeholder {
     padding: 28px 12px;
 }
+
+/* ─── Dark Theme Overrides for Analytics Tab ─── */
+.dark-theme .bi-prop-tool-btn {
+    background: var(--bg-secondary);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-prop-tool-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    color: #ff6b8b;
+}
+
+.dark-theme .bi-prop-accordion-header {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-prop-accordion-header:hover {
+    color: #ff6b8b;
+}
+
+.dark-theme .bi-prop-label {
+    color: var(--text-secondary);
+}
+
+.dark-theme .bi-prop-input {
+    background: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--input-text);
+}
+
+.dark-theme .bi-prop-input:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(255, 107, 139, 0.2);
+}
+
+.dark-theme .bi-prop-textarea {
+    background: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--input-text);
+}
+
+.dark-theme .bi-prop-textarea:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(255, 107, 139, 0.2);
+}
+
+.dark-theme .bi-prop-hint {
+    color: var(--text-muted);
+}

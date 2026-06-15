@@ -364,3 +364,167 @@
   flex: 1;
   min-width: 0;
 }
+
+/* ── Dark Theme Overrides ───────────────────────────────────────────── */
+.dark-theme .bi-sql-datasets-panel {
+  border-right-color: var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+.dark-theme .bi-sql-datasets-panel--collapsed {
+  border-right-color: var(--border-primary);
+  background: var(--bg-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-panel-expand-label {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-panel-expand {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-sql-datasets-panel-expand:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-sql-datasets-panel-header {
+  color: var(--text-secondary);
+  border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .bi-sql-datasets-panel-tab {
+  border-color: var(--border-primary);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-sql-datasets-panel-tab.active {
+  border-color: var(--border-secondary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-sql-datasets-panel-collapse {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-panel-collapse:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-model-catalog-search--tree {
+  border-color: var(--border-primary);
+  background: var(--bg-primary);
+}
+
+.dark-theme .bi-model-catalog-search input {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-panel-catalog-node {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-panel-catalog-node--level1 {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-panel-catalog-table-item {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-panel-catalog-table-item:hover {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-model-catalog-item {
+  border-color: var(--border-primary);
+  background: var(--bg-primary);
+}
+
+.dark-theme .bi-model-catalog-item:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border-secondary);
+}
+
+.dark-theme .bi-model-catalog-item-name {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-model-catalog-item-meta {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-panel-empty {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-item {
+  background: var(--bg-primary);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .bi-sql-datasets-item:hover {
+  border-color: var(--border-secondary);
+}
+
+.dark-theme .bi-sql-datasets-item--active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.dark-theme .bi-sql-datasets-item-title {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-sql-datasets-item-snippet {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-item-meta {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-sql-datasets-apply-row {
+  border-top-color: var(--border-primary);
+}
+
+.dark-theme .bi-sql-datasets-apply-btn {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  color: #818cf8;
+}
+
+.dark-theme .bi-sql-datasets-apply-btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.dark-theme .bi-sql-datasets-apply-btn--applied:disabled {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: #818cf8;
+  color: #a5b4fc;
+}
+
+.dark-theme .bi-sql-datasets-icon-btn {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-sql-datasets-icon-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-sql-datasets-icon-btn--danger:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.2);
+  color: #f87171;
+}
+
+.dark-theme .bi-sql-datasets-rename-input {
+  background: var(--bg-primary);
+  border-color: #6366f1;
+  color: var(--text-primary);
+}
+

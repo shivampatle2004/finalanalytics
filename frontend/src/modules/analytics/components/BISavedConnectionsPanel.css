@@ -104,15 +104,8 @@
 }
 
 .bi-conn-header-icon {
-  color: #fff;
+  color: #8c2546;
   margin-top: 0;
-  width: 36px;
-  height: 36px;
-  padding: 7px;
-  box-sizing: border-box;
-  border-radius: 11px;
-  background: linear-gradient(135deg, #7a1e3a 0%, #5e172c 100%);
-  box-shadow: 0 6px 18px -6px rgba(94, 23, 44, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25);
   flex-shrink: 0;
 }
 
@@ -1894,3 +1887,302 @@
     max-width: 60vw;
   }
 }
+
+/* ── Dark Theme Overrides for Saved Connections ────────────────────── */
+.dark-theme .bi-conn-panel {
+  background: var(--bg-primary);
+}
+
+.dark-theme .bi-conn-panel-title {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-panel-muted {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-h1 {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-sub {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-icon-btn {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-icon-btn:hover:not(:disabled) {
+  background: rgba(122, 30, 58, 0.15);
+  color: var(--accent-primary-hover);
+}
+
+.dark-theme .bi-conn-more-connectors {
+  border-color: rgba(122, 30, 58, 0.3);
+  background: rgba(122, 30, 58, 0.15);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-more-connectors:hover {
+  background: rgba(122, 30, 58, 0.25);
+  border-color: rgba(122, 30, 58, 0.5);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .bi-conn-more-connectors-plus {
+  background: rgba(122, 30, 58, 0.25);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-count {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-search {
+  border-bottom-color: var(--border-primary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-search::placeholder {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-conn-search:focus {
+  border-bottom-color: var(--accent-primary);
+  box-shadow: 0 1px 0 0 var(--accent-primary);
+}
+
+.dark-theme .bi-conn-empty p:first-child {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-muted {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-th {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-cell:hover {
+  background: var(--bg-secondary);
+}
+
+.dark-theme .bi-conn-cell--live::before {
+  background: var(--accent-primary);
+}
+
+.dark-theme .bi-conn-cell--selected::before {
+  background: var(--accent-primary);
+}
+
+.dark-theme .bi-conn-cell--selected {
+  background: var(--bg-secondary);
+}
+
+.dark-theme .bi-conn-name {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-cell--live .bi-conn-name {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-status-pill {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-status-pill::before {
+  background: var(--border-primary);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+.dark-theme .bi-conn-status-pill--live {
+  color: var(--status-success);
+}
+
+.dark-theme .bi-conn-status-pill--live::before {
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.2);
+}
+
+.dark-theme .bi-conn-meta-line {
+  color: var(--text-tertiary);
+}
+
+.dark-theme .bi-conn-meta-line--host {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-conn-meta-line--used {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-conn-dbname {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-conn-dbtype {
+  color: var(--text-primary);
+  background: rgba(122, 30, 58, 0.2);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .bi-conn-btn {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .bi-conn-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--border-secondary);
+}
+
+.dark-theme .bi-conn-btn-primary {
+  color: var(--text-primary);
+  background: rgba(122, 30, 58, 0.15);
+  border: 1px solid rgba(122, 30, 58, 0.3);
+}
+
+.dark-theme .bi-conn-btn-primary:hover:not(:disabled) {
+  background: rgba(122, 30, 58, 0.25);
+  border-color: rgba(122, 30, 58, 0.5);
+  box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .bi-conn-btn-disconnect {
+  background: var(--bg-primary);
+  border-color: var(--border-primary);
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-conn-btn-disconnect::before {
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.2);
+}
+
+.dark-theme .bi-conn-btn-disconnect:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #fecaca;
+  color: #f87171;
+}
+
+.dark-theme .bi-conn-btn-disconnect:hover:not(:disabled)::before {
+  background: #f87171;
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.18);
+}
+
+.dark-theme .bi-conn-btn-ghost:hover:not(:disabled) {
+  background: var(--bg-secondary);
+}
+
+.dark-theme .bi-conn-error {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #f87171;
+}
+
+/* ── ADDITIONAL DARK THEME STYLES FOR CONNECTIONS PANEL ── */
+.dark-theme .bi-conn-panel {
+  background: var(--bg-primary);
+}
+
+.dark-theme .bi-conn-panel-title,
+.dark-theme .bi-conn-h1,
+.dark-theme .bi-conn-name {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-panel-muted,
+.dark-theme .bi-conn-sub,
+.dark-theme .bi-conn-count,
+.dark-theme .bi-conn-muted,
+.dark-theme .bi-conn-meta-line,
+.dark-theme .bi-conn-meta-line--used,
+.dark-theme .bi-conn-used,
+.dark-theme .bi-conn-th {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-conn-search {
+  color: var(--text-primary);
+  border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .bi-conn-search:focus {
+  border-bottom-color: var(--accent-primary);
+  box-shadow: 0 1px 0 0 var(--accent-primary);
+}
+
+.dark-theme .bi-conn-btn {
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-conn-btn:hover:not(:disabled) {
+  background: var(--border-primary);
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-cell:hover {
+  background: var(--bg-secondary);
+}
+
+.dark-theme .bi-conn-cell--selected {
+  background: var(--bg-tertiary);
+}
+
+.dark-theme .bi-conn-cell--live::before {
+  background: var(--accent-primary);
+}
+
+.dark-theme .bi-conn-cell--selected::before {
+  background: var(--accent-primary-hover);
+}
+
+.dark-theme .bi-conn-btn-details {
+  color: var(--accent-primary) !important;
+}
+
+.dark-theme .bi-conn-btn-details:hover:not(:disabled) {
+  background: var(--bg-secondary) !important;
+}
+
+.dark-theme .bi-conn-more-connectors {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-more-connectors:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-secondary);
+}
+
+.dark-theme .bi-conn-more-connectors-plus {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-conn-btn-disconnect {
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-conn-btn-disconnect:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.dark-theme .bi-conn-dbtype {
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
+  color: var(--text-primary);
+}
+

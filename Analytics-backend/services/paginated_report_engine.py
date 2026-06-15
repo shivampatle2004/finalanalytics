@@ -1,10 +1,15 @@
 import io
 import datetime
+import base64
+import logging
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, letter, landscape as rl_landscape, portrait as rl_portrait
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image as PlatypusImage
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, KeepTogether, Image as PlatypusImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
+
+
+logger = logging.getLogger("paginated_report_engine")
 
 
 # Brand palette aligned with BI dashboard / report theme
@@ -171,9 +176,9 @@ def generate_chart_image(data, chart_type='bar', title='', width=6*inch, height=
             else:
                 labels, values = [], []
 
-            if chart_type == "pie":
+            if chart_type in ("pie", "donut"):
                 _apply_bi_chart_style(ax, fig, show_y_grid=False)
-                ax.pie(
+                wedges, texts, autotexts = ax.pie(
                     values,
                     labels=labels,
                     autopct="%1.1f%%",
@@ -181,6 +186,9 @@ def generate_chart_image(data, chart_type='bar', title='', width=6*inch, height=
                     wedgeprops=dict(edgecolor="white", linewidth=1.2),
                     textprops={"fontsize": 8, "color": "#334155"},
                 )
+                if chart_type == "donut":
+                    centre_circle = plt.Circle((0,0), 0.62, fc='white')
+                    fig.gca().add_artist(centre_circle)
                 ax.axis("equal")
             else:
                 _apply_bi_chart_style(ax, fig)
@@ -326,6 +334,27 @@ class PaginatedReportEngine:
                                    fontSize=20, textColor=colors.HexColor('#78176b'), alignment=1))
         styles.add(ParagraphStyle(name='KPILabel', parent=styles['Normal'], 
                                    fontSize=10, textColor=colors.grey, alignment=1))
+        # Table cell styles — used for word-wrapped cells
+        styles.add(ParagraphStyle(
+            name='TableHeader',
+            parent=styles['Normal'],
+            fontSize=9,
+            fontName='Helvetica-Bold',
+            textColor=colors.whitesmoke,
+            leading=12,
+            wordWrap='LTR',
+            splitLongWords=True,
+        ))
+        styles.add(ParagraphStyle(
+            name='TableCell',
+            parent=styles['Normal'],
+            fontSize=8,
+            fontName='Helvetica',
+            textColor=colors.HexColor('#1e293b'),
+            leading=11,
+            wordWrap='LTR',
+            splitLongWords=True,
+        ))
         
         # Get config values
         header_text = report_config.get("header_text", "Report")
@@ -431,6 +460,11 @@ class PaginatedReportEngine:
         for element in elements:
             el_type = element.get("type")
             config = element.get("config_json", {})
+
+            # Page break if one_per_page is requested (and story is not empty)
+            # and it's not a table (tables already handle PageBreak explicitly below)
+            if config.get("one_per_page") and story and el_type != "table":
+                story.append(PageBreak())
             
             if el_type == "text":
                 text = config.get("content", "")
@@ -438,6 +472,10 @@ class PaginatedReportEngine:
                 story.append(Spacer(1, 0.1 * inch))
                  
             elif el_type == "table":
+                # Always start table on a fresh page to avoid mixing with charts/KPIs
+                if story:
+                    story.append(PageBreak())
+
                 columns = config.get("columns", [])
                 rows_per_page = config.get("rows_per_page", default_rows_per_page)
                 show_header_el = config.get("show_header", True)
@@ -464,101 +502,238 @@ class PaginatedReportEngine:
                 if len(data_rows) > report_row_cap:
                     data_rows = data_rows[:report_row_cap]
 
-                # Prepare column names
-                col_names = [col.get("name") for col in columns]
-                col_headers = [col.get("header", col.get("name")) for col in columns]
-                
-                # Calculate column widths (equal distribution)
-                num_cols = len(col_names)
-                if num_cols > 0:
-                    col_width = page_width / num_cols
-                    col_widths = [col_width] * num_cols
-                else:
-                    col_widths = None
-                
-                # Split data into pages (data_rows already capped to export limit)
-                total_rows = len(data_rows)
-                total_pages = max(1, (total_rows + rows_per_page - 1) // rows_per_page)
+                # Prepare column groups to handle wide tables.
+                # We use a fixed maximum of columns per sub-page so each column
+                # gets a meaningful width without overlap.
+                MAX_COLS_PER_PAGE = 6
+                col_groups = [
+                    columns[i:i + MAX_COLS_PER_PAGE]
+                    for i in range(0, len(columns), MAX_COLS_PER_PAGE)
+                ]
+                total_col_groups  = len(col_groups)
+                total_rows        = len(data_rows)
+                total_row_pages   = max(1, (total_rows + rows_per_page - 1) // rows_per_page)
+                sub_letters       = [chr(ord('a') + g) for g in range(total_col_groups)]
 
-                for page_num in range(total_pages):
-                    start_idx = page_num * rows_per_page
-                    end_idx = min(start_idx + rows_per_page, total_rows)
-                    page_data = data_rows[start_idx:end_idx]
-                    
-                    # Build table data
-                    table_data = []
-                    
-                    # Header row
-                    if page_num == 0 or show_header_el:
-                        table_data.append(col_headers)
-                    
-                    # Data rows
-                    for row_dict in page_data:
-                        row_data = [str(row_dict.get(col_name, ""))[:50] for col_name in col_names]
-                        table_data.append(row_data)
-                    
-                    # Create table
-                    t = Table(table_data, colWidths=col_widths, repeatRows=1)
-                    
-                    # Style
-                    t_style = TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#78176b')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 9),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                        ('TOPPADDING', (0, 0), (-1, 0), 8),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 1), (-1, -1), 8),
-                        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                    ])
-                    
-                    # Alternating row colors
-                    header_rows = 1 if (page_num == 0 or show_header_el) else 0
-                    for i in range(header_rows, len(table_data)):
-                        if i % 2 == 0:
-                            t_style.add('BACKGROUND', (0, i), (-1, i), colors.HexColor('#f9fafb'))
-                    
-                    t.setStyle(t_style)
-                    story.append(t)
-                    
-                    # Page number info for this chunk
-                    story.append(Spacer(1, 0.1 * inch))
-                    if total_pages > 1:
-                        story.append(Paragraph(
-                            f'<small>Rows {start_idx + 1}–{end_idx} of {total_rows}</small>',
-                            styles['Normal'],
-                        ))
+                for group_idx, col_group in enumerate(col_groups):
+                    g_col_names   = [col.get("name")                    for col in col_group]
+                    g_col_headers = [col.get("header", col.get("name")) for col in col_group]
+                    g_col_widths  = [page_width / len(col_group)] * len(col_group)
 
-                    if page_num < total_pages - 1:
-                        story.append(PageBreak())
-                
+                    for page_num in range(total_row_pages):
+                        start_idx  = page_num * rows_per_page
+                        end_idx    = min(start_idx + rows_per_page, total_rows)
+                        page_data  = data_rows[start_idx:end_idx]
+
+                        # Sub-page label when table is wider than one page width
+                        if total_col_groups > 1:
+                            col_start = group_idx * MAX_COLS_PER_PAGE + 1
+                            col_end   = min((group_idx + 1) * MAX_COLS_PER_PAGE, len(columns))
+                            sub_label = (
+                                f"Page {page_num + 1}{sub_letters[group_idx]}"
+                                f"  —  Columns {col_start}–{col_end} of {len(columns)}"
+                                f"  |  Rows {start_idx + 1}–{end_idx} of {total_rows}"
+                            )
+                            story.append(Paragraph(
+                                f'<font size="8" color="#64748b">{sub_label}</font>',
+                                styles['Normal'],
+                            ))
+                            story.append(Spacer(1, 0.05 * inch))
+
+                        table_data = []
+                        if page_num == 0 or show_header_el:
+                            # Wrap header cells in Paragraph so they word-wrap
+                            table_data.append([
+                                Paragraph(str(h or ''), styles['TableHeader'])
+                                for h in g_col_headers
+                            ])
+
+                        for row_dict in page_data:
+                            table_data.append([
+                                Paragraph(str(row_dict.get(n, '') or ''), styles['TableCell'])
+                                for n in g_col_names
+                            ])
+
+                        t = Table(table_data, colWidths=g_col_widths, repeatRows=1)
+                        t_style = TableStyle([
+                            # Header row
+                            ('BACKGROUND',    (0, 0), (-1,  0), colors.HexColor('#78176b')),
+                            ('BOTTOMPADDING', (0, 0), (-1,  0), 8),
+                            ('TOPPADDING',    (0, 0), (-1,  0), 8),
+                            ('LEFTPADDING',   (0, 0), (-1,  0), 6),
+                            ('RIGHTPADDING',  (0, 0), (-1,  0), 6),
+                            # Data rows
+                            ('BACKGROUND',    (0, 1), (-1, -1), colors.white),
+                            ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+                            ('TOPPADDING',    (0, 1), (-1, -1), 5),
+                            ('LEFTPADDING',   (0, 1), (-1, -1), 5),
+                            ('RIGHTPADDING',  (0, 1), (-1, -1), 5),
+                            # All cells
+                            ('ALIGN',         (0, 0), (-1, -1), 'LEFT'),
+                            ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+                            ('GRID',          (0, 0), (-1, -1), 0.4, colors.lightgrey),
+                        ])
+
+                        hdr_rows = 1 if (page_num == 0 or show_header_el) else 0
+                        for i in range(hdr_rows, len(table_data)):
+                            if i % 2 == 0:
+                                t_style.add('BACKGROUND', (0, i), (-1, i),
+                                            colors.HexColor('#f9fafb'))
+
+                        t.setStyle(t_style)
+                        story.append(t)
+                        story.append(Spacer(1, 0.08 * inch))
+
+                        # Row-range footer when only one column group (label already
+                        # shown above for multi-group)
+                        if total_col_groups == 1 and total_row_pages > 1:
+                            story.append(Paragraph(
+                                f'<font size="7" color="#94a3b8">Rows {start_idx + 1}–{end_idx} of {total_rows}</font>',
+                                styles['Normal'],
+                            ))
+
+                        # Page break after every sub-page except the very last one
+                        is_last = (group_idx == total_col_groups - 1) and (page_num == total_row_pages - 1)
+                        if not is_last:
+                            story.append(PageBreak())
+
                 story.append(Spacer(1, 0.2 * inch))
 
             elif el_type == "chart":
                 chart_data = config.get("chart_data")
-                chart_type = (config.get("chart_type") or "bar").lower()
+                chart_type = (config.get("chart_type") or config.get("chartType") or "bar").lower()
                 if chart_type == "column":
                     chart_type = "bar"
                 title = config.get("title", "Chart")
-                x_field = config.get("xField") or config.get("x_axis")
-                y_field = config.get("yField") or config.get("y_field") or config.get("y_axis")
-                
+                x_field = config.get("xField") or config.get("x_field") or config.get("x_axis") or ""
+                y_field = config.get("yField") or config.get("y_field") or config.get("y_axis") or ""
+
+                print(f"CHART START - title: {title}")
+                print(f"CHART TYPE: {chart_type}")
+                logger.info("CHART START - title: %s", title)
+                logger.info("CHART TYPE: %s", chart_type)
+
+                chart_flowables = []
+                # Chart title label
+                if title:
+                    chart_flowables.append(Paragraph(
+                        f'<font size="11" color="#1e293b"><b>{title}</b></font>',
+                        styles['Normal'],
+                    ))
+                    chart_flowables.append(Spacer(1, 0.06 * inch))
+
                 if chart_data and len(chart_data) > 0:
+                    payload_size = len(str(chart_data))
+                    print(f"PAYLOAD SIZE: {payload_size}")
+                    logger.info("PAYLOAD SIZE: %d", payload_size)
+                    
                     chart_bytes = generate_chart_image(
                         chart_data, chart_type, title,
-                        x_key=x_field, y_key=y_field
+                        x_key=x_field or None, y_key=y_field or None
                     )
                     if chart_bytes:
-                        img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5*inch)
-                        story.append(img)
+                        print("RENDER SUCCESS")
+                        logger.info("RENDER SUCCESS")
+                        img = PlatypusImage(io.BytesIO(chart_bytes), width=page_width, height=2.5 * inch)
+                        chart_flowables.append(img)
+                        print("FLOWABLE ADDED")
+                        logger.info("FLOWABLE ADDED")
+                    else:
+                        print("RENDER FAILURE")
+                        logger.error("RENDER FAILURE - generate_chart_image returned None")
+                        chart_flowables.append(Paragraph(
+                            f'<font size="9" color="#94a3b8">Chart could not be rendered for "{title}".</font>',
+                            styles['Normal'],
+                        ))
                 else:
-                    story.append(Paragraph("No chart data available.", styles['Normal']))
-                
-                story.append(Spacer(1, 0.2 * inch))
+                    print("PAYLOAD SIZE: 0")
+                    print("RENDER FAILURE")
+                    logger.warning("RENDER FAILURE - chart_data is empty or missing")
+                    chart_flowables.append(Paragraph(
+                        f'<font size="9" color="#94a3b8">No data available for chart "{title}".</font>',
+                        styles['Normal'],
+                    ))
+
+                chart_flowables.append(Spacer(1, 0.25 * inch))
+                story.append(KeepTogether(chart_flowables))
+
+            elif el_type == "image_snapshot" or el_type == "visual":
+                image_bytes = config.get("image_bytes")
+                image_b64 = config.get("image_b64")
+                title = config.get("title", "")
+
+                print(f"CHART START - title: {title}")
+                print(f"CHART TYPE: {el_type}")
+                logger.info("CHART START - title: %s", title)
+                logger.info("CHART TYPE: %s", el_type)
+
+                snapshot_flowables = []
+                if title:
+                    snapshot_flowables.append(Paragraph(
+                        f'<font size="11" color="#1e293b"><b>{title}</b></font>',
+                        styles['Normal'],
+                    ))
+                    snapshot_flowables.append(Spacer(1, 0.06 * inch))
+
+                img_data = None
+                payload_size = 0
+                if image_bytes:
+                    img_data = image_bytes
+                    payload_size = len(image_bytes)
+                elif image_b64:
+                    try:
+                        img_data = base64.b64decode(image_b64)
+                        payload_size = len(image_b64)
+                    except Exception as e:
+                        logger.error(f"Error decoding image_b64: {e}")
+
+                print(f"PAYLOAD SIZE: {payload_size}")
+                logger.info("PAYLOAD SIZE: %d", payload_size)
+
+                if img_data:
+                    try:
+                        aspect = 0.5
+                        try:
+                            from PIL import Image as PILImage
+                            im = PILImage.open(io.BytesIO(img_data))
+                            width, height = im.size
+                            if width > 0:
+                                aspect = height / width
+                        except Exception as pil_err:
+                            logger.warning(f"PIL failed to parse image: {pil_err}")
+
+                        target_width = page_width
+                        target_height = page_width * aspect
+
+                        max_allowed_height = 4.5 * inch
+                        if target_height > max_allowed_height:
+                            target_height = max_allowed_height
+                            target_width = target_height / aspect
+
+                        img = PlatypusImage(io.BytesIO(img_data), width=target_width, height=target_height)
+                        snapshot_flowables.append(img)
+                        print("RENDER SUCCESS")
+                        logger.info("RENDER SUCCESS")
+                        print("FLOWABLE ADDED")
+                        logger.info("FLOWABLE ADDED")
+                    except Exception as e:
+                        print("RENDER FAILURE")
+                        logger.error(f"Error rendering snapshot/visual: {e}")
+                        snapshot_flowables.append(Paragraph(
+                            f'<font size="9" color="#e11d48">Error loading image: {str(e)}</font>',
+                            styles['Normal']
+                        ))
+                else:
+                    print("RENDER FAILURE")
+                    logger.warning("RENDER FAILURE - no image data found")
+                    snapshot_flowables.append(Paragraph(
+                        '<font size="9" color="#94a3b8">No image data found.</font>',
+                        styles['Normal']
+                    ))
+
+                snapshot_flowables.append(Spacer(1, 0.25 * inch))
+                story.append(KeepTogether(snapshot_flowables))
+
 
         # ===== 5. FOOTER =====
         # Using canvas callback for page numbers

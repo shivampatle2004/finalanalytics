@@ -529,6 +529,10 @@ def materialize_connection_dataset(connection_id: str, db: Session = Depends(get
         row_count=len(rows),
         column_count=len(rows[0].keys()) if rows else 0,
         status="completed",
+        model_config={
+            "source_type": "api_connector",
+            "api_connection_id": connection_id,
+        },
     )
     db.add(uploaded)
     db.flush()

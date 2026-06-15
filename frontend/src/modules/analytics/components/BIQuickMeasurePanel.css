@@ -65,14 +65,10 @@
 }
 
 .qm-header-icon-box {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  background: #7a1e3a;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: #8c2546;
   flex-shrink: 0;
 }
 
@@ -81,6 +77,15 @@
   font-size: 16px;
   font-weight: 600;
   color: #333333;
+}
+
+.qm-template-count {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #7a1e3a;
+  font-weight: 600;
 }
 
 .qm-header-actions {
@@ -594,4 +599,188 @@
 
 .slide-up-anim {
   animation: slideUp 0.25s ease forwards;
+}
+
+/* ─── Dark Theme Overrides for Quick Measures ─── */
+.dark-theme .bi-quick-measure-panel,
+.dark-theme .bi-quick-measure-collapsed {
+  background-color: var(--bg-primary);
+  border-left-color: var(--border-primary);
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-quick-measure-collapsed:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.dark-theme .qm-collapsed-text {
+  color: var(--text-secondary);
+}
+
+.dark-theme .qm-header {
+  border-bottom-color: var(--border-primary);
+  background: var(--bg-primary);
+}
+
+.dark-theme .qm-header h3 {
+  color: var(--text-primary);
+}
+
+.dark-theme .qm-template-count {
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-icon-btn {
+  color: var(--text-secondary);
+}
+
+.dark-theme .qm-icon-btn:hover {
+  background: rgba(255, 107, 139, 0.15);
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-glass-panel {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .qm-section-header h4 {
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-search-box input {
+  background: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--input-text);
+}
+
+.dark-theme .qm-search-box input:focus {
+  border-color: var(--accent-primary);
+  background: var(--input-bg);
+  box-shadow: 0 0 0 2px rgba(255, 107, 139, 0.2);
+}
+
+.dark-theme .qm-suggestions-title {
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-suggestion-chip {
+  background: rgba(255, 107, 139, 0.1);
+  border-color: rgba(255, 107, 139, 0.3);
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-suggestion-chip:hover {
+  background: rgba(255, 107, 139, 0.2);
+}
+
+.dark-theme .qm-accordion-group {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .qm-accordion-group.expanded {
+  border-color: var(--border-secondary);
+}
+
+.dark-theme .qm-accordion-header {
+  color: var(--text-primary);
+}
+
+.dark-theme .qm-accordion-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.dark-theme .qm-accordion-label svg {
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-template-item {
+  color: var(--text-secondary);
+}
+
+.dark-theme .qm-template-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.dark-theme .qm-template-item.active {
+  color: #ff6b8b;
+  background: rgba(255, 107, 139, 0.15);
+}
+
+.dark-theme .qm-template-item.active::before {
+  background: #ff6b8b;
+}
+
+.dark-theme .qm-measure-name label,
+.dark-theme .qm-param-row label {
+  color: var(--text-secondary);
+}
+
+.dark-theme .qm-measure-name input,
+.dark-theme .qm-param-input,
+.dark-theme .qm-param-select {
+  background: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--input-text);
+}
+
+.dark-theme .qm-measure-name input:focus,
+.dark-theme .qm-param-input:focus,
+.dark-theme .qm-param-select:focus {
+  border-color: var(--accent-primary);
+  background: var(--input-bg);
+  box-shadow: 0 0 0 2px rgba(255, 107, 139, 0.2);
+}
+
+.dark-theme .qm-code-block {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .qm-code-header {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .qm-code-block pre {
+  color: var(--text-primary);
+}
+
+.dark-theme .qm-preview-result {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+  color: var(--text-secondary);
+}
+
+.dark-theme .qm-preview-result strong {
+  color: #ff6b8b;
+}
+
+.dark-theme .qm-footer {
+  border-top-color: var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+.dark-theme .qm-btn-ghost {
+  color: var(--text-secondary);
+}
+
+.dark-theme .qm-btn-ghost:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dark-theme .qm-btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-primary);
+}
+
+.dark-theme .qm-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--accent-primary);
+  color: #ff6b8b;
 }

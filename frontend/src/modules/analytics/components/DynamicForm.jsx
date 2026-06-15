@@ -5,12 +5,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Eye, EyeOff, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 
-const API_BASE = '/api';
+const ANALYTICS_API_BASE = '/analytics/api';
+
+function normalizeEngine(value) {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') return value.engine || value.id || '';
+  return '';
+}
+
+const RequiredMark = () => (
+  <span className="dyn-required" aria-hidden="true">*</span>
+);
 
 /**
  * Renders a single form field based on a JSON Schema property.
  */
-const FormField = ({ name, schema, value, onChange, error, className = '' }) => {
+const FormField = ({ name, schema, value, onChange, error, className = '', required = false }) => {
   const [showPassword, setShowPassword] = useState(false);
 
   const isPassword = schema.format === 'password' || schema.secret === true;
@@ -45,7 +55,10 @@ const FormField = ({ name, schema, value, onChange, error, className = '' }) => 
             onChange={(e) => onChange(name, e.target.checked)}
           />
           <span className="dyn-toggle-slider" />
-          <span className="dyn-toggle-label">{label}</span>
+          <span className="dyn-toggle-label">
+            {label}
+            {required && <RequiredMark />}
+          </span>
         </label>
         {schema.description && <p className="dyn-field-hint">{schema.description}</p>}
         {error && <p className="dyn-field-error"><AlertCircle size={12} /> {error}</p>}
@@ -56,7 +69,10 @@ const FormField = ({ name, schema, value, onChange, error, className = '' }) => 
   if (isEnum) {
     return (
       <div className={`dyn-field ${className}`.trim()}>
-        <label className="dyn-label" htmlFor={fieldId}>{label}</label>
+        <label className="dyn-label" htmlFor={fieldId}>
+          {label}
+          {required && <RequiredMark />}
+        </label>
         <select
           id={fieldId}
           className={baseClass}
@@ -76,7 +92,10 @@ const FormField = ({ name, schema, value, onChange, error, className = '' }) => 
   if (isObject || isArray) {
     return (
       <div className={`dyn-field ${className}`.trim()}>
-        <label className="dyn-label" htmlFor={fieldId}>{label}</label>
+        <label className="dyn-label" htmlFor={fieldId}>
+          {label}
+          {required && <RequiredMark />}
+        </label>
         <textarea
           id={fieldId}
           className={`${baseClass} dyn-textarea`}
@@ -100,7 +119,10 @@ const FormField = ({ name, schema, value, onChange, error, className = '' }) => 
   if (isPassword) {
     return (
       <div className={`dyn-field ${className}`.trim()}>
-        <label className="dyn-label" htmlFor={fieldId}>{label}</label>
+        <label className="dyn-label" htmlFor={fieldId}>
+          {label}
+          {required && <RequiredMark />}
+        </label>
         <div className="dyn-password-wrap">
           <input
             id={fieldId}
@@ -130,7 +152,10 @@ const FormField = ({ name, schema, value, onChange, error, className = '' }) => 
 
   return (
     <div className={`dyn-field ${className}`.trim()}>
-      <label className="dyn-label" htmlFor={fieldId}>{label}</label>
+      <label className="dyn-label" htmlFor={fieldId}>
+        {label}
+        {required && <RequiredMark />}
+      </label>
       <input
         id={fieldId}
         type={inputType}
@@ -159,6 +184,7 @@ const FormField = ({ name, schema, value, onChange, error, className = '' }) => 
  *   initialValues  — pre-populated field values
  */
 const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initialValues = {} }) => {
+  const engineName = normalizeEngine(engine);
   const [schema, setSchema] = useState(propSchema || null);
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState({});
@@ -172,16 +198,16 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
       setSchema(propSchema);
       return;
     }
-    if (!engine) return;
+    if (!engineName) return;
     setLoading(true);
-    fetch(`${API_BASE}/connectors/${engine}/schema`)
+    fetch(`${ANALYTICS_API_BASE}/connectors/${engineName}/schema`)
       .then((r) => r.json())
       .then((data) => {
         setSchema(data.schema || null);
       })
       .catch(() => setSchema(null))
       .finally(() => setLoading(false));
-  }, [engine, propSchema]);
+  }, [engineName, propSchema]);
 
   // Seed defaults from schema
   useEffect(() => {
@@ -223,14 +249,19 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`${API_BASE}/connectors/test`, {
+      const res = await fetch(`${ANALYTICS_API_BASE}/connectors/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engine, config: { ...values, engine_name: engine } }),
+        body: JSON.stringify({ engine: engineName, config: { ...values, engine_name: engineName } }),
       });
       const data = await res.json();
-      setTestResult(data);
-      onTestResult?.(data);
+      const result = {
+        ...data,
+        success: !!data.success,
+        message: data.message || data.detail || 'Connection test failed',
+      };
+      setTestResult(result);
+      onTestResult?.(result);
     } catch (err) {
       const result = { success: false, message: 'Network error. Please check the server.' };
       setTestResult(result);
@@ -243,7 +274,7 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!validate()) return;
-    onSubmit?.(engine, values);
+    onSubmit?.(engineName, values);
   };
 
   if (loading) {
@@ -306,6 +337,7 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
             value={values[key]}
             onChange={handleChange}
             error={errors[key]}
+            required={required.includes(key)}
             className={getFieldGridClass(key, fieldSchema)}
           />
         ))}
@@ -319,6 +351,7 @@ const DynamicForm = ({ engine, schema: propSchema, onSubmit, onTestResult, initi
               value={values.output_file_name}
               onChange={handleChange}
               error={errors.output_file_name}
+              required={required.includes('output_file_name')}
               className={getFieldGridClass('output_file_name', properties.output_file_name)}
             />
           </>

@@ -7,7 +7,7 @@ const SIDEBAR_EXPANDED_WIDTH = 220;
  
 /* ─── Existing Icons ─── */
 const IconWorkspace = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
     <line x1="12" y1="22" x2="12" y2="12" />
     <line x1="22" y1="8.5" x2="12" y2="12" />
@@ -17,7 +17,7 @@ const IconWorkspace = () => (
 );
  
 const IconSqlEditor = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <ellipse cx="12" cy="5" rx="8" ry="3" />
     <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
     <polyline points="9 11 6 14 9 17" />
@@ -26,7 +26,7 @@ const IconSqlEditor = () => (
 );
  
 const IconCatalog = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="18" cy="6" r="3" />
     <circle cx="6" cy="18" r="3" />
     <circle cx="18" cy="18" r="3" />
@@ -37,7 +37,7 @@ const IconCatalog = () => (
 );
  
 const IconPipeline = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 12c4 0 6-6 10-6s6 6 10 6" />
     <path d="M2 12c4 0 6 6 10 6s6-6 10-6" opacity="0.4" />
     <circle cx="12" cy="12" r="1.5" fill="currentColor" />
@@ -48,7 +48,7 @@ const IconPipeline = () => (
  
 /* ─── NEW Icons ─── */
 const IconConnector = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
        stroke="currentColor" strokeWidth="2"
        strokeLinecap="round" strokeLinejoin="round">
     <path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z"/>
@@ -62,7 +62,7 @@ const IconConnector = () => (
 );
  
 const IconAnalytics = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
        stroke="currentColor" strokeWidth="2"
        strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 21H4.6c-.56 0-.84 0-1.05-.11a1 1 0 0 1-.44-.44C3 20.24 3 19.96 3 19.4V3"/>
@@ -72,7 +72,7 @@ const IconAnalytics = () => (
 );
  
 const IconDashboard = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="7" height="9" />
     <rect x="14" y="3" width="7" height="5" />
     <rect x="14" y="12" width="7" height="9" />
@@ -81,7 +81,7 @@ const IconDashboard = () => (
 );
  
 const IconTransform = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
     <path d="M12 12v9" />
     <path d="m8 17 4 4 4-4" />
@@ -89,7 +89,7 @@ const IconTransform = () => (
 );
  
 const IconLogs = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
     <polyline points="14 2 14 8 20 8" />
     <line x1="16" y1="13" x2="8" y2="13" />
@@ -99,7 +99,7 @@ const IconLogs = () => (
 );
  
 const IconPipelineEditor = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
     <circle cx="6" cy="12" r="1" fill="currentColor" />
     <circle cx="18" cy="12" r="1" fill="currentColor" />
@@ -158,12 +158,11 @@ const SECTIONS = [
 const NavItemContent = ({ label, icon: Icon, isActive, isExpanded }) => (
   <>
     <span
-      className="flex-shrink-0 flex items-center justify-center transition-all duration-300 ease-out group-hover:scale-110"
+      className="flex-shrink-0 flex items-center justify-center transition-colors duration-200"
       style={{
-        width: 24,
-        height: 24,
+        width: 20,
+        height: 20,
         opacity: isExpanded ? 1 : 0,
-        transform: isExpanded ? 'scale(1)' : 'scale(0.75)',
         color: isActive ? 'var(--df-strong)' : 'var(--df-text-soft)',
         pointerEvents: isExpanded ? 'auto' : 'none',
       }}
@@ -171,7 +170,7 @@ const NavItemContent = ({ label, icon: Icon, isActive, isExpanded }) => (
       <Icon />
     </span>
     <span
-      className="text-sm font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ease-out"
+      className="text-[13px] font-medium leading-none whitespace-nowrap overflow-hidden transition-all duration-300 ease-out"
       style={{
         color: isActive ? 'var(--df-strong)' : 'var(--df-text-soft)',
         opacity: isExpanded ? 1 : 0,
@@ -195,15 +194,15 @@ const Sidebar = () => {
   }, [sidebarWidth]);
  
   const itemClasses = (isActive) =>
-    `relative flex items-center rounded-2xl transition-all duration-300 ease-out group cursor-pointer overflow-hidden ${
+    `relative flex items-center rounded-lg transition-colors duration-200 group cursor-pointer overflow-hidden ${
       isExpanded
-        ? 'h-12 w-full gap-3 px-3 justify-start opacity-100'
+        ? 'h-9 w-full gap-2.5 px-2.5 justify-start opacity-100'
         : 'h-0 w-0 opacity-0 overflow-hidden pointer-events-none'
     } ${
       isActive ? 'bg-[var(--df-sidebar-active)]' : 'hover:bg-[var(--df-sidebar-hover)]'
     }`;
- 
-  const visibleSections = SECTIONS.filter(({ items }) => items.length > 0);
+
+  const navItems = SECTIONS.flatMap(({ items }) => items);
  
   return (
     <aside
@@ -220,13 +219,13 @@ const Sidebar = () => {
         boxShadow: isExpanded ? '4px 0 24px rgba(0, 0, 0, 0.08)' : 'none',
         overflow: 'hidden',
       }}
-      className={`flex flex-col transition-all duration-300 ${isExpanded ? 'pt-6' : 'pt-0'}`}
+      className={`flex flex-col transition-all duration-300 ${isExpanded ? 'pt-3' : 'pt-0'}`}
     >
       <button
         type="button"
         aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
         onClick={() => setIsExpanded((prev) => !prev)}
-        className="absolute top-4 z-50 flex items-center justify-center text-[var(--df-text-soft)] hover:text-[var(--df-strong)] transition-all duration-300"
+        className="absolute top-3 z-50 flex items-center justify-center text-[var(--df-text-soft)] hover:text-[var(--df-strong)] transition-all duration-300"
         style={{
           width: '14px',
           height: '14px',
@@ -252,49 +251,42 @@ const Sidebar = () => {
       </button>
       <nav
         className={`flex-1 overflow-y-auto overflow-x-hidden df-scrollbar transition-all duration-300 ease-out ${
-          isExpanded ? 'px-3 space-y-2 opacity-100 visible' : 'px-0 space-y-0 opacity-0 invisible'
+          isExpanded ? 'px-2 py-2 flex flex-col gap-0.5 opacity-100 visible' : 'px-0 gap-0 opacity-0 invisible'
         }`}
         style={{
-          paddingRight: isExpanded ? '12px' : 0,
+          paddingRight: isExpanded ? '8px' : 0,
           pointerEvents: isExpanded ? 'auto' : 'none',
           transform: isExpanded ? 'translateX(0)' : 'translateX(-12px)',
         }}
         aria-hidden={!isExpanded}
       >
-        {visibleSections.map(({ id, items }) => (
-          <div
-            key={id}
-            className={`transition-all duration-300 ${isExpanded ? 'space-y-2' : 'space-y-0'}`}
-          >
-            {items.map(({ id: itemId, label, icon, to, openInNewTab }) => {
-              if (openInNewTab) {
-                return (
-                  <a
-                    key={itemId}
-                    href={to}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`${itemClasses(false)} hover:bg-[var(--df-sidebar-hover)]`}
-                  >
-                    <NavItemContent label={label} icon={icon} isActive={false} isExpanded={isExpanded} />
-                  </a>
-                );
-              }
- 
-              return (
-                <NavLink
-                  key={itemId}
-                  to={to}
-                  className={({ isActive }) => itemClasses(isActive)}
-                >
-                  {({ isActive }) => (
-                    <NavItemContent label={label} icon={icon} isActive={isActive} isExpanded={isExpanded} />
-                  )}
-                </NavLink>
-              );
-            })}
-          </div>
-        ))}
+        {navItems.map(({ id: itemId, label, icon, to, openInNewTab }) => {
+          if (openInNewTab) {
+            return (
+              <a
+                key={itemId}
+                href={to}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${itemClasses(false)} hover:bg-[var(--df-sidebar-hover)]`}
+              >
+                <NavItemContent label={label} icon={icon} isActive={false} isExpanded={isExpanded} />
+              </a>
+            );
+          }
+
+          return (
+            <NavLink
+              key={itemId}
+              to={to}
+              className={({ isActive }) => itemClasses(isActive)}
+            >
+              {({ isActive }) => (
+                <NavItemContent label={label} icon={icon} isActive={isActive} isExpanded={isExpanded} />
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
     </aside>
   );

@@ -71,7 +71,7 @@ export default function BISqlDatasetModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    fetch('/api/db/connections')
+    fetch('/analytics/api/db/connections')
       .then((r) => r.json())
       .then((d) => {
         const list = d.connections || [];
@@ -134,7 +134,7 @@ export default function BISqlDatasetModal({
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/db/sql/execute', {
+      const res = await fetch('/analytics/api/db/sql/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -189,7 +189,7 @@ export default function BISqlDatasetModal({
         payload.id = initialSqlDataset.id;
       }
 
-      const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/sql-dataset`, {
+      const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/sql-dataset`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -237,7 +237,7 @@ export default function BISqlDatasetModal({
         columns,
       };
 
-      const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/sql-dataset`, {
+      const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/sql-dataset`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -257,7 +257,7 @@ export default function BISqlDatasetModal({
     if (!fileId) return;
     if (!window.confirm('Stop using SQL for this report’s data? Saved datasets stay in the library; you can select one again from Model view.')) return;
     try {
-      await fetch(`/api/files/${encodeURIComponent(fileId)}/sql-dataset`, { method: 'DELETE' });
+      await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/sql-dataset`, { method: 'DELETE' });
       if (onSaved) onSaved(null);
       onClose();
     } catch (e) {

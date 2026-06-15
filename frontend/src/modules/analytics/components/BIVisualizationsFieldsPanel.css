@@ -216,3 +216,114 @@
     padding: 4px 0;
     font-style: italic;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DARK THEME STYLES FOR VISUALIZATION FIELDS PANEL (BIVisualizationsFieldsPanel)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dark-theme .bi-right-panel {
+  border-left-color: var(--border-primary);
+}
+
+.dark-theme .bi-viz-section {
+  border-bottom-color: var(--border-primary);
+  background-color: var(--bg-elevated);
+}
+
+.dark-theme .bi-viz-grid {
+  background-color: var(--bg-primary);
+}
+
+.dark-theme .bi-viz-icon-wrapper {
+  background: var(--bg-elevated);
+  border-color: var(--border-primary);
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-viz-icon-wrapper:hover {
+  background-color: rgba(255, 107, 139, 0.05);
+  border-color: #ff6b8b;
+  color: #ff6b8b;
+}
+
+.dark-theme .bi-viz-dropzones {
+  background-color: var(--bg-elevated);
+}
+
+.dark-theme .bi-dropzone-label {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-dropzone-area {
+  background-color: var(--bg-primary);
+  border-color: var(--border-primary);
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-fields-search {
+  background-color: var(--bg-elevated);
+  border-bottom-color: var(--border-primary);
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-fields-search input {
+  color: var(--text-primary);
+}
+
+.dark-theme .bi-fields-content {
+  background-color: var(--bg-elevated);
+}
+
+.dark-theme .bi-table-header {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-table-header:hover {
+  background-color: var(--bg-primary);
+}
+
+.dark-theme .bi-table-icon {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-field-item {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-drill-section {
+  background-color: var(--bg-primary);
+  border-top-color: var(--border-primary);
+}
+
+.dark-theme .bi-drill-header {
+  color: var(--text-muted);
+}
+
+.dark-theme .bi-drill-label {
+  color: var(--text-secondary);
+}
+
+.dark-theme .bi-switch {
+  background-color: var(--bg-tertiary);
+}
+
+.dark-theme .bi-measure-icon {
+  color: #a78bfa;
+}
+
+.dark-theme .bi-measure-item {
+  color: #c4b5fd;
+}
+
+.dark-theme .bi-measure-item:hover {
+  background-color: rgba(167, 139, 250, 0.1);
+}
+
+.dark-theme .bi-measure-field-icon {
+  color: #a78bfa;
+}
+
+.dark-theme .bi-field-item-empty {
+  color: var(--text-muted);
+}
+

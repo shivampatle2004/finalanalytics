@@ -420,6 +420,38 @@ class PaginatedReport(Base):
     owner = relationship("User")
 
 
+class ReportRefreshSchedule(Base):
+    """Scheduled auto-refresh configuration for reports and dashboards."""
+    __tablename__ = "report_refresh_schedule"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    report_id = Column(String, nullable=False, index=True)
+    resource_type = Column(String(50), nullable=False, default="paginated_report")  # paginated_report | dashboard
+    enabled = Column(Boolean, nullable=False, default=False)
+    refresh_type = Column(String(50), nullable=True)  # every_5_minutes, daily, custom_cron, etc.
+    cron_expression = Column(Text, nullable=True)
+    timezone = Column(String(100), nullable=False, default="UTC")
+    start_at = Column(DateTime(timezone=True), nullable=True)
+    last_refresh_at = Column(DateTime(timezone=True), nullable=True)
+    next_refresh_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ReportRefreshHistory(Base):
+    """Audit log for report/dashboard refresh executions."""
+    __tablename__ = "report_refresh_history"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    report_id = Column(String, nullable=False, index=True)
+    refresh_started_at = Column(DateTime(timezone=True), nullable=True)
+    refresh_completed_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(50), nullable=True)  # running, success, failed, skipped
+    records_processed = Column(Integer, nullable=True, default=0)
+    error_message = Column(Text, nullable=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # POWER AUTOMATE WORKFLOW MODELS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -930,3 +962,323 @@ class ApiConnectorData(Base):
     __table_args__ = (
         Index("idx_api_connector_data_conn_entity", "connection_id", "entity_id", unique=True),
     )
+
+
+class SemanticMeasure(Base):
+    """Stores reusable calculated measures at the semantic model level."""
+    __tablename__ = "semantic_measures"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+
+    name = Column(String(255), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    category = Column(String(100), nullable=False)           # e.g., Financial, Sales, Marketing, Operations, HR, Custom
+    expression = Column(Text, nullable=False)
+    format = Column(String(100), nullable=True)              # e.g., Currency, Percentage, Whole Number, Decimal Number, Custom Format
+    dependencies = Column(JSON, nullable=True)               # stores {"fields": [], "measures": []}
+
+    # Governance & Metadata Extensions
+    uuid = Column(String(50), nullable=True)
+    version = Column(Integer, default=1)
+    status = Column(String(50), default="Active")            # Active, Archived, Deprecated
+    created_by = Column(String(100), nullable=True)
+    modified_by = Column(String(100), nullable=True)
+
+    business_definition = Column(Text, nullable=True)
+    tags = Column(JSON, nullable=True)                       # list of tags e.g. ["KPI", "Executive"]
+
+    referenced_measures = Column(JSON, nullable=True)         # list of measure names used by this
+    referenced_columns = Column(JSON, nullable=True)          # list of schema columns used by this
+
+    currency = Column(String(10), nullable=True)             # currency symbol (e.g. ₹, $)
+    decimal_places = Column(Integer, default=2)
+    color_rules = Column(JSON, nullable=True)                 # conditional formatting Rules
+    display_units = Column(String(20), default="None")       # None, Thousands, Millions, Billions
+
+    owner = Column(String(100), nullable=True)
+    steward = Column(String(100), nullable=True)
+    certification_status = Column(String(50), default="Uncertified")  # Uncertified, Under Review, Certified
+    approval_status = Column(String(50), default="Draft")             # Draft, Under Review, Approved, Rejected
+
+    usage_count = Column(Integer, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    dashboards_using = Column(JSON, nullable=True)            # dashboards referencing this
+    reports_using = Column(JSON, nullable=True)               # reports referencing this
+    visuals_using = Column(JSON, nullable=True)               # visuals referencing this
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    def __repr__(self):
+        return f"<SemanticMeasure(name='{self.name}', file='{self.file_id}')>"
+
+
+class SemanticMeasureVersion(Base):
+    """Stores historical versions of calculations for the governance system."""
+    __tablename__ = "semantic_measure_versions"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    measure_id = Column(String, ForeignKey("semantic_measures.id", ondelete="CASCADE"), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    expression = Column(Text, nullable=False)
+    display_name = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    category = Column(String(100), nullable=True)
+    format = Column(String(100), nullable=True)
+    modified_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<SemanticMeasureVersion(measure='{self.measure_id}', version={self.version})>"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POWER BI DATA MANAGEMENT MODELS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BIDatasource(Base):
+    """Unified datasource registry for the reporting platform."""
+    __tablename__ = "bi_datasources"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    name = Column(String(255), nullable=False)
+    source_type = Column(String(50), nullable=False)  # postgresql, mysql, sqlserver, oracle, snowflake, mongodb, rest_api, csv, excel, google_sheets
+    connection_config = Column(JSON, nullable=False, default=dict)
+    encrypted_credentials = Column(Text, nullable=True)
+    ssl_enabled = Column(Boolean, default=True)
+    health_status = Column(String(50), default="unknown")  # connected, disconnected, auth_failed, timeout, permission_error
+    last_health_check = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    datasets = relationship("BIDataset", back_populates="datasource", cascade="all, delete-orphan")
+
+
+class BIDataset(Base):
+    """Logical dataset within a report workspace."""
+    __tablename__ = "bi_datasets"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    datasource_id = Column(String, ForeignKey("bi_datasources.id"), nullable=True, index=True)
+    name = Column(String(255), nullable=False)
+    source_table = Column(String(255), nullable=True)
+    source_query = Column(Text, nullable=True)
+    schema_snapshot = Column(JSON, nullable=True, default=list)
+    row_count = Column(Integer, default=0)
+    incremental_column = Column(String(255), nullable=True)
+    last_incremental_value = Column(String(512), nullable=True)
+    version = Column(Integer, default=1)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    datasource = relationship("BIDatasource", back_populates="datasets")
+    transformations = relationship("BIDatasetTransformation", back_populates="dataset", cascade="all, delete-orphan")
+    refresh_schedules = relationship("BIDatasetRefreshSchedule", back_populates="dataset", cascade="all, delete-orphan")
+
+
+class BIDatasetTransformation(Base):
+    """Transformation pipeline stored as JSONB steps (Power Query style)."""
+    __tablename__ = "bi_dataset_transformations"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    dataset_id = Column(String, ForeignKey("bi_datasets.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False, default="Query")
+    steps = Column(JSON, nullable=False, default=list)
+    applied_steps_index = Column(Integer, default=-1)
+    undo_stack = Column(JSON, nullable=True, default=list)
+    redo_stack = Column(JSON, nullable=True, default=list)
+    version = Column(Integer, default=1)
+    is_published = Column(Boolean, default=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    dataset = relationship("BIDataset", back_populates="transformations")
+    versions = relationship("BIDatasetTransformationVersion", back_populates="transformation", cascade="all, delete-orphan")
+
+
+class BIDatasetTransformationVersion(Base):
+    """Version history for transformation pipelines."""
+    __tablename__ = "bi_dataset_transformation_versions"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    transformation_id = Column(String, ForeignKey("bi_dataset_transformations.id"), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    steps = Column(JSON, nullable=False, default=list)
+    change_summary = Column(String(500), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    transformation = relationship("BIDatasetTransformation", back_populates="versions")
+
+
+class BIDatasetRefreshSchedule(Base):
+    """Scheduled refresh for individual datasets."""
+    __tablename__ = "bi_dataset_refresh_schedules"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    dataset_id = Column(String, ForeignKey("bi_datasets.id"), nullable=False, index=True)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    enabled = Column(Boolean, default=False)
+    refresh_type = Column(String(50), default="every_30_minutes")
+    cron_expression = Column(Text, nullable=True)
+    timezone = Column(String(100), default="UTC")
+    incremental_enabled = Column(Boolean, default=False)
+    last_refresh_at = Column(DateTime(timezone=True), nullable=True)
+    next_refresh_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    dataset = relationship("BIDataset", back_populates="refresh_schedules")
+
+
+class BIDatasetRefreshLog(Base):
+    """Refresh execution logs for datasets."""
+    __tablename__ = "bi_dataset_refresh_logs"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    dataset_id = Column(String, ForeignKey("bi_datasets.id"), nullable=True, index=True)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    status = Column(String(50), default="running")  # running, success, failed, skipped
+    refresh_type = Column(String(50), nullable=True)  # manual, scheduled, incremental
+    records_fetched = Column(Integer, default=0)
+    records_processed = Column(Integer, default=0)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True, default=dict)
+
+
+class BIReportParameter(Base):
+    """Dynamic report parameters (Power BI style)."""
+    __tablename__ = "bi_report_parameters"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    param_type = Column(String(50), nullable=False)  # text, number, date, datetime, boolean, dropdown, multi_select
+    default_value = Column(JSON, nullable=True)
+    current_value = Column(JSON, nullable=True)
+    options = Column(JSON, nullable=True, default=list)
+    validation_rules = Column(JSON, nullable=True, default=dict)
+    is_required = Column(Boolean, default=False)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class BIReportVariable(Base):
+    """Report-level and system-level variables."""
+    __tablename__ = "bi_report_variables"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=True, index=True)
+    name = Column(String(255), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    variable_type = Column(String(50), nullable=False)  # user, system, custom
+    scope = Column(String(50), default="report")  # report, system, tenant
+    expression = Column(Text, nullable=True)
+    current_value = Column(JSON, nullable=True)
+    is_system = Column(Boolean, default=False)
+    is_editable = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class QueryMaster(Base):
+    """Power Query master — one logical query per report dataset."""
+    __tablename__ = "query_master"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    report_id = Column(String, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    query_name = Column(String(255), nullable=False)
+    source_type = Column(String(50), nullable=False, default="csv")  # csv, excel, sql, api, database
+    source_config = Column(JSON, nullable=True, default=dict)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    steps = relationship("QueryStep", back_populates="query", cascade="all, delete-orphan", order_by="QueryStep.step_order")
+
+
+class QueryStep(Base):
+    """Sequential transformation step for a query."""
+    __tablename__ = "query_steps"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    query_id = Column(String, ForeignKey("query_master.id"), nullable=False, index=True)
+    step_order = Column(Integer, nullable=False, default=0)
+    operation_type = Column(String(50), nullable=False)
+    operation_config = Column(JSON, nullable=False, default=dict)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    query = relationship("QueryMaster", back_populates="steps")
+
+
+class BIDataAuditLog(Base):
+    """Audit trail for data management actions."""
+    __tablename__ = "bi_data_audit_logs"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    file_id = Column(String, ForeignKey("uploaded_files.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action = Column(String(100), nullable=False)
+    resource_type = Column(String(50), nullable=True)
+    resource_id = Column(String, nullable=True)
+    details = Column(JSON, nullable=True, default=dict)
+    ip_address = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CalculatedTable(Base):
+    """User-defined calculated table (DAX-like formula, query builder, or manual)."""
+    __tablename__ = "calculated_tables"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    report_id = Column(String, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    table_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    method = Column(String(50), nullable=False, default="formula")
+    expression = Column(Text, nullable=True)
+    builder_config = Column(JSON, nullable=True, default=dict)
+    manual_data = Column(JSON, nullable=True, default=dict)
+    source_tables = Column(JSON, nullable=True, default=list)
+    model_table_id = Column(String, nullable=True, index=True)
+    row_count = Column(Integer, default=0)
+    is_valid = Column(Boolean, default=True)
+    validation_errors = Column(JSON, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    columns = relationship("CalculatedTableColumn", back_populates="calculated_table", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_calc_tables_report", "report_id"),
+    )
+
+
+class CalculatedTableColumn(Base):
+    """Column metadata for a calculated table."""
+    __tablename__ = "calculated_table_columns"
+
+    id = Column(String, primary_key=True, default=get_uuid)
+    calculated_table_id = Column(String, ForeignKey("calculated_tables.id", ondelete="CASCADE"), nullable=False, index=True)
+    column_name = Column(String(255), nullable=False)
+    data_type = Column(String(50), default="text")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    calculated_table = relationship("CalculatedTable", back_populates="columns")
+

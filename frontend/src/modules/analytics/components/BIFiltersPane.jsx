@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { useGlobalFilters } from '../context/FilterContext';
+import { filterRulesToFilterMap, normalizeFilterRules, filterMapHasValues } from '../utils/filterUtils';
+import { formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 
 const EMPTY_FILTER = { field: '', operator: 'equals', value: '' };
 
@@ -16,7 +18,14 @@ const getDistinctValues = (dataset, field) => {
     return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 };
 
-const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
+const BIFiltersPane = ({
+    selectedVisual,
+    schema,
+    dataset,
+    onUpdateVisual,
+    onUnlinkCrossFilter,
+    isViewOnly = false,
+}) => {
     const {
         filters: crossFilters,
         setFilters,
@@ -26,8 +35,6 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
         clearFilters,
         reportCrossFilterEnabled,
         crossFilterSourceVisualId,
-        applyReportCrossFilter,
-        clearReportCrossFilter,
     } = useGlobalFilters();
 
     const fieldOptions = useMemo(
@@ -47,25 +54,58 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
     const [pageFilters, setPageFilters] = useState([]);
     const [reportFilters, setReportFilters] = useState([]);
 
-    const normalizeFilterRules = (list) =>
-        (Array.isArray(list) ? list : []).filter(
-            (f) => f?.field && f?.operator && f.operator !== 'all'
-        );
-
-    useEffect(() => {
+    useLayoutEffect(() => {
         const opts = selectedVisual?.options || {};
         setVisualFilters(normalizeFilterRules(opts.filters));
         setPageFilters(normalizeFilterRules(opts.pageFilters));
         setReportFilters(normalizeFilterRules(opts.reportFilters));
-    }, [selectedVisual?.id, selectedVisual?.options, selectedVisual?.options?.filters]);
+    }, [
+        selectedVisual?.id,
+        selectedVisual?.options,
+        selectedVisual?.options?.filters,
+        selectedVisual?.options?.pageFilters,
+    ]);
 
     const slicerRulesForApply = useMemo(() => {
         const fromVisual = normalizeFilterRules(selectedVisual?.options?.filters);
-        return fromVisual.length > 0 ? fromVisual : normalizeFilterRules(visualFilters);
+        const fromPane = normalizeFilterRules(visualFilters);
+        const merged = fromVisual.length > 0 ? fromVisual : fromPane;
+        return merged.filter(
+            (f) => f?.field && f.operator === 'equals' && f.value != null && String(f.value).trim() !== ''
+        );
     }, [selectedVisual?.options?.filters, visualFilters]);
 
+    const visualSlicerEntries = useMemo(() => {
+        const map = filterRulesToFilterMap(slicerRulesForApply);
+        return Object.entries(map).filter(([, vals]) => Array.isArray(vals) && vals.length > 0);
+    }, [slicerRulesForApply]);
+
+    const isCrossFilterSynced =
+        reportCrossFilterEnabled
+        || filterMapHasValues(crossFilters);
+
+    const hasAnyActiveFilters = useMemo(() => {
+        if (isCrossFilterSynced) return true;
+        if (normalizeFilterRules(pageFilters).length > 0) return true;
+        if (normalizeFilterRules(visualFilters).length > 0) return true;
+        return false;
+    }, [isCrossFilterSynced, pageFilters, visualFilters]);
+
+    const displayFilterEntries = isCrossFilterSynced ? crossFilterEntries : visualSlicerEntries;
+
+    const rulesFromSlicerEntries = useCallback((entries) => {
+        if (!Array.isArray(entries) || entries.length === 0) return [];
+        return entries.flatMap(([field, vals]) =>
+            (Array.isArray(vals) ? vals : []).map((value) => ({
+                field,
+                operator: 'equals',
+                value: String(value),
+            }))
+        );
+    }, []);
+
     const syncToVisual = (nextVisualFilters, nextPageFilters = pageFilters, nextReportFilters = reportFilters) => {
-        if (!selectedVisual?.id || !onUpdateVisual) return;
+        if (!selectedVisual?.id || !onUpdateVisual || isViewOnly) return;
         onUpdateVisual(selectedVisual.id, {
             options: {
                 ...(selectedVisual.options || {}),
@@ -104,7 +144,7 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
 
     const renameCrossFilterDimension = (oldDimension, newDimension) => {
         if (!oldDimension || !newDimension || oldDimension === newDimension) return;
-        const values = crossFilters[oldDimension] || [];
+        const values = Array.isArray(crossFilters[oldDimension]) ? crossFilters[oldDimension] : [];
         setFilters((prev) => {
             const next = { ...prev };
             delete next[oldDimension];
@@ -115,8 +155,18 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
     };
 
     const handleAddCrossFilter = () => {
+        if (isViewOnly) return;
         const field = fieldOptions[0];
         if (!field) return;
+        if (!isCrossFilterSynced) {
+            const distinct = getDistinctValues(dataset, field);
+            const next = [
+                ...visualFilters,
+                { field, operator: 'equals', value: distinct[0] || '' },
+            ];
+            updateFilterList('visual', next);
+            return;
+        }
         const distinct = getDistinctValues(dataset, field);
         if (distinct.length > 0) {
             addFilter(field, distinct[0]);
@@ -125,26 +175,29 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
         }
     };
 
-    const hasVisualSlicer = slicerRulesForApply.some(
-        (f) => f?.field && f.operator === 'equals' && f.value != null && String(f.value).trim() !== ''
-    );
-    const isCrossFilterSource =
-        Boolean(selectedVisual?.id) && crossFilterSourceVisualId === selectedVisual.id;
-    const canApplyToAll =
-        Boolean(selectedVisual?.id) && hasVisualSlicer && !isCrossFilterSource && !reportCrossFilterEnabled;
+    const hasVisualSlicer = visualSlicerEntries.length > 0 || slicerRulesForApply.length > 0;
+    const showUnlinkAllFilter = isCrossFilterSynced;
 
-    const handleUnlinkAllVisuals = () => {
-        const sourceId = crossFilterSourceVisualId;
-        clearReportCrossFilter();
-        if (sourceId && onUpdateVisual && selectedVisual?.id === sourceId) {
-            onUpdateVisual(sourceId, {
-                options: {
-                    ...(selectedVisual.options || {}),
-                    filters: [],
-                },
-            });
+    const handleUnlinkFilter = useCallback(() => {
+        if (onUnlinkCrossFilter) {
+            onUnlinkCrossFilter();
+        } else {
+            const sourceId = crossFilterSourceVisualId;
+            clearFilters();
+            if (sourceId && onUpdateVisual && selectedVisual?.id === sourceId) {
+                onUpdateVisual(sourceId, {
+                    options: {
+                        ...(selectedVisual.options || {}),
+                        filters: [],
+                        pageFilters: [],
+                    },
+                    cached_data: null,
+                });
+            }
         }
-    };
+        setVisualFilters([]);
+        setPageFilters([]);
+    }, [onUnlinkCrossFilter, crossFilterSourceVisualId, clearFilters, onUpdateVisual, selectedVisual]);
 
     const handleClearCrossVisualFilters = () => {
         const sourceId = crossFilterSourceVisualId;
@@ -163,47 +216,42 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
         <div className="bi-pane-section bi-cross-filters-section">
             <div className="bi-section-subtitle">Cross-visual filters (drill-down &amp; selection)</div>
             <p className="bi-cross-filters-hint">
-                Chart clicks filter the selected visual only. Use the button below to sync that filter to every chart on the page.
+                Chart clicks instantly filter all visuals on this page.
             </p>
+
             <div className="bi-cross-filter-actions">
-                {canApplyToAll && (
-                    <button
-                        type="button"
-                        className="bi-crossfilter-apply-btn"
-                        onClick={() => {
-                            if (!slicerRulesForApply.length) return;
-                            applyReportCrossFilter(selectedVisual.id, slicerRulesForApply);
-                        }}
-                        title="Apply this visual's filter to all other charts"
-                    >
-                        Apply to all visuals
-                    </button>
-                )}
-                {isCrossFilterSource && (
+                {showUnlinkAllFilter ? (
                     <button
                         type="button"
                         className="bi-crossfilter-unlink-btn"
-                        onClick={handleUnlinkAllVisuals}
-                        title="Stop filtering other charts and restore the source chart"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleUnlinkFilter();
+                        }}
+                        title="Remove the filter from all linked visuals on this page"
                     >
                         Unlink all visuals
                     </button>
-                )}
-                {reportCrossFilterEnabled && !isCrossFilterSource && (
-                    <span className="bi-crossfilter-status">Another visual is filtering the report</span>
-                )}
-                {selectedVisual && !hasVisualSlicer && !reportCrossFilterEnabled && (
+                ) : null}
+                {selectedVisual && !hasVisualSlicer && !isCrossFilterSynced && (
                     <span className="bi-crossfilter-status bi-crossfilter-status--muted">
-                        Select a value on the chart to enable cross-filter
+                        Click a chart value to filter linked visuals
+                    </span>
+                )}
+                {isCrossFilterSynced && (
+                    <span className="bi-crossfilter-status">
+                        Cross-filter active across linked visuals
                     </span>
                 )}
             </div>
-            <div className="bi-filter-dropzone">
-                {crossFilterEntries.length === 0 && (
+
+            <div className="bi-filter-dropzone bi-filter-dropzone--cross">
+                {displayFilterEntries.length === 0 && (
                     <span className="bi-dropzone-empty">No cross-visual filters applied</span>
                 )}
 
-                {crossFilterEntries.map(([dimension, values]) => {
+                {isCrossFilterSynced && displayFilterEntries.map(([dimension, values]) => {
                     const distinct = getDistinctValues(dataset, dimension);
                     const primaryValue = values[0] ?? '';
 
@@ -213,6 +261,7 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
                                 <select
                                     className="bi-filter-select"
                                     value={dimension}
+                                    disabled={isViewOnly}
                                     onChange={(e) => renameCrossFilterDimension(dimension, e.target.value)}
                                 >
                                     {fieldOptions.map((field) => (
@@ -250,6 +299,7 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
                                         onChange={(e) => setDimensionValues(dimension, [e.target.value])}
                                     />
                                 )}
+                                {!isViewOnly && (
                                 <button
                                     type="button"
                                     className="bi-filter-remove-btn"
@@ -258,6 +308,7 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
                                 >
                                     <X size={14} />
                                 </button>
+                                )}
                             </div>
                             {values.length > 1 && (
                                 <div className="bi-cross-filter-multi">
@@ -280,28 +331,45 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
                     );
                 })}
 
-                <button
-                    type="button"
-                    className="bi-filter-add-btn"
-                    disabled={fieldOptions.length === 0}
-                    onClick={handleAddCrossFilter}
-                >
-                    Add filter
-                </button>
-                {crossFilterEntries.length > 0 && (
+                {!isViewOnly && isCrossFilterSynced && (
+                    <div className="bi-cross-filter-dropzone-actions">
+                        <button
+                            type="button"
+                            className="bi-filter-add-btn bi-filter-add-btn--cross"
+                            disabled={fieldOptions.length === 0}
+                            onClick={handleAddCrossFilter}
+                        >
+                            + Add filter
+                        </button>
+                        {displayFilterEntries.length > 0 && (
+                            <button
+                                type="button"
+                                className="bi-filter-clear-cross-btn"
+                                onClick={handleClearCrossVisualFilters}
+                            >
+                                Clear cross-visual filters
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {!isViewOnly && !isCrossFilterSynced && (
                     <button
                         type="button"
-                        className="bi-filter-clear-cross-btn"
-                        onClick={handleClearCrossVisualFilters}
+                        className="bi-filter-add-btn bi-filter-add-btn--cross"
+                        disabled={fieldOptions.length === 0 || !selectedVisual}
+                        onClick={handleAddCrossFilter}
                     >
-                        Clear cross-visual filters
+                        Add filter
                     </button>
                 )}
             </div>
         </div>
     );
 
-    const renderFilterSection = (title, section, filters, disabled = false) => (
+    const renderFilterSection = (title, section, filterRules, disabled = false) => {
+        const filters = Array.isArray(filterRules) ? filterRules : [];
+        return (
         <div className="bi-pane-section">
             <div className="bi-section-subtitle">{title}</div>
             <div className="bi-filter-dropzone">
@@ -409,24 +477,41 @@ const BIFiltersPane = ({ selectedVisual, schema, dataset, onUpdateVisual }) => {
                 </button>
             </div>
         </div>
-    );
+        );
+    };
 
     return (
-        <div className="bi-pane-view">
-            <div className="bi-pane-header">
-                <span className="bi-pane-title">Filters</span>
-                {selectedVisual && (
-                    <span className="bi-pane-subtitle" title={selectedVisual.options?.title || selectedVisual.graph_type}>
-                        {selectedVisual.options?.title || selectedVisual.graph_type || 'Visual'}
-                    </span>
+        <div className={`bi-pane-view bi-pane-view--filters${isViewOnly ? ' bi-pane-view--view-only' : ''}`}>
+            <div className="bi-pane-header bi-pane-header--filters">
+                <div className="bi-pane-header__titles">
+                    <span className="bi-pane-title">Filters</span>
+                    {selectedVisual && (
+                        <span className="bi-pane-subtitle" title={formatVisualDisplayTitle(selectedVisual.options?.title, selectedVisual.graph_type)}>
+                            {formatVisualDisplayTitle(selectedVisual.options?.title, selectedVisual.graph_type)}
+                        </span>
+                    )}
+                </div>
+                {hasAnyActiveFilters && !isViewOnly && (
+                    <button
+                        type="button"
+                        className="bi-crossfilter-unlink-btn bi-filters-pane-unlink-btn"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleUnlinkFilter();
+                        }}
+                        title="Remove all filters on this page"
+                    >
+                        Unlink
+                    </button>
                 )}
             </div>
 
             <div className="bi-pane-scroll">
                 {renderCrossVisualFilterSection()}
-                {renderFilterSection('Filters on this visual', 'visual', visualFilters, !selectedVisual)}
-                {renderFilterSection('Filters on this page', 'page', pageFilters, !selectedVisual)}
-                {renderFilterSection('Filters on all pages', 'report', reportFilters, !selectedVisual)}
+                {renderFilterSection('Filters on this visual', 'visual', visualFilters, !selectedVisual || isViewOnly)}
+                {renderFilterSection('Filters on this page', 'page', pageFilters, !selectedVisual || isViewOnly)}
+                {renderFilterSection('Filters on all pages', 'report', reportFilters, !selectedVisual || isViewOnly)}
             </div>
         </div>
     );

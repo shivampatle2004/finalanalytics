@@ -17,8 +17,19 @@ top_router = APIRouter(prefix="/api/graphs", tags=["graphs_top"])
 
 _GRAPH_QUERY_CACHE = {}
 _GRAPH_QUERY_CACHE_LOCK = threading.Lock()
-_GRAPH_QUERY_CACHE_TTL_SECONDS = 60
-_GRAPH_QUERY_CACHE_MAX_SIZE = 200
+_GRAPH_QUERY_CACHE_TTL_SECONDS = 600
+_GRAPH_QUERY_CACHE_MAX_SIZE = 500
+
+
+def clear_graph_cache_for_file(file_id: str) -> int:
+    """Remove in-memory graph-data cache entries for a file. Returns keys cleared."""
+    removed = 0
+    with _GRAPH_QUERY_CACHE_LOCK:
+        keys = [k for k in _GRAPH_QUERY_CACHE if f'"file_id": "{file_id}"' in k or f'"file_id":"{file_id}"' in k]
+        for k in keys:
+            _GRAPH_QUERY_CACHE.pop(k, None)
+            removed += 1
+    return removed
 
 def get_db():
     db = SessionLocal()
@@ -204,8 +215,14 @@ def _build_graph_cache_key(file_id: str, request: schemas.GraphDataRequest) -> s
         "x_axis": request.x_axis,
         "y_axis": request.y_axis,
         "aggregation": request.aggregation,
-        "dimension_fields": request.dimension_fields or [],
-        "measure_fields": request.measure_fields or []
+        "dimension_fields": sorted(request.dimension_fields or [], key=str),
+        "measure_fields": request.measure_fields or [],
+        # Include all filter state so filtered queries get their own cache slot
+        "active_filters": request.active_filters or {},
+        "drill_filters": request.drill_filters or [],
+        "year_filter": request.year_filter,
+        "month_filter": request.month_filter,
+        "quarter_filter": request.quarter_filter,
     }
     return json.dumps(payload, sort_keys=True, default=str)
 
@@ -267,19 +284,18 @@ def get_graph_data(
     db: Session = Depends(get_db)
 ):
     try:
-        # Bypass cache if any date filters are present
+        cache_key = _build_graph_cache_key(file_id, request)
+        # Always check in-memory cache first (key now includes all filter state)
+        cached_response = _get_cached_graph_response(cache_key)
+        if cached_response is not None:
+            print(f"DEBUG: In-memory cache hit for {file_id}")
+            return cached_response
+
         has_filters = any([request.year_filter, request.month_filter, request.quarter_filter])
         has_active_filters = (
             (request.active_filters and len(request.active_filters) > 0) or
-            (request.dimension_fields and len(request.dimension_fields) > 1) or
             (request.drill_filters and len(request.drill_filters) > 0)
         )
-        
-        cache_key = _build_graph_cache_key(file_id, request)
-        if not (has_filters or has_active_filters):
-            cached_response = _get_cached_graph_response(cache_key)
-            if cached_response is not None:
-                return cached_response
 
         # 1. Check if the specific graph definition exists and has cached data.
         # Bypass DB cache if active/drill filters are active to allow dynamic calculation.
@@ -360,7 +376,13 @@ def get_graph_data(
             for col, vals in request.active_filters.items():
                 if df is not None and not df.empty and col in df.columns:
                     if isinstance(vals, list) and len(vals) > 0:
-                        df = df[df[col].astype(str).isin([str(v) for v in vals])]
+                        str_vals = set(str(v) for v in vals)
+                        col_series = df[col]
+                        # Avoid astype(str) on whole column when native dtype matches
+                        if col_series.dtype == object or str(col_series.dtype).startswith("string"):
+                            df = df[col_series.isin(str_vals)]
+                        else:
+                            df = df[col_series.astype(str).isin(str_vals)]
 
         # 3. Apply Time Intelligence filters if requested
         if has_filters:
@@ -376,6 +398,18 @@ def get_graph_data(
                     quarter=request.quarter_filter
                 )
 
+        # Load semantic measures from the dedicated SemanticMeasure table (correct source).
+        # The legacy model_config["measures"] path is no longer populated by the Measure Designer.
+        from models import SemanticMeasure as SemanticMeasureModel
+        sm_records = db.query(SemanticMeasureModel).filter(SemanticMeasureModel.file_id == file_id).all()
+        if sm_records:
+            semantic_measures = [{"name": m.name, "expression": m.expression, "format": m.format,
+                                   "display_name": m.display_name, "description": m.description,
+                                   "category": m.category} for m in sm_records]
+        else:
+            # Fallback to legacy model_config path for backwards compatibility
+            semantic_measures = (file_record.model_config or {}).get("measures") or []
+
         from services.graph_engine import GraphEngine
         result = GraphEngine.get_aggregated_data(
             df, 
@@ -384,20 +418,39 @@ def get_graph_data(
             request.y_axis, 
             request.aggregation,
             request.dimension_fields,
-            request.measure_fields
+            request.measure_fields,
+            semantic_measures=semantic_measures
         )
+
+        if isinstance(result, dict) and result.get("error"):
+            raise ValueError(result["error"])
 
         print(f"DEBUG: GraphEngine returned {len(result.get('labels', [])) if isinstance(result, dict) else 'N/A'} items for {request.graph_type}")
         safe_result = _json_safe(result)
-        if not has_filters:
-            _set_cached_graph_response(cache_key, safe_result)
-            # Persist cache into the graph definition for instant loads on reload.
+        if request.measure_fields:
+            safe_result["_measure_fields_sig"] = _json_safe(request.measure_fields)
+
+        # Inject measure metadata (format, display_name, description) into the response
+        # so the frontend can format values and show tooltips without a separate lookup.
+        if semantic_measures:
+            measures_meta = {m["name"]: {
+                "format": m.get("format") or "General",
+                "display_name": m.get("display_name") or m["name"],
+                "description": m.get("description") or "",
+                "category": m.get("category") or "",
+            } for m in semantic_measures if isinstance(m, dict)}
+            if measures_meta:
+                safe_result["_measures_meta"] = measures_meta
+
+        # Always cache in memory (key includes all filter state)
+        _set_cached_graph_response(cache_key, safe_result)
+        # Persist to DB only for unfiltered requests (DB cache = canonical view)
+        if not has_filters and not has_active_filters:
             try:
                 if graph_def is not None and _has_non_empty_chart_payload(safe_result):
                     graph_def.cached_data = safe_result
                     db.commit()
             except Exception:
-                # Never fail the request due to cache persistence.
                 db.rollback()
         return safe_result
     except ValueError as e:

@@ -114,7 +114,7 @@ const PowerAutomateVisual = ({ visualId }) => {
   const loadHistory = async () => {
     setHistoryLoading(true);
     try {
-      const res  = await fetch('/api/power-automate/flows');
+      const res  = await fetch('/analytics/api/power-automate/flows');
       const data = await res.json();
       setFlows(Array.isArray(data) ? data : []);
     } catch {
@@ -138,7 +138,7 @@ const PowerAutomateVisual = ({ visualId }) => {
     pollTimerRef.current = setInterval(async () => {
       attempts++;
       try {
-        const res  = await fetch(`/api/power-automate/flow/${workflowId}`);
+        const res  = await fetch(`/analytics/api/power-automate/flow/${workflowId}`);
         const data = await res.json();
 
         if (data.has_export) {
@@ -201,7 +201,7 @@ const PowerAutomateVisual = ({ visualId }) => {
 
     // Fire API call + animation concurrently
     const [apiResult] = await Promise.all([
-      fetch('/api/power-automate/create-flow', {
+      fetch('/analytics/api/power-automate/create-flow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

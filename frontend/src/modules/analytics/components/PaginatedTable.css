@@ -34,7 +34,8 @@
   background-color: #f9fafb;
 }
 
-.table-empty, .no-data {
+.table-empty,
+.no-data {
   display: flex;
   align-items: center;
   justify-content: center;

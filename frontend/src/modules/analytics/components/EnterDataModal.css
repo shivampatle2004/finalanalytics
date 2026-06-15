@@ -119,3 +119,13 @@
   border-color: var(--input-border);
   color: var(--input-text);
 }
+.dark-theme .edm-paste-hint {
+  background: rgba(122, 30, 58, 0.12);
+  border-color: rgba(122, 30, 58, 0.3);
+}
+.dark-theme .edm-paste-text {
+  color: var(--text-secondary);
+}
+.dark-theme .edm-gen-label {
+  color: var(--text-secondary);
+}

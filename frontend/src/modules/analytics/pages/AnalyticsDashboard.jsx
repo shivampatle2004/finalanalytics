@@ -15,7 +15,7 @@ const AnalyticsDashboard = ({ onLogout }) => {
     const initialFileName = queryParams.get('fileName') || undefined;
     const viewParam = queryParams.get('view');
     const initialActiveView =
-      viewParam === 'connections' ? 'connections' : undefined;
+        viewParam === 'connections' ? 'connections' : undefined;
     const navigate = useNavigate();
     const userId = localStorage.getItem('userId');
 
@@ -25,12 +25,12 @@ const AnalyticsDashboard = ({ onLogout }) => {
 
     const handleOpenFile = (file) => {
         if (file && file.id) {
-            navigate(`/workspace/${file.id}`, { replace: true });
+            navigate(`/analytics/workspace/${file.id}`, { replace: true });
         }
     };
 
     return (
-        <BIWorkspace 
+        <BIWorkspace
             key={fileId || (initialActiveView === 'connections' ? 'connections' : 'empty')}
             fileId={fileId}
             initialFileName={initialFileName}

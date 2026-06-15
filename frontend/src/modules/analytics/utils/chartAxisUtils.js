@@ -89,6 +89,7 @@ export const buildMeasureFieldsForApi = (graphDefinition, cleanMeasureFields, yA
         return cleanMeasureFields
             .filter((m) => m?.column && String(m.column).trim())
             .map((m) => ({
+                ...m,
                 column: String(m.column).trim(),
                 aggregation: String(normalizeAggregation(m.aggregation || aggregation)).toLowerCase() === 'none'
                     ? 'none'

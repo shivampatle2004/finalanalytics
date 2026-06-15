@@ -123,12 +123,46 @@ async def change_detection_poller():
             
             for config in active_configs:
                 try:
+                    file_record = db.query(UploadedFile).filter(
+                        UploadedFile.id == config.table_name
+                    ).first()
+                    if file_record:
+                        try:
+                            from services.report_refresh_service import (
+                                _resolve_api_connection_id,
+                                _refresh_api_connection_sync,
+                                _rematerialize_api_file,
+                                _clear_dashboard_caches,
+                            )
+                            conn_id = _resolve_api_connection_id(file_record)
+                            if conn_id:
+                                _refresh_api_connection_sync(db, conn_id)
+                                _rematerialize_api_file(db, file_record, conn_id)
+                                _clear_dashboard_caches(file_record)
+                        except Exception as api_sync_err:
+                            print(f"WARNING: API sync before change check failed: {api_sync_err}")
+
                     current_hash = ModelingService.compute_column_hash(config.table_name, config.column_name, db)
                     if current_hash != config.last_value:
                         print(f"CHANGE DETECTED: Table {config.table_name}, Column {config.column_name}")
-                        # In a full system, you would emit a websocket event here to refresh dashboards
                         config.last_value = current_hash
                         config.status = "Changed"
+                        db.commit()
+
+                        try:
+                            import threading
+                            from services.report_refresh_service import execute_refresh
+
+                            def _refresh_report():
+                                execute_refresh(
+                                    config.table_name,
+                                    "dashboard",
+                                    triggered_by="change_detection",
+                                )
+
+                            threading.Thread(target=_refresh_report, daemon=True).start()
+                        except Exception as refresh_err:
+                            print(f"WARNING: Auto-refresh after change detection failed: {refresh_err}")
                     else:
                         if config.status == "Error":
                             config.status = "Monitoring"

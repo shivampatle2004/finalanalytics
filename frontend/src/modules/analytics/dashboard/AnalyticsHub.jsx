@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { BarChart2, ExternalLink, FileBarChart, Pencil, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getGlobalUserId } from '../config/auth';
 import { analyticsApiUrl, analyticsFetchJson } from '../config/api';
@@ -30,6 +30,7 @@ function reportDescription(report) {
 
 export default function AnalyticsHub() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -46,6 +47,17 @@ export default function AnalyticsHub() {
         setPage((p) => Math.min(Math.max(1, p), totalPages));
     }, [reports.length, totalPages]);
 
+    // Published / deep links: /analytics?fileId=… → open workspace (not the reports list)
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const fileId = params.get('fileId')?.trim();
+        if (!fileId) return;
+        params.delete('fileId');
+        const rest = params.toString();
+        const target = `/analytics/workspace/${encodeURIComponent(fileId)}${rest ? `?${rest}` : ''}`;
+        navigate(target, { replace: true });
+    }, [location.search, navigate]);
+
     const openStudio = useCallback(
         (fileId) => {
             if (fileId) {
@@ -57,7 +69,7 @@ export default function AnalyticsHub() {
         [navigate]
     );
 
-    const userQuery = () => `?user_id=${encodeURIComponent(getGlobalUserId())}`;
+    const userQuery = () => ``;
 
     const handleRenameReport = async (report) => {
         const display = (report.fileName || 'Untitled').replace(/\.osa$/i, '');
@@ -111,7 +123,7 @@ export default function AnalyticsHub() {
             setError(null);
             try {
                 const userId = getGlobalUserId();
-                const data = await analyticsFetchJson(`/files/user/${userId}`);
+                const data = await analyticsFetchJson(`/files/user/${userId}?t=${Date.now()}`, { cache: 'no-store' });
                 if (cancelled) return;
                 setReports(Array.isArray(data) ? data : []);
             } catch (err) {

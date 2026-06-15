@@ -5,7 +5,7 @@ import os
 # Add the current directory to sys.path to allow importing from connectors
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-async def test_mongodb():
+async def _test_mongodb():
     print("--- Testing MongoDB Connector Loading ---")
     try:
         from connectors.mongodb_connector import MongoDBConnector
@@ -35,4 +35,8 @@ async def test_mongodb():
         print("❌ Connection Failed (Expected if MongoDB is not running locally)")
 
 if __name__ == "__main__":
-    asyncio.run(test_mongodb())
+    asyncio.run(_test_mongodb())
+
+
+def test_mongodb():
+    asyncio.run(_test_mongodb())

@@ -35,7 +35,7 @@ export default function InfluencersVisual({ fileId, graphDefinition, isDark = fa
         setError(null);
         setPayload(null);
         try {
-            const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/key-influencers`, {
+            const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/key-influencers`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

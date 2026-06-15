@@ -4,12 +4,12 @@ import './PaginatedTable.css';
 /**
  * PaginatedTable - A report table component capable of being split across pages.
  */
-const PaginatedTable = ({ 
-  columns = [], 
-  rows = [], 
+const PaginatedTable = ({
+  columns = [],
+  rows = [],
   pageIndex = 0,
-  rowsPerPage = 20, 
-  config = {} 
+  rowsPerPage = 20,
+  config = {}
 }) => {
   // Simple pagination for now - in the real engine, 
   // the parent Builder calculates indices based on measured heights.

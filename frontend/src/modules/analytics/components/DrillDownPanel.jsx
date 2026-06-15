@@ -148,7 +148,16 @@ export const DrillDownPanel = ({
 
             <div className="drill-down-actions">
                 <button
-                    onClick={onDrillUp}
+                    type="button"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDrillUp?.();
+                    }}
                     disabled={!canDrillUp}
                     title="Drill up — remove one hierarchy level"
                     className={`bi-drill-btn${canDrillUp ? '' : ' is-disabled'}`}
@@ -157,7 +166,16 @@ export const DrillDownPanel = ({
                     ↑
                 </button>
                 <button
-                    onClick={onDrillDown}
+                    type="button"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDrillDown?.();
+                    }}
                     disabled={!canDrillDown}
                     title={canDrillDown ? `Drill down — add ${nextDimension || 'next level'}` : 'Deepest level'}
                     className={`bi-drill-btn${canDrillDown ? '' : ' is-disabled'}`}
@@ -166,7 +184,16 @@ export const DrillDownPanel = ({
                     ↓
                 </button>
                 <button
-                    onClick={onDrillModeToggle}
+                    type="button"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDrillModeToggle?.();
+                    }}
                     title={drillModeActive ? 'Click-to-drill ON' : 'Enable click-to-drill on chart'}
                     className="bi-drill-btn"
                     style={drillModeActive ? btnActive : btnBase}
@@ -174,7 +201,16 @@ export const DrillDownPanel = ({
                     <span style={{ fontSize: 9 }}>⊞</span>
                 </button>
                 <button
-                    onClick={onResetDrill}
+                    type="button"
+                    onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onResetDrill?.();
+                    }}
                     disabled={!canReset}
                     title="Reset hierarchy"
                     className={`bi-drill-btn${canReset ? ' is-reset' : ' is-disabled'}`}

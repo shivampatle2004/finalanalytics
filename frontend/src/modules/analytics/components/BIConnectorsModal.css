@@ -1,53 +1,48 @@
-/* Get Data — Power BI–inspired, compact professional shell */
+/* Get Data — minimal, theme-aware */
 .bi-connectors-overlay {
-    --bi-conn-surface: #ffffff;
-    --bi-conn-muted-bg: #f3f2f1;
-    --bi-conn-border: #e1dfdd;
-    --bi-conn-text: #323130;
-    --bi-conn-text-secondary: #605e5c;
-    --bi-conn-accent: #7a1e3a;
-    --bi-conn-accent-hover: #7a1e3a;
-    --bi-conn-tile-hover: #f5f9fc;
+    --bi-conn-surface: var(--bg-primary, #ffffff);
+    --bi-conn-muted-bg: var(--bg-tertiary, #f1f5f9);
+    --bi-conn-border: var(--border-primary, #e2e8f0);
+    --bi-conn-text: var(--text-primary, #0f172a);
+    --bi-conn-text-secondary: var(--text-tertiary, #64748b);
+    --bi-conn-accent: var(--accent-primary, #7a1e3a);
+    --bi-conn-accent-hover: var(--accent-primary-hover, #8c2546);
+    --bi-conn-tile-hover: var(--bg-tertiary, #f1f5f9);
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(32, 33, 36, 0.45);
-    backdrop-filter: blur(8px);
+    inset: 0;
+    background: var(--bg-overlay, rgba(15, 23, 42, 0.42));
+    backdrop-filter: blur(6px);
     display: flex;
     justify-content: center;
     align-items: center;
     z-index: 15000;
-    padding: 24px;
+    padding: 20px;
     box-sizing: border-box;
     animation: connectors-fadeIn 0.22s ease-out;
 }
 
 .bi-connectors-modal {
     background: var(--bi-conn-surface);
-    width: min(1180px, 100%);
-    max-height: min(860px, calc(100vh - 28px));
-    border-radius: 8px;
-    box-shadow:
-        0 2px 4px rgba(0, 0, 0, 0.04),
-        0 12px 28px rgba(0, 0, 0, 0.12),
-        0 24px 48px rgba(0, 0, 0, 0.08);
+    width: min(1080px, 100%);
+    max-height: min(78vh, 720px);
+    border-radius: 14px;
+    box-shadow: var(--shadow-xl, 0 20px 25px -5px rgba(0, 0, 0, 0.1));
     display: flex;
     flex-direction: column;
     overflow: hidden;
     border: 1px solid var(--bi-conn-border);
     animation: connectors-slideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: var(--bi-conn-text);
 }
 
 .bi-connectors-header {
-    padding: 14px 20px 12px;
-    border-bottom: 1px solid var(--bi-conn-border);
+    padding: 16px 20px 12px;
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 16px;
-    background: var(--bi-conn-surface);
+    flex-shrink: 0;
 }
 
 .bi-connectors-header-text {
@@ -59,12 +54,11 @@
 
 .bi-connectors-title {
     margin: 0;
-    font-size: 1.125rem;
+    font-size: 16px;
     font-weight: 600;
     color: var(--bi-conn-text);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
     line-height: 1.3;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 .bi-connectors-subtitle {
@@ -101,9 +95,8 @@
 }
 
 .bi-connectors-search-bar {
-    padding: 10px 20px 12px;
-    background: var(--bi-conn-surface);
-    border-bottom: 1px solid var(--bi-conn-border);
+    padding: 0 20px 12px;
+    flex-shrink: 0;
 }
 
 .bi-connectors-search-input-wrap {
@@ -124,27 +117,27 @@
     width: 100%;
     box-sizing: border-box;
     padding: 8px 12px 8px 38px;
-    border: 1px solid var(--bi-conn-border);
-    border-radius: 4px;
-    font-size: 0.875rem;
+    border: none;
+    border-bottom: 1px solid var(--bi-conn-border);
+    border-radius: 0;
+    font-size: 13px;
     color: var(--bi-conn-text);
-    background: var(--bi-conn-surface);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    background: transparent;
+    transition: border-color 0.15s ease;
     font-family: inherit;
 }
 
 .bi-connectors-search-input::placeholder {
-    color: #a19f9d;
+    color: var(--text-muted, #94a3b8);
 }
 
 .bi-connectors-search-input:hover {
-    border-color: #c8c6c4;
+    border-bottom-color: #cbd5e1;
 }
 
 .bi-connectors-search-input:focus {
     outline: none;
-    border-color: var(--bi-conn-accent);
-    box-shadow: 0 0 0 1px var(--bi-conn-accent);
+    border-bottom-color: var(--bi-conn-accent);
 }
 
 .bi-connectors-content {
@@ -379,39 +372,37 @@
     justify-content: flex-end;
     align-items: center;
     gap: 8px;
-    /* background: var(--bi-conn-muted-bg); */
+    flex-shrink: 0;
 }
 
 .bi-connectors-btn {
-    padding: 7px 18px;
-    border-radius: 4px;
-    font-size: 0.875rem;
-    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    border: none;
+    transition: background 0.15s ease, color 0.15s ease;
     font-family: inherit;
 }
 
 .bi-connectors-btn-cancel {
-    background: var(--bi-conn-surface);
-    border: 1px solid var(--bi-conn-border);
-    color: var(--bi-conn-text);
+    background: transparent;
+    color: var(--bi-conn-text-secondary);
 }
 
 .bi-connectors-btn-cancel:hover {
-    background: #faf9f8;
-    border-color: #c8c6c4;
+    background: var(--bi-conn-muted-bg);
+    color: var(--bi-conn-text);
 }
 
 .bi-connectors-btn-connect {
     background: var(--bi-conn-accent);
-    border: 1px solid var(--bi-conn-accent);
     color: #fff;
 }
 
 .bi-connectors-btn-connect:hover:not(:disabled) {
     background: var(--bi-conn-accent-hover);
-    border-color: var(--bi-conn-accent-hover);
 }
 
 .bi-connectors-btn-connect:disabled {
@@ -554,38 +545,39 @@
     align-items: center;
     gap: 4px;
     background: transparent;
-    border: 1px solid var(--bi-conn-border);
-    border-radius: 4px;
-    color: var(--bi-conn-text-secondary);
+    border: none;
+    border-radius: 6px;
+    color: var(--bi-conn-accent);
     cursor: pointer;
-    font-size: 0.8125rem;
+    font-size: 12px;
+    font-weight: 500;
     font-family: inherit;
-    padding: 4px 10px;
-    transition: background 0.15s, color 0.15s;
+    padding: 4px 8px;
+    transition: background 0.15s;
     flex-shrink: 0;
 }
-.bi-connectors-back-btn:hover { background: var(--bi-conn-muted-bg); color: var(--bi-conn-text); }
+.bi-connectors-back-btn:hover { background: color-mix(in srgb, var(--bi-conn-accent) 8%, transparent); }
 
 .bi-connectors-config-panel {
     flex: 1;
     overflow-y: auto;
-    padding: 18px 26px 22px;
+    padding: 0 20px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
+    min-height: 0;
 }
 
 .bi-config-loading,
 .bi-config-error {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 16px;
-    border-radius: 6px;
-    font-size: 0.875rem;
+    gap: 8px;
+    padding: 8px 0;
+    font-size: 13px;
 }
 .bi-config-loading { color: var(--bi-conn-text-secondary); }
-.bi-config-error   { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.bi-config-error   { color: var(--status-error, #ef4444); }
 
 .bi-extract-loading {
     display: flex;
@@ -601,13 +593,12 @@
     align-items: flex-start;
     flex-wrap: wrap;
     gap: 6px;
-    padding: 12px 14px;
-    border-radius: 6px;
-    font-size: 0.8125rem;
+    padding: 8px 0;
+    font-size: 12px;
     line-height: 1.45;
 }
-.bi-extract-result.success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-.bi-extract-result.failure { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.bi-extract-result.success { color: var(--status-success, #10b981); }
+.bi-extract-result.failure { color: var(--status-error, #ef4444); }
 .bi-extract-result-detail  { margin-left: 4px; opacity: 0.85; }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -628,28 +619,38 @@
 .dyn-field--full { grid-column: 1 / -1; }
 
 .dyn-label {
-    font-size: 0.8125rem;
+    font-size: 10px;
     font-weight: 600;
-    color: var(--bi-conn-text, #323130);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--bi-conn-text-secondary, #64748b);
     line-height: 1.3;
 }
 
+.dyn-required {
+    color: var(--status-error, #ef4444);
+    margin-left: 2px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
 .dyn-input {
-    padding: 9px 11px;
-    border: 1px solid var(--bi-conn-border, #e1dfdd);
-    border-radius: 4px;
-    font-size: 0.875rem;
-    color: var(--bi-conn-text, #323130);
-    background: #fff;
+    padding: 8px 0;
+    border: none;
+    border-bottom: 1px solid var(--bi-conn-border, #e2e8f0);
+    border-radius: 0;
+    font-size: 13px;
+    color: var(--bi-conn-text, #0f172a);
+    background: transparent;
     font-family: inherit;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color 0.15s;
     width: 100%;
     box-sizing: border-box;
 }
-.dyn-input:hover  { border-color: #c8c6c4; }
-.dyn-input:focus  { outline: none; border-color: var(--bi-conn-accent, #7a1e3a); box-shadow: 0 0 0 1px var(--bi-conn-accent, #7a1e3a); }
-.dyn-input-error  { border-color: #d93025 !important; }
-.dyn-textarea     { resize: vertical; min-height: 80px; font-family: 'Menlo', 'Consolas', monospace; font-size: 0.8125rem; }
+.dyn-input:hover  { border-bottom-color: #cbd5e1; }
+.dyn-input:focus  { outline: none; border-bottom-color: var(--bi-conn-accent, #7a1e3a); }
+.dyn-input-error  { border-bottom-color: #d93025 !important; }
+.dyn-textarea     { resize: vertical; min-height: 56px; font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; }
 
 .dyn-password-wrap { position: relative; }
 .dyn-password-wrap .dyn-input { padding-right: 38px; }
@@ -713,22 +714,21 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
-    border-radius: 6px;
-    font-size: 0.8125rem;
-    margin-top: 14px;
+    padding: 8px 0;
+    font-size: 12px;
+    margin-top: 8px;
 }
-.dyn-test-result.success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-.dyn-test-result.failure { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.dyn-test-result.success { color: var(--status-success, #10b981); }
+.dyn-test-result.failure { color: var(--status-error, #ef4444); }
 
 /* Form action buttons */
 .dyn-form-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 18px;
-    padding-top: 14px;
-    border-top: 1px solid var(--bi-conn-border, #e1dfdd);
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--bi-conn-border, #e2e8f0);
 }
 
 @media (max-width: 980px) {
@@ -748,32 +748,31 @@
 }
 
 .dyn-btn {
-    padding: 7px 18px;
-    border-radius: 4px;
-    font-size: 0.875rem;
-    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     font-family: inherit;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    border: none;
+    transition: background 0.15s, color 0.15s;
 }
-.dyn-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.dyn-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .dyn-btn-test {
-    background: #fff;
-    border: 1px solid var(--bi-conn-border, #e1dfdd);
-    color: var(--bi-conn-text, #323130);
+    background: transparent;
+    color: var(--bi-conn-text-secondary, #475569);
 }
-.dyn-btn-test:hover:not(:disabled) { background: #faf9f8; border-color: #c8c6c4; }
+.dyn-btn-test:hover:not(:disabled) { background: var(--bi-conn-muted-bg, #f1f5f9); }
 
 .dyn-btn-connect {
     background: var(--bi-conn-accent, #7a1e3a);
-    border: 1px solid var(--bi-conn-accent, #7a1e3a);
     color: #fff;
 }
-.dyn-btn-connect:hover:not(:disabled) { background: #7a1e3a; border-color: #7a1e3a; }
+.dyn-btn-connect:hover:not(:disabled) { background: var(--bi-conn-accent-hover, #8c2546); }
 
 /* Loading / empty states */
 .dyn-loading, .dyn-empty {
@@ -792,11 +791,11 @@
 
 /* Dark mode overrides for DynamicForm */
 .dark-theme .dyn-input {
-    background: var(--input-bg);
+    background: transparent;
     color: var(--text-primary);
-    border-color: var(--input-border);
+    border-bottom-color: var(--input-border);
 }
-.dark-theme .dyn-input:focus { border-color: #4cc2ff; box-shadow: 0 0 0 1px #4cc2ff; }
+.dark-theme .dyn-input:focus { border-bottom-color: var(--accent-primary, #4cc2ff); }
 .dark-theme .dyn-label { color: #f3f2f1; }
 .dark-theme .dyn-field-hint { color: #c8c6c4; }
 .dark-theme .dyn-btn-test { background: #252423; border-color: #3b3a39; color: #f3f2f1; }

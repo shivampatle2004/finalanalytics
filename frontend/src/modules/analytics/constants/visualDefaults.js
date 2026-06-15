@@ -9,3 +9,15 @@ export const METRIC_CARD_DEFAULT_SIZE = {
   width: 300,
   height: 168,
 };
+
+/** Compact default for Insert → Text box (Power BI–style caption tile). */
+export const TEXT_BOX_DEFAULT_SIZE = {
+  width: 320,
+  height: 88,
+};
+
+/** Compact square tile for pie and donut charts (fits labels without excess canvas). */
+export const PIE_DONUT_DEFAULT_SIZE = {
+  width: 300,
+  height: 300,
+};

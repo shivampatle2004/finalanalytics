@@ -65,7 +65,8 @@ function resolveTableIdForSql(tables, bareName, connectionId) {
 }
 
 const BIModelView = ({ 
-    schema, fileName, fileId, userId, 
+    schema, fileName, fileId, userId,
+    readOnly = false,
     /** When true, do not synthesize a "main" card from file schema (blank report / placeholder-only file). */
     suppressMainTableInModel = false,
     /** False until BI workspace has finished the first load for this file (avoids locking before model props arrive). */
@@ -148,7 +149,7 @@ const BIModelView = ({
     React.useEffect(() => {
         const fetchDateTables = async () => {
             try {
-                const res = await fetch('/api/modeling/date-tables');
+                const res = await fetch('/analytics/api/modeling/date-tables');
                 if (res.ok) {
                     const data = await res.json();
                     const mapping = {};
@@ -241,6 +242,7 @@ const BIModelView = ({
     const prevPayloadStrRef = React.useRef(null);
 
     const persistModelNow = useCallback(async (nextTables, nextRelationships, nextExtras = null) => {
+        if (readOnly) return false;
         if (!fileId) throw new Error('No report is open (missing fileId).');
         const payload = {
             ...(nextExtras && typeof nextExtras === 'object' ? nextExtras : modelExtras),
@@ -249,7 +251,7 @@ const BIModelView = ({
         };
         if ((payload.tables || []).length > 0) payload.blank_report = false;
 
-        const res = await fetch(`/api/files/${fileId}/model`, {
+        const res = await fetch(`/analytics/api/files/${fileId}/model`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -267,10 +269,10 @@ const BIModelView = ({
         }
         if (onModelUpdate) await onModelUpdate();
         return true;
-    }, [fileId, modelExtras, onModelUpdate]);
+    }, [fileId, modelExtras, onModelUpdate, readOnly]);
 
     React.useEffect(() => {
-        if (!isLoaded || !fileId) return;
+        if (!isLoaded || !fileId || readOnly) return;
 
         const payload = { ...modelExtras, tables, relationships };
         if (tables.length > 0) {
@@ -303,7 +305,7 @@ const BIModelView = ({
         let isCancelled = false;
 
         const doSave = () => {
-            fetch(`/api/files/${fileId}/model`, {
+            fetch(`/analytics/api/files/${fileId}/model`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: payloadStr,
@@ -332,7 +334,7 @@ const BIModelView = ({
                 clearTimeout(saveTimer);
             };
         }
-    }, [tables, relationships, modelExtras, isLoaded, fileId, onModelUpdate]);
+    }, [tables, relationships, modelExtras, isLoaded, fileId, onModelUpdate, readOnly]);
     const [dragging, setDragging] = useState(null);
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
     const canvasRef = useRef(null);
@@ -401,7 +403,7 @@ const BIModelView = ({
             q.set('pg_schemas', schemaList.join(','));
             q.set('pg_schema', sch);
             if (refresh) q.set('refresh', 'true');
-            const res = await fetch(`/api/db/schema?${q.toString()}`);
+            const res = await fetch(`/analytics/api/db/schema?${q.toString()}`);
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 const msg = data.detail || data.message || `Failed to load tables (${res.status})`;
@@ -433,7 +435,7 @@ const BIModelView = ({
                 q.set('pg_schema', schemaList[0]);
             }
             if (refresh) q.set('refresh', 'true');
-            const res = await fetch(`/api/db/schema?${q.toString()}`);
+            const res = await fetch(`/analytics/api/db/schema?${q.toString()}`);
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 setCatalogTables([]);
@@ -454,7 +456,7 @@ const BIModelView = ({
         }
         try {
             const q = new URLSearchParams({ connection_id: connId });
-            const res = await fetch(`/api/db/schemas?${q.toString()}`);
+            const res = await fetch(`/analytics/api/db/schemas?${q.toString()}`);
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.detail || data.message || 'Failed to load schemas');
             const nextSchemas = Array.isArray(data.schemas) && data.schemas.length > 0 ? data.schemas : ['public'];
@@ -483,8 +485,8 @@ const BIModelView = ({
         const load = async () => {
             try {
                 const [connRes, savedRes] = await Promise.all([
-                    fetch('/api/db/connections').then((r) => r.json()),
-                    userId ? fetch(`/api/db/saved?user_id=${encodeURIComponent(userId)}`).then((r) => r.json()) : Promise.resolve({ profiles: [] }),
+                    fetch('/analytics/api/db/connections').then((r) => r.json()),
+                    userId ? fetch(`/analytics/api/db/saved?user_id=${encodeURIComponent(userId)}`).then((r) => r.json()) : Promise.resolve({ profiles: [] }),
                 ]);
                 if (cancelled) return;
                 setUserConnections(connRes.connections || []);
@@ -524,7 +526,7 @@ const BIModelView = ({
         let cancelled = false;
         const loadCatalogSource = async () => {
             try {
-                const connRes = await fetch('/api/db/connections').then((r) => r.json());
+                const connRes = await fetch('/analytics/api/db/connections').then((r) => r.json());
                 if (cancelled) return;
                 const list = connRes.connections || [];
                 setUserConnections(list);
@@ -576,7 +578,7 @@ const BIModelView = ({
     const activateSavedProfile = async (profileId) => {
         setSchemaError('');
         try {
-            const res = await fetch(`/api/db/saved/${encodeURIComponent(profileId)}/activate`, { method: 'POST' });
+            const res = await fetch(`/analytics/api/db/saved/${encodeURIComponent(profileId)}/activate`, { method: 'POST' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 const msg = data.detail || data.message || 'Could not connect';
@@ -590,7 +592,7 @@ const BIModelView = ({
             } catch (_) {
                 /* ignore */
             }
-            const refreshed = await fetch('/api/db/connections').then((r) => r.json());
+            const refreshed = await fetch('/analytics/api/db/connections').then((r) => r.json());
             setUserConnections(refreshed.connections || []);
             setSelectedConn(cid);
             const schemas = await fetchSchemaOptions(cid);
@@ -605,7 +607,7 @@ const BIModelView = ({
     const deleteSavedProfile = async (profileId) => {
         if (!window.confirm('Remove this saved connection?')) return;
         try {
-            const res = await fetch(`/api/db/saved/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+            const res = await fetch(`/analytics/api/db/saved/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
             if (!res.ok) throw new Error('Delete failed');
             setSavedProfiles((prev) => prev.filter((p) => p.id !== profileId));
         } catch (err) {
@@ -630,14 +632,14 @@ const BIModelView = ({
         if (pwd && String(pwd).length > 0) body.password = String(pwd);
 
         try {
-            const res = await fetch(`/api/db/saved/${encodeURIComponent(editingProfile.id)}`, {
+            const res = await fetch(`/analytics/api/db/saved/${encodeURIComponent(editingProfile.id)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.detail || 'Update failed');
-            const listRes = await fetch(`/api/db/saved?user_id=${encodeURIComponent(userId)}`).then((r) => r.json());
+            const listRes = await fetch(`/analytics/api/db/saved?user_id=${encodeURIComponent(userId)}`).then((r) => r.json());
             setSavedProfiles(listRes.profiles || []);
             setEditingProfile(null);
         } catch (err) {
@@ -731,7 +733,7 @@ const BIModelView = ({
 
         try {
             // 1. Upload
-            const uploadRes = await fetch('/api/files/upload', {
+            const uploadRes = await fetch('/analytics/api/files/upload', {
                 method: 'POST',
                 body: formData
             });
@@ -753,7 +755,7 @@ const BIModelView = ({
             while (!isComplete) {
                 await new Promise(r => setTimeout(r, 1000));
                 attempts += 1;
-                const statusRes = await fetch(`/api/files/${newFileId}/status`);
+                const statusRes = await fetch(`/analytics/api/files/${newFileId}/status`);
                 if (!statusRes.ok) {
                     throw new Error(`Status check failed (${statusRes.status})`);
                 }
@@ -776,7 +778,7 @@ const BIModelView = ({
             }
 
             // 3. Get schema
-            const schemaRes = await fetch(`/api/files/${newFileId}/schema`);
+            const schemaRes = await fetch(`/analytics/api/files/${newFileId}/schema`);
             if (!schemaRes.ok) throw new Error("Schema fetch failed");
             const schemaData = await schemaRes.json();
 
@@ -936,7 +938,7 @@ const BIModelView = ({
         if (userId) formData.append('user_id', userId);
 
         try {
-            const uploadRes = await fetch('/api/files/upload', { method: 'POST', body: formData });
+            const uploadRes = await fetch('/analytics/api/files/upload', { method: 'POST', body: formData });
             if (!uploadRes.ok) {
                 if (uploadRes.status === 413) {
                     throw new Error("Upload blocked by server gateway (413 Request Entity Too Large). Increase nginx proxy upload size (client_max_body_size).");
@@ -953,7 +955,7 @@ const BIModelView = ({
             while (!isComplete) {
                 await new Promise(r => setTimeout(r, 1000));
                 attempts += 1;
-                const statusRes = await fetch(`/api/files/${newFileId}/status`);
+                const statusRes = await fetch(`/analytics/api/files/${newFileId}/status`);
                 if (!statusRes.ok) throw new Error(`Status check failed`);
                 const statusData = await statusRes.json();
                 const nextProgress = Number.isFinite(Number(statusData?.progress))
@@ -969,7 +971,7 @@ const BIModelView = ({
                 if (attempts >= maxPollAttempts) throw new Error("Processing timed out.");
             }
 
-            const schemaRes = await fetch(`/api/files/${newFileId}/schema`);
+            const schemaRes = await fetch(`/analytics/api/files/${newFileId}/schema`);
             if (!schemaRes.ok) throw new Error("Schema fetch failed");
             const schemaData = await schemaRes.json();
 
@@ -1058,7 +1060,7 @@ const BIModelView = ({
                 }
             }
             const runPreviewQuery = async (connId) => {
-                const res = await fetch('/api/db/query', {
+                const res = await fetch('/analytics/api/db/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1105,17 +1107,26 @@ const BIModelView = ({
             };
         }
 
-        const fid = table.id === 'main' ? fileId : table.id;
+        const fid = table.id === 'main'
+            ? fileId
+            : (table.source?.file_id || table.id);
         if (!fid) {
             throw new Error('No file or connection is linked to this table.');
         }
         const res = await fetch(
-            `/api/files/${fid}/dataset?limit=${MODEL_TABLE_PREVIEW_PAGE_SIZE}&offset=${offset}`
+            `/analytics/api/files/${encodeURIComponent(fid)}/dataset?limit=${MODEL_TABLE_PREVIEW_PAGE_SIZE}&offset=${offset}`
         );
+        const contentType = res.headers.get('content-type') || '';
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
             const msg = data.detail || data.message || `HTTP ${res.status}`;
             throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+        }
+        if (!contentType.includes('application/json')) {
+            throw new Error('Could not load dataset preview. Please refresh and try again.');
+        }
+        if (!Array.isArray(data?.columns) && !Array.isArray(data?.rows)) {
+            throw new Error(data?.metadata?.error || 'Dataset preview is empty or unavailable.');
         }
         const totalRows = Number(data.metadata?.totalRows) || Number(data.rows?.length) || 0;
         return { dataset: data, totalRows };
@@ -1191,7 +1202,7 @@ const BIModelView = ({
                     onCatalogTableClick={(table) => setCatalogTableInfo(table)}
                 />
             )}
-            <div className="bi-model-view">
+            <div className={`bi-model-view${readOnly ? ' bi-model-view--read-only' : ''}`}>
             {importJob.active && (
                 <div className="bi-model-import-overlay" role="status" aria-live="polite">
                     <div className="bi-model-import-card">
@@ -1919,7 +1930,7 @@ const BIModelView = ({
                                         currentPage={tablePreviewModal.page}
                                         pageSize={MODEL_TABLE_PREVIEW_PAGE_SIZE}
                                         totalRows={tablePreviewModal.totalRows}
-                                        loadError={null}
+                                        loadError={tablePreviewModal.dataset?.metadata?.error || null}
                                         onPageChange={(next) =>
                                             openTableDataPreview(tablePreviewModal.table, next)
                                         }

@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMe
 import { createPortal, flushSync } from 'react-dom';
 import { GitBranch } from 'lucide-react';
 import './DynamicChart.css';
+import { useTheme } from '../../../shared/context/ThemeContext';
 import { useGlobalFilters } from '../context/FilterContext';
 import {
     filterData,
     filterRulesToFilterMap,
     filterMapHasValues,
+    normalizeFilterRules,
+    sanitizeFilterMap,
     dimensionAppliesToChartAxis,
     getConsistentColor,
 } from '../utils/filterUtils';
@@ -24,8 +27,9 @@ import {
 } from '../utils/drillHierarchy';
 import LegendComponent, { truncateLabel, getVisualDimensionFilterValues, getLegendColor } from './Legend';
 import DrillDownPanel from './DrillDownPanel';
+import { resolveTableStyle } from '../utils/tableStyleUtils';
 import {
-    BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, Sector,
+    BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, Sector, Label,
     XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
     AreaChart, Area, ScatterChart, Scatter, ReferenceLine,
     Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -40,7 +44,13 @@ import PowerAutomateVisual from './PowerAutomateVisual';
 import QnaVisual from './QnaVisual';
 import InfluencersVisual from './InfluencersVisual';
 import PowerAppsVisual from './PowerAppsVisual';
-import { VIBRANT_PALETTE, getCategoryColor } from '../constants/chartPalette';
+import {
+    VIBRANT_PALETTE,
+    buildCategoryColorMap,
+    resolveCategoryColor,
+    isChartNoFill,
+    resolveChartFillBackground,
+} from '../constants/chartPalette';
 const THEME_PALETTES = {
     /** OSA Purple — full vibrant series colors (no restricted theme palette). */
     theme_default: {
@@ -104,24 +114,231 @@ const getThemeColor = (id, palette = VIBRANT_PALETTE) => {
     return palette[Math.abs(hash) % palette.length];
 };
 
-/** Category tick label — truncation limit comes from layout (slot width / label length). */
-const formatXAxisTick = (val, fullLabels = false, tickMaxLen = 12) => {
-    const str = String(val ?? '');
-    if (fullLabels || str.includes(' | ')) return str;
-    const max = Math.max(6, Number(tickMaxLen) || 12);
-    if (str.length <= max) return str;
-    return `${str.slice(0, Math.max(4, max - 1))}…`;
+/** Scale typography with the measured visual container (resize card → fonts follow). */
+const computeResponsiveFontSize = (baseSize, width, height, { min = 7, max = 18 } = {}) => {
+    const w = width > 0 ? width : 400;
+    const h = height > 0 ? height : 320;
+    const minDim = Math.min(w, h);
+    const scale = Math.min(1.35, Math.max(0.72, minDim / 360));
+    return Math.round(Math.min(max, Math.max(min, baseSize * scale)));
+};
+
+const estimateTextWidth = (text, fontSize, weight = 400) => {
+    const len = Math.max(1, String(text).length);
+    const charFactor = weight >= 700 ? 0.62 : 0.54;
+    return len * fontSize * charFactor;
+};
+
+/** Fit donut center labels inside the inner hole using the rendered inner radius (px). */
+const computeDonutCenterTypography = ({
+    innerRadiusPx,
+    nameText = '',
+    valueText = '',
+    pctText = '',
+}) => {
+    const innerR = Math.max(6, Number(innerRadiusPx) || 0);
+    const holeDiameter = innerR * 2;
+    const maxW = holeDiameter * 0.62;
+    const maxH = holeDiameter * 0.62;
+
+    const showTitle = holeDiameter >= 44 && String(nameText).trim().length > 0;
+    const showPct = holeDiameter >= 36 && String(pctText).trim().length > 0;
+    const lineCount = 1 + (showTitle ? 1 : 0) + (showPct ? 1 : 0);
+
+    let valueFont = Math.max(6, Math.min(18, innerR * (lineCount === 1 ? 0.42 : 0.34)));
+    let titleFont = Math.max(5, Math.min(12, valueFont * 0.58));
+    let pctFont = Math.max(5, Math.min(10, valueFont * 0.48));
+
+    const fitFontToWidth = (font, text, weight) => {
+        const est = estimateTextWidth(text, font, weight);
+        return est > maxW ? font * (maxW / est) : font;
+    };
+
+    valueFont = fitFontToWidth(valueFont, valueText, 800);
+    if (showTitle) titleFont = fitFontToWidth(titleFont, nameText, 600);
+    if (showPct) pctFont = fitFontToWidth(pctFont, pctText, 500);
+
+    const lineGap = (a, b) => Math.max(1, Math.min(4, (a + b) * 0.08));
+    const lineFonts = [];
+    if (showTitle) lineFonts.push(titleFont);
+    lineFonts.push(valueFont);
+    if (showPct) lineFonts.push(pctFont);
+
+    let totalH = lineFonts.reduce((sum, font, i) => {
+        if (i === 0) return font;
+        return sum + lineGap(lineFonts[i - 1], font) + font;
+    }, 0);
+
+    if (totalH > maxH) {
+        const shrink = maxH / totalH;
+        titleFont *= shrink;
+        valueFont *= shrink;
+        pctFont *= shrink;
+    }
+
+    const finalLineFonts = [];
+    if (showTitle) finalLineFonts.push(titleFont);
+    finalLineFonts.push(valueFont);
+    if (showPct) finalLineFonts.push(pctFont);
+    totalH = finalLineFonts.reduce((sum, font, i) => {
+        if (i === 0) return font;
+        return sum + lineGap(finalLineFonts[i - 1], font) + font;
+    }, 0);
+
+    const maxNameChars = Math.max(4, Math.floor(maxW / (titleFont * 0.54)));
+    let displayName = String(nameText);
+    if (displayName.length > maxNameChars) {
+        displayName = `${displayName.slice(0, Math.max(3, maxNameChars - 1))}…`;
+    }
+
+    const round = (n) => Math.round(n * 10) / 10;
+    return {
+        titleFont: round(titleFont),
+        valueFont: round(valueFont),
+        pctFont: round(pctFont),
+        totalH: round(totalH),
+        displayName,
+        showTitle,
+        showPct,
+        lineGap,
+    };
+};
+
+const buildDonutCenterLabelLines = (type, cx, cy, valueText, pctText) => {
+    const items = [];
+    if (type.showTitle) {
+        items.push({ text: type.displayName, fontSize: type.titleFont, weight: 600, kind: 'title' });
+    }
+    items.push({ text: valueText, fontSize: type.valueFont, weight: 800, kind: 'value' });
+    if (type.showPct) {
+        items.push({ text: pctText, fontSize: type.pctFont, weight: 500, kind: 'pct' });
+    }
+
+    const gap = type.lineGap;
+    let y = cy - type.totalH / 2;
+    return items.map((item, index) => {
+        y += item.fontSize / 2;
+        const line = { ...item, x: cx, y };
+        y += item.fontSize / 2;
+        if (index < items.length - 1) {
+            y += gap(item.fontSize, items[index + 1].fontSize);
+        }
+        return line;
+    });
 };
 
 const TICK_FONT_PX = 8;
 const TICK_CHAR_PX = TICK_FONT_PX * 0.62;
 
+/** How many characters fit in one bar slot at a given font size (px). */
+const measureSlotCharCapacity = (slotWidthPx, fontSize) => {
+    if (slotWidthPx <= 0 || fontSize <= 0) return 0;
+    const charPx = Math.max(2.6, fontSize * 0.5);
+    return Math.max(1, Math.floor((slotWidthPx * 0.95) / charPx));
+};
+
+const formatXAxisTick = (val, fullLabels = false, _tickMaxLen = 12, _charsPerSlot = 0, slotWidthPx = 0, fontSize = TICK_FONT_PX) => {
+    const str = String(val ?? '');
+    if (fullLabels || str.includes(' | ')) return str;
+
+    const slotChars = slotWidthPx > 0
+        ? measureSlotCharCapacity(slotWidthPx, fontSize)
+        : Math.max(1, Math.floor(Number(_charsPerSlot) || Number(_tickMaxLen) || 12));
+
+    if (str.length <= slotChars) return str;
+    if (slotChars < 2) return str;
+    return `${str.slice(0, slotChars - 1)}…`;
+};
+
+const QUICK_MEASURE_FIELD_LABELS = {
+    value_field: 'Value',
+    total_field: 'Total',
+    current_field: 'Current',
+    prior_field: 'Prior',
+    actual_field: 'Actual',
+    target_field: 'Target',
+    numerator: 'Numerator',
+    denominator: 'Denominator',
+    part_field: 'Part',
+    whole_field: 'Whole',
+    field: 'Field',
+    field_a: 'Field A',
+    field_b: 'Field B',
+    date_field: 'Date',
+    category_field: 'Category',
+    condition_field: 'Condition',
+    weight_field: 'Weight',
+    top_n: 'Top N',
+    periods: 'Periods',
+};
+
+const formatQuickMeasureFieldLabel = (key) => {
+    const raw = String(key || '').trim();
+    if (!raw) return 'Field';
+    if (QUICK_MEASURE_FIELD_LABELS[raw]) return QUICK_MEASURE_FIELD_LABELS[raw];
+    return raw
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
+};
+
+const getQuickMeasureMappings = (measureField) => {
+    const mappings = measureField?.field_mappings || measureField?.config || {};
+    if (!mappings || typeof mappings !== 'object' || Array.isArray(mappings)) return [];
+    return Object.entries(mappings)
+        .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
+        .map(([key, value]) => ({
+            key,
+            label: formatQuickMeasureFieldLabel(key),
+            value: String(value),
+        }));
+};
+
+const formatPercentNumber = (num) => {
+    if (typeof num !== 'number' || !Number.isFinite(num)) return num;
+    return `${num.toLocaleString(undefined, {
+        minimumFractionDigits: Math.abs(num) > 0 && Math.abs(num) < 1 ? 2 : 0,
+        maximumFractionDigits: 2,
+    })}%`;
+};
+
+/**
+ * Pick the largest readable font that fits the longest label in each bar slot.
+ * Falls back to the font that maximizes visible characters when the longest name cannot fit.
+ */
+const computeXAxisTickFontSize = (count, slotWidth, focusView = false, maxLabelLen = 0, dashboardCard = false) => {
+    if (slotWidth <= 0) return focusView ? 11 : TICK_FONT_PX;
+
+    const longest = Math.max(1, Number(maxLabelLen) || 1);
+    const minFs = focusView ? 8 : (dashboardCard ? 7 : 5);
+    const maxFs = focusView ? 14 : (dashboardCard ? 8 : 9);
+
+    let bestFs = minFs;
+    let bestCap = 0;
+    for (let fs = maxFs; fs >= minFs; fs -= 1) {
+        const cap = measureSlotCharCapacity(slotWidth, fs);
+        if (cap >= longest) return fs;
+        if (cap > bestCap) {
+            bestCap = cap;
+            bestFs = fs;
+        }
+    }
+    return dashboardCard ? Math.max(minFs, bestFs) : bestFs;
+};
+
+/** Plot width available for category bands (single margin pass). */
+const resolveBarPlotWidth = (containerWidth, { isDashboardCanvas = false, isFocusView = false } = {}) => {
+    if (containerWidth <= 0) return 420;
+    const yAxisReserve = isDashboardCanvas ? 44 : 52;
+    const sideMargin = isDashboardCanvas ? 10 : (isFocusView ? 14 : 18);
+    return Math.max(120, containerWidth - yAxisReserve - sideMargin);
+};
+
 /** Vertical space (px) needed for a tick label at a given angle and character count. */
 const estimateAngledTickHeight = (labelChars, angleDeg, fontSize = TICK_FONT_PX) => {
-    if (!angleDeg) return fontSize + 12;
+    if (!angleDeg) return fontSize + 8;
     const rad = (Math.abs(angleDeg) * Math.PI) / 180;
     const textPx = labelChars * TICK_CHAR_PX * (fontSize / TICK_FONT_PX);
-    return Math.ceil(Math.sin(rad) * textPx + Math.cos(rad) * (fontSize + 4) + 6);
+    return Math.ceil(Math.sin(rad) * textPx + Math.cos(rad) * (fontSize + 2) + 4);
 };
 
 /** Y-axis title for Recharts (X-axis title on bar charts is rendered as HTML below the plot). */
@@ -140,12 +357,10 @@ const buildYAxisTitleLabel = (title) => {
     };
 };
 
-/** Bottom margin sized to the computed tick band (axis title is outside the chart). */
-const computeChartBottomMargin = (xLayout) => {
-    const height = xLayout?.height ?? 24;
-    const tickMargin = xLayout?.tickMargin ?? 2;
-    return height + tickMargin + 2;
-};
+/** Small padding below the X-axis band (tick space is reserved via XAxis `height`). */
+const computeChartBottomMargin = (isDashboardCanvas = false) => (
+    isDashboardCanvas ? 2 : 4
+);
 
 /**
  * X-axis layout derived from category labels + plot width:
@@ -159,7 +374,10 @@ const extractChartRows = (payload) => {
     return [];
 };
 
-const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode = false, chartWidth = 0 } = {}) => {
+/** Above this category count, x-axis labels are thinned (API / high-cardinality charts). */
+const DENSE_X_AXIS_CATEGORY_CAP = 28;
+
+const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode = false, chartWidth = 0, focusView = false, dashboardCard = false } = {}) => {
     const names = (Array.isArray(chartData) ? chartData : []).map((d) => String(d?.name ?? ''));
     const count = names.length;
     const emptyLayout = {
@@ -173,64 +391,762 @@ const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode =
         textAnchor: 'middle',
         minTickGap: 0,
         tickMargin: 2,
-        footerGap: 4,
+        footerGap: 2,
     };
     if (count === 0) return emptyLayout;
 
     const hasComposite = expandModeActive || names.some((n) => n.includes(' | '));
     const maxLen = names.reduce((m, n) => Math.max(m, n.length), 0);
-    const plotWidth = chartWidth > 60 ? chartWidth - 24 : 0;
+    const plotWidth = chartWidth > 60 ? chartWidth : 0;
     const slotWidth = plotWidth > 0 ? plotWidth / count : 0;
-    const charsPerSlot = slotWidth > 0 ? Math.max(4, Math.floor(slotWidth / TICK_CHAR_PX)) : maxLen;
+    let fontSize = computeXAxisTickFontSize(count, slotWidth, focusView, maxLen, dashboardCard);
+    let charsPerSlot = measureSlotCharCapacity(slotWidth, fontSize) || maxLen;
 
-    const fullLabels = hasComposite
-        || (compactMode && count <= 8 && maxLen <= 28)
-        || (count <= 5 && maxLen <= 24)
-        || (count <= 8 && maxLen <= 18 && charsPerSlot >= maxLen);
+    const isHighCardinality = count > DENSE_X_AXIS_CATEGORY_CAP;
 
-    const tickMaxLen = fullLabels ? maxLen : Math.min(maxLen, charsPerSlot);
-    const displayLen = fullLabels ? maxLen : Math.min(tickMaxLen, maxLen);
+    const useAngledDashboard = dashboardCard && !focusView && !hasComposite
+        && !isHighCardinality
+        && count > 8
+        && (charsPerSlot < maxLen || count > 12);
 
-    let angle = 0;
-    if (compactMode) {
-        angle = count > 2 ? -36 : (maxLen > 8 ? -18 : 0);
-    } else if (hasComposite || maxLen > 20) {
-        angle = count > 6 ? -42 : -32;
-    } else if (count > 8 || maxLen > 14) {
-        angle = count > 14 ? -40 : -32;
-    } else if (count > 4 || maxLen > 10) {
-        angle = -28;
-    } else if (count > 2 && maxLen > 8) {
-        angle = -18;
+    if (useAngledDashboard) {
+        fontSize = Math.max(7, Math.min(8, fontSize));
+        charsPerSlot = Math.max(charsPerSlot, Math.min(maxLen, 14));
     }
 
-    let height = estimateAngledTickHeight(displayLen, angle, TICK_FONT_PX);
-    const maxHeight = compactMode ? 56 : (hasComposite ? 76 : 64);
-    height = Math.min(maxHeight, Math.max(angle === 0 ? 18 : 22, height));
+    const fullLabels = !hasComposite && !isHighCardinality && charsPerSlot >= maxLen;
+    let tickMaxLen = fullLabels ? maxLen : Math.min(maxLen, charsPerSlot);
+    let displayLen = useAngledDashboard ? Math.min(maxLen, 16) : tickMaxLen;
 
-    const tickMargin = angle ? Math.min(6, Math.max(2, Math.round(height * 0.06))) : 2;
+    const preferHorizontal = focusView
+        ? true
+        : (!useAngledDashboard && (compactMode || count > 8 || (slotWidth > 0 && slotWidth < 64)));
+    let angle = 0;
+    let textAnchor = 'middle';
+
+    if (useAngledDashboard) {
+        angle = count > 14 ? -40 : -35;
+        textAnchor = 'end';
+    } else if (!preferHorizontal && !hasComposite) {
+        if (maxLen > 20) {
+            angle = count > 6 ? -32 : -24;
+        } else if (count > 10 || maxLen > 16) {
+            angle = -28;
+        } else if (count > 6 || maxLen > 12) {
+            angle = count <= 8 ? -22 : -28;
+        } else if (count > 3 && maxLen > 9) {
+            angle = -16;
+        }
+        if (angle !== 0) textAnchor = 'end';
+    }
+
+    const tickPad = focusView ? 10 : (dashboardCard ? 9 : 7);
+    let height = angle === 0
+        ? fontSize + tickPad
+        : estimateAngledTickHeight(displayLen, angle, fontSize);
+    const maxHeight = focusView
+        ? 64
+        : (useAngledDashboard ? 48 : (compactMode ? 40 : (hasComposite ? 64 : 52)));
+    height = Math.min(maxHeight, Math.max(angle === 0 ? fontSize + (focusView ? 8 : (dashboardCard ? 7 : 6)) : 20, height));
+
+    const tickMargin = angle ? Math.min(4, Math.max(1, Math.round(height * 0.04))) : (focusView ? 2 : 1);
     let interval = 0;
-    if (count > 28) interval = 'preserveStartEnd';
-    else if (count > 18 && slotWidth > 0 && slotWidth < 22) {
-        interval = Math.max(1, Math.floor(count / 14));
+    let minTickGap = 0;
+
+    if (isHighCardinality) {
+        angle = 0;
+        textAnchor = 'middle';
+        fontSize = dashboardCard ? 7 : Math.min(fontSize, 8);
+        charsPerSlot = measureSlotCharCapacity(slotWidth, fontSize) || charsPerSlot;
+        tickMaxLen = Math.min(maxLen, Math.max(4, charsPerSlot));
+        displayLen = tickMaxLen;
+        height = fontSize + (dashboardCard ? 8 : 9);
+        const maxTicks = focusView
+            ? Math.min(20, Math.max(10, Math.floor(plotWidth / 34)))
+            : Math.min(12, Math.max(6, Math.floor(plotWidth / 40)));
+        interval = Math.max(1, Math.ceil(count / maxTicks) - 1);
+        minTickGap = 6;
+    } else {
+        const labelsFitAll = focusView || fullLabels || (slotWidth >= 28 && charsPerSlot >= 5);
+        if (!labelsFitAll && slotWidth > 0) {
+            if (count > 32 && slotWidth < 20) {
+                interval = 'preserveStartEnd';
+            } else if (charsPerSlot < 5 && count > 12) {
+                const targetVisible = Math.max(8, Math.floor(plotWidth / Math.max(maxLen * fontSize * 0.5, fontSize * 5)));
+                if (targetVisible < count) {
+                    interval = Math.max(1, Math.ceil(count / targetVisible) - 1);
+                }
+            }
+        }
+        minTickGap = labelsFitAll || interval === 0 ? 0 : 1;
     }
 
     return {
         fullLabels,
         tickMaxLen,
+        charsPerSlot,
+        slotWidth,
+        useAngledDashboard,
         angle,
         height,
         bottom: height + tickMargin,
         interval,
-        fontSize: TICK_FONT_PX,
-        textAnchor: angle ? 'end' : 'middle',
-        minTickGap: 0,
+        fontSize,
+        textAnchor,
+        minTickGap,
         tickMargin,
-        footerGap: 4,
+        footerGap: 2,
     };
 };
 
-const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection = null, onClick, onUpdate, onSelectVisual, isExporting = false, hideInternalStats = false, hideChartTitle = false, isDragging = false, showZoomControls = false, zoomToolbarContainer = null, reportTheme = 'theme_default', isViewOnly = false }) => {
+/** Bar value labels — above positive bars, just above zero line for negatives (avoids x-axis overlap). */
+const renderBarDataLabel = (formatNumber) => (props) => {
+    const { x, y, width, height, value } = props;
+    const num = Number(value);
+    if (!Number.isFinite(num) || x == null || y == null) return null;
+    const cx = Number(x) + (Number(width) || 0) / 2;
+    const isNeg = num < 0;
+    const labelY = isNeg ? Number(y) - 4 : Number(y) - 6;
+    return (
+        <text
+            x={cx}
+            y={labelY}
+            textAnchor="middle"
+            dominantBaseline="auto"
+            fontSize={9}
+            fontWeight={600}
+            fill="#334155"
+            style={{ pointerEvents: 'none' }}
+        >
+            {formatNumber(value)}
+        </text>
+    );
+};
+
+const MAX_PIE_SHOW_ALL_SLICES = 1200;
+
+/** Shared Top-N / Show All slice builder for pie & donut (controls + chart must use the same output). */
+function buildPieDonutProcessedData(chartRows, { scShowAll, scTopN, scGroupOthers, scHiddenSlices }) {
+    if (!Array.isArray(chartRows) || chartRows.length === 0) return null;
+    const rawSorted = [...chartRows].sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
+
+    const showAll = scShowAll;
+    const topN = scTopN;
+    const groupOthers = scGroupOthers;
+
+    let processedData;
+    if (!showAll && rawSorted.length > topN) {
+        const top = rawSorted.slice(0, topN).filter((d) => !scHiddenSlices.has(d.name));
+        if (groupOthers) {
+            const othersVal = rawSorted.slice(topN).reduce((s, d) => s + (Number(d.value) || 0), 0)
+                + rawSorted.filter((d) => scHiddenSlices.has(d.name)).reduce((s, d) => s + (Number(d.value) || 0), 0);
+            processedData = othersVal > 0
+                ? [...top, { name: 'Others', value: othersVal, __others: true }]
+                : top;
+        } else {
+            processedData = top;
+        }
+    } else {
+        processedData = rawSorted.filter((d) => !scHiddenSlices.has(d.name));
+        if (processedData.length > MAX_PIE_SHOW_ALL_SLICES) {
+            processedData = processedData.slice(0, MAX_PIE_SHOW_ALL_SLICES);
+        }
+    }
+    const pieSlices = processedData;
+    const pieTotal = pieSlices.reduce((s, d) => s + (Number(d.value) || 0), 0);
+    const nonZeroSliceCount = pieSlices.filter((d) => Number(d.value) > 0).length;
+    return {
+        rawSorted,
+        pieSlices,
+        pieTotal,
+        nonZeroSliceCount,
+        scLabelCount: pieSlices.length,
+        actualShowAll: showAll,
+        actualTopN: topN,
+        actualGroupOthers: groupOthers,
+    };
+}
+
+/** Max radial outside labels that fit in the card without overlap */
+function computeMaxPieOutsideLabels({
+    sliceCount,
+    labelFont,
+    labelMargin,
+    plotHeight,
+    plotWidth,
+    hasLegendPanel,
+}) {
+    const legendSide = hasLegendPanel ? 120 : 0;
+    const plotH = Math.max(100, plotHeight - labelMargin * 2 - 36);
+    const plotW = Math.max(100, plotWidth - labelMargin * 2 - legendSide);
+    const ring = Math.min(plotH, plotW);
+    const slotH = labelFont + 8;
+    let cap = Math.max(6, Math.floor(ring / slotH));
+    if (sliceCount <= 6) return sliceCount;
+    if (sliceCount <= 10) cap = Math.min(cap, 8);
+    else if (sliceCount <= 16) cap = Math.min(cap, 7);
+    else if (sliceCount > 35) cap = Math.min(cap, 10);
+    else if (sliceCount > 24) cap = Math.min(cap, 12);
+    else if (sliceCount > 16) cap = Math.min(cap, 14);
+    return Math.min(cap, sliceCount);
+}
+
+/** Dashboard pie/donut: scale label budget + pie size with card dimensions. */
+function computePieCardLabelCapacity({
+    plotWidth,
+    plotHeight,
+    sliceCount,
+    labelFont = 10,
+    isDashboardCanvas = false,
+}) {
+    const w = Math.max(120, plotWidth || 300);
+    const h = Math.max(100, plotHeight || 280);
+    const minDim = Math.min(w, h);
+    const area = w * h;
+    const isLarge = minDim >= 360 || area >= 160000;
+    const isMedium = !isLarge && (minDim >= 260 || area >= 90000);
+
+    const slotH = labelFont + 7;
+    const labelRing = Math.min(Math.max(80, w - 36), Math.max(80, h - 36));
+    let maxLabels = Math.max(4, Math.floor(labelRing / slotH));
+
+    if (!isDashboardCanvas) {
+        return {
+            maxLabels: Math.min(maxLabels, sliceCount),
+            isLarge,
+            isMedium,
+            marginRatio: 0.12,
+            outerBoost: 0,
+            maxStaggerTiers: 8,
+            cardInset: 4,
+        };
+    }
+
+    if (sliceCount <= 6) {
+        maxLabels = sliceCount;
+    } else if (isLarge) {
+        maxLabels = Math.min(sliceCount, sliceCount <= 10 ? sliceCount : sliceCount <= 16 ? 12 : 14);
+    } else if (isMedium) {
+        maxLabels = Math.min(sliceCount, sliceCount <= 10 ? 9 : sliceCount <= 16 ? 10 : 11);
+    } else {
+        maxLabels = Math.min(sliceCount, sliceCount <= 10 ? 7 : sliceCount <= 16 ? 8 : 9);
+    }
+
+    let marginRatio;
+    if (isLarge) {
+        marginRatio = sliceCount <= 6 ? 0.085 : sliceCount <= 10 ? 0.095 : sliceCount <= 16 ? 0.10 : 0.11;
+    } else if (isMedium) {
+        marginRatio = sliceCount <= 6 ? 0.10 : sliceCount <= 10 ? 0.11 : sliceCount <= 16 ? 0.12 : 0.13;
+    } else {
+        marginRatio = sliceCount <= 6 ? 0.11 : sliceCount <= 10 ? 0.13 : sliceCount <= 16 ? 0.14 : 0.15;
+    }
+
+    const outerBoost = isLarge ? 10 : isMedium ? 5 : 0;
+    const maxStaggerTiers = isLarge ? 14 : isMedium ? 10 : 6;
+
+    return {
+        maxLabels,
+        isLarge,
+        isMedium,
+        marginRatio,
+        outerBoost,
+        maxStaggerTiers,
+        cardInset: isLarge ? 6 : 8,
+    };
+}
+
+function computePieOutsideLabelEligible(pieSlices, pieTotal, maxOutside, showAllLabels = false) {
+    const eligible = new Set();
+    if (showAllLabels) {
+        pieSlices.forEach((d, i) => {
+            if (Number(d.value) > 0) eligible.add(i);
+        });
+        return eligible;
+    }
+    const candidates = [];
+    const sliceCount = pieSlices.length;
+    const minPct = sliceCount > 20 ? 0.025 : sliceCount > 12 ? 0.015 : 0;
+    pieSlices.forEach((d, i) => {
+        const val = Number(d.value) || 0;
+        if (val <= 0) return;
+        const isOthers = d.name === 'Others' || d.__others;
+        const pct = pieTotal > 0 ? val / pieTotal : 0;
+        candidates.push({ index: i, val, pct, isOthers });
+    });
+    candidates.sort((a, b) => b.val - a.val);
+    candidates.filter((c) => c.isOthers).forEach((c) => eligible.add(c.index));
+    for (const c of candidates) {
+        if (eligible.size >= maxOutside) break;
+        if (eligible.has(c.index)) continue;
+        if (minPct > 0 && c.pct < minPct) continue;
+        eligible.add(c.index);
+    }
+    return eligible;
+}
+
+/** Stop dashboard card drag/select — bubble phase only so inputs still receive clicks. */
+function stopPieControlBubble(e) {
+    e.stopPropagation();
+}
+
+function PieDonutControls({
+    scShowLabels,
+    onShowLabelsChange,
+    scGroupOthers,
+    onGroupOthersChange,
+    scShowAll,
+    onShowAllChange,
+    scTopN,
+    onTopNChange,
+    scLabelSide,
+    onLabelSideChange,
+    sliceModel,
+    scTotalPoints,
+    formatNumber,
+    calloutLabelStats,
+    isFocusView = false,
+    centerLegend = null,
+}) {
+    if (!sliceModel) return null;
+    const { rawSorted, pieSlices, pieTotal, nonZeroSliceCount, scLabelCount } = sliceModel;
+    const showAllDense = scShowAll && scLabelCount > 24 && scLabelSide !== 'all';
+    const veryDenseShowAll = scShowAll && scLabelCount > 80 && scLabelSide !== 'all';
+
+    return (
+        <div
+            className={`sc-controls-bar${isFocusView ? ' sc-controls-bar--focus' : ''}${!isFocusView ? ' sc-controls-bar--dashboard' : ''}`}
+            role="toolbar"
+            aria-label="Pie chart display options"
+            onMouseDown={stopPieControlBubble}
+            onPointerDown={stopPieControlBubble}
+            onClick={stopPieControlBubble}
+        >
+            <div className="sc-controls-start">
+                <label className="sc-toggle">
+                    <input
+                        type="checkbox"
+                        checked={scShowLabels}
+                        onChange={(e) => onShowLabelsChange(e.target.checked)}
+                    />
+                    <span>Labels</span>
+                </label>
+                <label className="sc-toggle">
+                    <input
+                        type="checkbox"
+                        checked={scGroupOthers}
+                        onChange={(e) => onGroupOthersChange(e.target.checked)}
+                        disabled={scShowAll}
+                    />
+                    <span>Group Others</span>
+                </label>
+                <label className="sc-toggle">
+                    <input
+                        type="checkbox"
+                        checked={scShowAll}
+                        onChange={(e) => onShowAllChange(e.target.checked)}
+                    />
+                    <span>Show All</span>
+                </label>
+                {showAllDense && (
+                    <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                        {veryDenseShowAll && (
+                            <span style={{ fontSize: 10, color: '#64748b' }}>Dense mode: click any chart side for that corner labels</span>
+                        )}
+                        {!veryDenseShowAll && (
+                            <>
+                                {[
+                                    ['leftTop', 'Left Top'],
+                                    ['leftBottom', 'Left Bottom'],
+                                    ['rightTop', 'Right Top'],
+                                    ['rightBottom', 'Right Bottom'],
+                                    ['all', 'All'],
+                                ].map(([side, label]) => (
+                                    <button
+                                        key={side}
+                                        type="button"
+                                        style={{
+                                            fontSize: 10,
+                                            padding: '2px 6px',
+                                            borderRadius: 6,
+                                            border: '1px solid #cbd5e1',
+                                            background: scLabelSide === side ? '#eef2ff' : '#fff',
+                                            color: '#334155',
+                                            cursor: 'pointer',
+                                        }}
+                                        onClick={() => onLabelSideChange(side)}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </>
+                        )}
+                    </div>
+                )}
+                {!scShowAll && (
+                    <label className="sc-slider-label">
+                        <span>Top {scTopN}</span>
+                        <input
+                            type="range"
+                            min={3}
+                            max={Math.min(100, Math.max(3, rawSorted.length))}
+                            step={1}
+                            value={Math.min(scTopN, rawSorted.length)}
+                            onChange={(e) => onTopNChange(Number(e.target.value))}
+                            onInput={(e) => onTopNChange(Number(e.target.value))}
+                            className="sc-slider"
+                        />
+                    </label>
+                )}
+            </div>
+            {isFocusView && centerLegend ? (
+                <div className="sc-controls-legend">{centerLegend}</div>
+            ) : null}
+            {isFocusView && (
+                <span className="sc-info">
+                    {scShowAll
+                        ? `${scLabelCount} categories · ${nonZeroSliceCount} with values · total ${formatNumber(pieTotal)}`
+                        : `${pieSlices.length}/${Math.max(rawSorted.length, scTotalPoints)} shown`}
+                    {scShowAll && rawSorted.length > MAX_PIE_SHOW_ALL_SLICES ? ' (render-capped)' : ''}
+                    {scShowLabels && calloutLabelStats && (
+                        <> · {calloutLabelStats.shown}/{calloutLabelStats.total} labels on chart</>
+                    )}
+                </span>
+            )}
+        </div>
+    );
+}
+
+// ── Power BI-like Radar Chart Helpers & Custom Components ───────────────────
+
+const buildRadarProcessedData = (rawData, showAll = true) => {
+    if (!Array.isArray(rawData) || rawData.length === 0) return [];
+    const sorted = [...rawData].sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
+    if (showAll) {
+        return sorted;
+    } else {
+        const top = sorted.slice(0, 10);
+        const othersVal = sorted.slice(10).reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+        return othersVal > 0 ? [...top, { name: 'Others', value: othersVal, __others: true }] : top;
+    }
+};
+
+const computeRadarTicksVisibility = (radarData, hoveredName, selectedFilters) => {
+    const visibleIndices = new Set();
+    if (!Array.isArray(radarData) || radarData.length === 0) return visibleIndices;
+
+    const N = radarData.length;
+    const cx = 150;
+    const cy = 150;
+    const radius = 110;
+    const RADIAN = Math.PI / 180;
+
+    const items = radarData.map((d, index) => {
+        const angleDeg = -90 + (index * 360) / N;
+        const angleRad = angleDeg * RADIAN;
+        const tx = cx + radius * Math.cos(angleRad);
+        const ty = cy + radius * Math.sin(angleRad);
+
+        // Estimate label size
+        const name = d.name || '';
+        const len = name.length > 14 ? 14 : name.length;
+        const w = len * 6 + 6;
+        const h = 14;
+
+        // Bounding box estimation based on quadrants
+        let x1, x2, y1, y2;
+        const cosVal = Math.cos(angleRad);
+        const sinVal = Math.sin(angleRad);
+
+        if (Math.abs(cosVal) >= Math.abs(sinVal)) {
+            // Left or Right
+            if (cosVal >= 0) {
+                x1 = tx;
+                x2 = tx + w;
+            } else {
+                x2 = tx;
+                x1 = tx - w;
+            }
+            y1 = ty - h / 2;
+            y2 = ty + h / 2;
+        } else {
+            // Top or Bottom
+            x1 = tx - w / 2;
+            x2 = tx + w / 2;
+            if (sinVal >= 0) {
+                y1 = ty;
+                y2 = ty + h;
+            } else {
+                y2 = ty;
+                y1 = ty - h;
+            }
+        }
+
+        return {
+            index,
+            name,
+            value: Number(d.value) || 0,
+            bbox: { x1, y1, x2, y2 }
+        };
+    });
+
+    const priorityOrder = [...items].sort((a, b) => {
+        const aSelected = selectedFilters.some((v) => String(v) === String(a.name));
+        const bSelected = selectedFilters.some((v) => String(v) === String(b.name));
+        if (aSelected && !bSelected) return -1;
+        if (!aSelected && bSelected) return 1;
+
+        const aHovered = hoveredName === a.name;
+        const bHovered = hoveredName === b.name;
+        if (aHovered && !bHovered) return -1;
+        if (!aHovered && bHovered) return 1;
+
+        return b.value - a.value;
+    });
+
+    const placed = [];
+    const bboxesOverlap = (a, b) =>
+        a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+
+    priorityOrder.forEach((item) => {
+        const isSelected = selectedFilters.some((v) => String(v) === String(item.name));
+        const isHovered = hoveredName === item.name;
+
+        if (isSelected || isHovered) {
+            visibleIndices.add(item.index);
+            placed.push(item.bbox);
+        } else {
+            const overlaps = placed.some((p) => bboxesOverlap(item.bbox, p));
+            if (!overlaps) {
+                visibleIndices.add(item.index);
+                placed.push(item.bbox);
+            }
+        }
+    });
+
+    return visibleIndices;
+};
+
+const RadarAngleTick = (props) => {
+    const { x, y, cx, cy, angle, payload, index, visibleIndices, hoveredName, selectedFilters, axisTickColor } = props;
+    const name = payload?.value;
+    if (name == null) return null;
+
+    const isSelected = selectedFilters.some((v) => String(v) === String(name));
+    const isHovered = hoveredName === name;
+
+    const isVisible = isSelected || isHovered || visibleIndices.has(index);
+    if (!isVisible) return null;
+
+    const fill = isSelected || isHovered ? '#ffffff' : axisTickColor || 'rgba(255, 255, 255, 0.6)';
+    const fontWeight = isSelected || isHovered ? 750 : 400;
+    const fontSize = isSelected || isHovered ? 11 : 9;
+
+    const displayName = (isSelected || isHovered)
+        ? name
+        : (name.length > 14 ? name.slice(0, 12) + '…' : name);
+
+    return (
+        <text
+            x={x}
+            y={y}
+            textAnchor={props.textAnchor}
+            dominantBaseline={props.dominantBaseline}
+            fill={fill}
+            fontSize={fontSize}
+            fontWeight={fontWeight}
+            className={`radar-axis-tick${isSelected ? ' radar-axis-tick--selected' : ''}${isHovered ? ' radar-axis-tick--hovered' : ''}`}
+            style={{ transition: 'all 0.15s ease' }}
+        >
+            {displayName}
+            <title>{name}</title>
+        </text>
+    );
+};
+
+const CustomRadarDot = (props) => {
+    const { cx, cy, payload, value, hoveredName, selectedFilters, mainColor, formatNumber } = props;
+    if (cx == null || cy == null || !payload) return null;
+
+    const name = payload.name;
+    const isSelected = selectedFilters.some((v) => String(v) === String(name));
+    const isHovered = hoveredName === name;
+
+    const isAnyActive = selectedFilters.length > 0 || hoveredName !== null;
+    const isActive = isSelected || isHovered;
+
+    const r = isActive ? 6 : (isAnyActive ? 2 : 4);
+    const opacity = isActive ? 1.0 : (isAnyActive ? 0.25 : 0.85);
+    const fill = isActive ? '#ffffff' : mainColor;
+    const stroke = isActive ? mainColor : '#ffffff';
+    const strokeWidth = isActive ? 2.5 : 1;
+
+    return (
+        <g style={{ pointerEvents: 'none' }}>
+            <circle
+                cx={cx}
+                cy={cy}
+                r={r}
+                fill={fill}
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                opacity={opacity}
+                className="radar-active-dot"
+                style={{ transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)' }}
+            />
+        </g>
+    );
+};
+
+const formatCustomMeasureValue = (value, measure) => {
+    if (value === null || value === undefined) return 'BLANK';
+    const val = parseFloat(value);
+    if (isNaN(val)) return String(value);
+
+    const formatType = measure.format || 'General';
+    const decimalPlaces = measure.decimal_places !== undefined ? measure.decimal_places : 2;
+    const currencySymbol = measure.currency || '₹';
+    const displayUnits = measure.display_units || 'None';
+
+    // Apply scale divisor
+    let scaledVal = val;
+    let suffix = '';
+    if (formatType !== 'Percentage' && formatType !== 'Growth Rate') {
+        if (displayUnits === 'Thousands') {
+            scaledVal = val / 1000.0;
+            suffix = 'K';
+        } else if (displayUnits === 'Millions') {
+            scaledVal = val / 1000000.0;
+            suffix = 'M';
+        } else if (displayUnits === 'Billions') {
+            scaledVal = val / 1000000000.0;
+            suffix = 'B';
+        }
+    }
+
+    // Format decimals
+    let formattedNum = scaledVal.toLocaleString(undefined, {
+        minimumFractionDigits: decimalPlaces,
+        maximumFractionDigits: decimalPlaces
+    });
+
+    if (formatType === 'Percentage') {
+        return `${formattedNum}%`;
+    } else if (formatType === 'Growth Rate') {
+        const sign = val > 0 ? '+' : '';
+        return `${sign}${formattedNum}%`;
+    } else if (formatType === 'Currency') {
+        return `${currencySymbol}${formattedNum}${suffix}`;
+    } else if (formatType === 'Whole Number') {
+        return Math.round(val).toLocaleString();
+    }
+
+    if (measure.currency) {
+        return `${measure.currency}${formattedNum}${suffix}`;
+    }
+    return `${formattedNum}${suffix}`;
+};
+
+const resolveMeasureMetadata = (fieldName, measuresList, forceFallback = false) => {
+    if (!fieldName) return null;
+    const cleanName = String(fieldName).replace(/^\[|\]$/g, '').trim();
+    const custom = (measuresList || []).find(m => m.name === cleanName || m.display_name === cleanName);
+    if (custom) {
+        return {
+            name: custom.name,
+            display_name: custom.display_name || custom.name,
+            displayName: custom.display_name || custom.name,
+            description: custom.description || `Custom semantic measure for ${custom.name}`,
+            format: custom.format || 'General',
+            decimal_places: custom.decimal_places !== undefined ? custom.decimal_places : 2,
+            currency: custom.currency || '₹ ',
+            display_units: custom.display_units || 'None',
+            isCustom: true
+        };
+    }
+
+    const lowerName = cleanName.toLowerCase();
+    if (lowerName.includes('revenue')) {
+        return {
+            name: cleanName,
+            display_name: 'Revenue',
+            displayName: 'Revenue',
+            description: 'Total Revenue Generated',
+            format: 'Currency',
+            currency: '₹ ',
+            display_units: 'Millions',
+            decimal_places: 1,
+            isCustom: false
+        };
+    }
+    if (lowerName.includes('profit')) {
+        return {
+            name: cleanName,
+            display_name: 'Profit',
+            displayName: 'Profit',
+            description: 'Net Profit Margin and Income',
+            format: 'Currency',
+            currency: '₹ ',
+            display_units: 'Millions',
+            decimal_places: 1,
+            isCustom: false
+        };
+    }
+    if (lowerName.includes('sales')) {
+        return {
+            name: cleanName,
+            display_name: 'Sales',
+            displayName: 'Sales',
+            description: 'Total Volume of Sales Transactions',
+            format: 'Whole Number',
+            decimal_places: 0,
+            isCustom: false
+        };
+    }
+    if (lowerName.includes('margin')) {
+        return {
+            name: cleanName,
+            display_name: 'Margin',
+            displayName: 'Margin',
+            description: 'Profit Margin Percentage',
+            format: 'Percentage',
+            decimal_places: 1,
+            isCustom: false
+        };
+    }
+    if (lowerName.includes('cost')) {
+        return {
+            name: cleanName,
+            display_name: 'Cost',
+            displayName: 'Cost',
+            description: 'Total Operational Cost incurred',
+            format: 'Currency',
+            currency: '₹ ',
+            display_units: 'Millions',
+            decimal_places: 1,
+            isCustom: false
+        };
+    }
+
+    if (forceFallback) {
+        return {
+            name: cleanName,
+            display_name: cleanName,
+            displayName: cleanName,
+            description: `Sum of ${cleanName}`,
+            format: 'General',
+            decimal_places: 2,
+            isCustom: false
+        };
+    }
+    return null;
+};
+
+const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection = null, onClick, onUpdate, onSelectVisual, onApplyCrossFilter, onClearCrossFilter, isExporting = false, hideInternalStats = false, hideChartTitle = false, isDragging = false, showZoomControls = false, zoomToolbarContainer = null, reportTheme = 'theme_default', reportNoFill = false, isViewOnly = false, reportCrossFilterRevision = '', legendHeaderSlotId = null, measures = [] }) => {
+    const { isDark: globalIsDark } = useTheme();
+    const isFocusView = Boolean(zoomToolbarContainer);
+    const isCompactLayout = Boolean(zoomToolbarContainer || hideChartTitle);
+    const isDashboardCanvas = isCompactLayout && !isFocusView;
+    const suppressCanvasLegendRail = isDashboardCanvas;
     // 1. Calculate active X-axis dimension label based on drill path & mode at the top
     //    Also build validDimFields with x_axis as fallback for charts that haven't used the field-well yet
     const rawDimFields = Array.isArray(propGraphDefinition?.options?.dimension_fields)
@@ -298,18 +1214,55 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     const containerRef = useRef(null);
     const zoomViewportRef = useRef(null);
 
-    // ── Smart chart controls (Power BI-like) ──────────────────────────────
-    const [scTopN, setScTopN] = useState(10);
-    const [scShowAll, setScShowAll] = useState(false);
-    const [scGroupOthers, setScGroupOthers] = useState(true);
-    const [scShowLabels, setScShowLabels] = useState(true);
+    // ── Smart chart controls (Power BI-like) — persisted on visual options ──
+    const chartOptions = graphDefinition.options || {};
+    const scShowLabels = chartOptions.pieShowLabels !== false;
+    const scShowAll = chartOptions.pieShowAll !== false;
+    const scGroupOthers = chartOptions.pieGroupOthers !== false;
+    const scTopN = typeof chartOptions.pieTopN === 'number' ? chartOptions.pieTopN : 10;
+    const scLabelSide = chartOptions.pieLabelSide || (scShowAll ? 'all' : 'right');
+
+    const patchPieOptions = useCallback((patch) => {
+        if (!onUpdate) return;
+        onUpdate({
+            options: {
+                ...(graphDefinition.options || {}),
+                ...patch,
+            },
+        });
+    }, [onUpdate, graphDefinition.options]);
+
+    const setScShowLabels = useCallback((value) => {
+        patchPieOptions({ pieShowLabels: value });
+    }, [patchPieOptions]);
+
+    const setScGroupOthers = useCallback((value) => {
+        patchPieOptions({ pieGroupOthers: value });
+    }, [patchPieOptions]);
+
+    const setScTopN = useCallback((value) => {
+        patchPieOptions({ pieTopN: value });
+    }, [patchPieOptions]);
+
+    const setScLabelSide = useCallback((value) => {
+        patchPieOptions({ pieLabelSide: value });
+    }, [patchPieOptions]);
     const [scLegendSearch, setScLegendSearch] = useState('');
+    const [scLegendPanelCollapsed, setScLegendPanelCollapsed] = useState(true);
+    const toggleLegendPanelCollapsed = useCallback((e) => {
+        e?.stopPropagation?.();
+        e?.preventDefault?.();
+        setScLegendPanelCollapsed((collapsed) => !collapsed);
+    }, []);
     const [scHiddenSlices, setScHiddenSlices] = useState(new Set());
     /** Pie/donut: set only while pointer is over a slice (never on click). */
     const [pieHoverSegment, setPieHoverSegment] = useState(null);
-    const [scLabelSide, setScLabelSide] = useState('right'); // all | left | right | leftTop | leftBottom | rightTop | rightBottom
+    const [radarHoveredName, setRadarHoveredName] = useState(null);
     const [scTotalPoints, setScTotalPoints] = useState(0);
+    const [chartNotice, setChartNotice] = useState('');
     const scLegendRef = useRef(null);
+    const lastRollbackKeyRef = useRef('');
+    const chartNoticeTimerRef = useRef(null);
 
     // --- Centralized Global Filter Hook & Memoized Filtered Dataset ---
     const {
@@ -318,15 +1271,18 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         setHighlightedItem,
         reportCrossFilterEnabled,
         crossFilterSourceVisualId,
-        clearReportCrossFilter,
     } = useGlobalFilters();
 
+
+    const crossFilterMap = useMemo(() => sanitizeFilterMap(filters), [filters]);
+    const isCrossFilterLinked = graphDefinition.options?.crossFilterLinked !== false;
+
     const [visualFilterRules, setVisualFilterRules] = useState(
-        () => (Array.isArray(graphDefinition.options?.filters) ? graphDefinition.options.filters : [])
+        () => normalizeFilterRules(graphDefinition.options?.filters)
     );
 
     useEffect(() => {
-        const fromProp = Array.isArray(graphDefinition.options?.filters) ? graphDefinition.options.filters : [];
+        const fromProp = normalizeFilterRules(graphDefinition.options?.filters);
         if (skipFilterPropSyncRef.current) {
             if (fromProp.length === 0) skipFilterPropSyncRef.current = false;
             else return;
@@ -338,22 +1294,40 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     const drillPath = graphDefinition.options?.drillPath ?? [];
     const drillModeActive = graphDefinition.options?.drillModeActive ?? false;
     const expandModeActive = graphDefinition.options?.expandModeActive ?? false;
+    const drillHistory = Array.isArray(graphDefinition.options?.drillHistory)
+        ? graphDefinition.options.drillHistory
+        : [];
     const isDrillingActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
+
+    const effectiveCrossFilterMap = useMemo(
+        () => (isCrossFilterLinked ? crossFilterMap : {}),
+        [isCrossFilterLinked, crossFilterMap]
+    );
 
     const chartFilterMap = useMemo(() => {
         const visualMap = filterRulesToFilterMap(visualFilterRules);
-        if (!filterMapHasValues(filters)) return visualMap;
-        if (!filterMapHasValues(visualMap)) return filters;
-        return { ...visualMap, ...filters };
-    }, [filters, visualFilterRules]);
+        if (!filterMapHasValues(effectiveCrossFilterMap)) return visualMap;
+        if (!filterMapHasValues(visualMap)) return effectiveCrossFilterMap;
+        return { ...visualMap, ...effectiveCrossFilterMap };
+    }, [effectiveCrossFilterMap, visualFilterRules]);
 
     const crossFiltersFetchKey = useMemo(
-        () => (reportCrossFilterEnabled && filterMapHasValues(filters) ? JSON.stringify(filters) : ''),
-        [reportCrossFilterEnabled, filters]
+        () => (isCrossFilterLinked && reportCrossFilterEnabled && filterMapHasValues(effectiveCrossFilterMap)
+            ? JSON.stringify(effectiveCrossFilterMap)
+            : ''),
+        [isCrossFilterLinked, reportCrossFilterEnabled, effectiveCrossFilterMap]
     );
     const prevCrossFiltersFetchKeyRef = useRef(crossFiltersFetchKey);
 
-    const useServerCrossFilter = reportCrossFilterEnabled && filterMapHasValues(filters);
+    const useServerCrossFilter = isCrossFilterLinked && reportCrossFilterEnabled && filterMapHasValues(effectiveCrossFilterMap);
+
+    // Schema column for slicer / cross-filter rules — persisted x_axis, not drill display label
+    const categoryFilterField = useMemo(() => {
+        const fromX = propGraphDefinition?.x_axis;
+        if (fromX && String(fromX).trim()) return String(fromX).trim();
+        if (effectiveDimFields.length === 1) return effectiveDimFields[0];
+        return graphDefinition.x_axis || effectiveDimFields[0] || '';
+    }, [propGraphDefinition?.x_axis, effectiveDimFields, graphDefinition.x_axis]);
 
     const rawChartRows = useMemo(() => {
         const fromState = extractChartRows(data);
@@ -362,24 +1336,31 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         const chartFiltered = filterMapHasValues(chartFilterMap);
 
         if (useServerCrossFilter) {
-            const hasFreshServerRows = fromState.length > 0 && !crossFilterRefreshing;
-            if (hasFreshServerRows) return fromState;
-            const canClientPreview = filterMapHasValues(filters)
-                && Object.keys(filters).some((dim) =>
-                    dimensionAppliesToChartAxis(dim, graphDefinition.x_axis)
-                );
-            if (canClientPreview && fullRows.length > 0) {
-                const preview = filterData(
-                    fullRows,
-                    filters,
-                    graphDefinition.x_axis,
+            const applyReportFilter = (rows) => {
+                if (!filterMapHasValues(effectiveCrossFilterMap) || !rows?.length) return rows;
+                const filtered = filterData(
+                    rows,
+                    effectiveCrossFilterMap,
+                    categoryFilterField,
                     graphDefinition.y_axis
                 );
-                if (preview.length > 0) return preview;
+                return filtered.length > 0 ? filtered : rows;
+            };
+            if (fullRows.length > 0) {
+                const fromBaseline = applyReportFilter(fullRows);
+                if (fromBaseline.length > 0) return fromBaseline;
+            }
+            if (fromState.length > 0) {
+                const fromFiltered = applyReportFilter(fromState);
+                return fromFiltered.length > 0 ? fromFiltered : fromState;
             }
             return fromState;
         }
-        if (isDrillingActive) return fromState;
+        if (isDrillingActive) {
+            if (fromState.length > 0) return fromState;
+            if (fullRows.length > 0) return fullRows;
+            return fromState;
+        }
         if (chartFiltered && fullRows.length > 0) return fullRows;
         if (!chartFiltered) {
             if (fromState.length >= fullRows.length && fromState.length > 0) return fromState;
@@ -389,33 +1370,173 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     }, [
         data,
         useServerCrossFilter,
-        filters,
+        effectiveCrossFilterMap,
         chartFilterMap,
         crossFilterRefreshing,
         isDrillingActive,
-        graphDefinition.x_axis,
+        categoryFilterField,
         graphDefinition.y_axis,
         drillLevelIndex,
         drillPath.length,
         expandModeActive,
         dataFetchNonce,
+        reportCrossFilterRevision,
     ]);
 
     const processedChartData = useMemo(() => {
-        const rows = useServerCrossFilter
-            ? rawChartRows
-            : filterData(rawChartRows, chartFilterMap, graphDefinition.x_axis, graphDefinition.y_axis);
+        let rows = extractChartRows(rawChartRows);
+        if (isCrossFilterLinked && reportCrossFilterEnabled && filterMapHasValues(effectiveCrossFilterMap)) {
+            const baseline = extractChartRows(
+                unfilteredBaselineRef.current || baselineChartDataRef.current
+            );
+            const source = baseline.length >= rows.length && baseline.length > 0 ? baseline : rows;
+            const crossFiltered = filterData(
+                source,
+                effectiveCrossFilterMap,
+                categoryFilterField,
+                graphDefinition.y_axis
+            );
+            if (crossFiltered.length > 0) rows = crossFiltered;
+        } else if (!useServerCrossFilter && filterMapHasValues(chartFilterMap)) {
+            rows = filterData(
+                rows,
+                chartFilterMap,
+                categoryFilterField,
+                graphDefinition.y_axis
+            );
+        }
         return coerceChartRows(rows);
-    }, [rawChartRows, chartFilterMap, graphDefinition.x_axis, graphDefinition.y_axis, useServerCrossFilter]);
+    }, [
+        rawChartRows,
+        chartFilterMap,
+        effectiveCrossFilterMap,
+        isCrossFilterLinked,
+        reportCrossFilterEnabled,
+        useServerCrossFilter,
+        categoryFilterField,
+        graphDefinition.y_axis,
+        reportCrossFilterRevision,
+    ]);
 
     useEffect(() => {
         setPieHoverSegment(null);
-    }, [crossFiltersFetchKey, graphDefinition.id, processedChartData]);
+    }, [crossFiltersFetchKey, graphDefinition.id, processedChartData, crossFilterRefreshing]);
+
+    const isPieDonutChart = graphDefinition.graph_type === 'pie' || graphDefinition.graph_type === 'donut';
+
+    const pieChartRowsForControls = useMemo(() => {
+        if (!isPieDonutChart) return [];
+        let rows = Array.isArray(processedChartData) ? [...processedChartData] : [];
+        const opts = graphDefinition.options || {};
+        const reportPageFilters = [
+            ...(Array.isArray(opts.reportFilters) ? opts.reportFilters : []),
+            ...(Array.isArray(opts.pageFilters) ? opts.pageFilters : []),
+        ].filter((f) => f && f.field && f.operator && f.operator !== 'all');
+        if (reportPageFilters.length > 0) {
+            rows = rows.filter((row) => reportPageFilters.every((f) => {
+                const candidate =
+                    row?.[f.field]
+                    ?? (f.field === graphDefinition.x_axis ? row?.name : undefined)
+                    ?? (f.field === graphDefinition.y_axis || f.field === 'value' ? row?.value : undefined);
+                if (candidate == null) return false;
+                const cStr = String(candidate).toLowerCase();
+                const vStr = String(f.value ?? '').toLowerCase();
+                if (f.operator === 'equals') return cStr === vStr;
+                if (f.operator === 'contains') return cStr.includes(vStr);
+                if (f.operator === 'gt') return Number(candidate) > Number(f.value);
+                if (f.operator === 'lt') return Number(candidate) < Number(f.value);
+                return true;
+            }));
+        }
+        if (opts.sort === 'asc') rows.sort((a, b) => (Number(a.value) || 0) - (Number(b.value) || 0));
+        if (opts.sort === 'desc') rows.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
+        return rows;
+    }, [
+        isPieDonutChart,
+        processedChartData,
+        graphDefinition.options,
+        graphDefinition.x_axis,
+        graphDefinition.y_axis,
+    ]);
+
+    const pieDonutSliceModel = useMemo(() => {
+        if (!isPieDonutChart || pieChartRowsForControls.length === 0) return null;
+        return buildPieDonutProcessedData(pieChartRowsForControls, {
+            scShowAll,
+            scTopN,
+            scGroupOthers,
+            scHiddenSlices,
+        });
+    }, [
+        isPieDonutChart,
+        pieChartRowsForControls,
+        scShowAll,
+        scTopN,
+        scGroupOthers,
+        scHiddenSlices,
+    ]);
+
+    const handlePieShowAllChange = useCallback((next) => {
+        patchPieOptions({
+            pieShowAll: next,
+            ...(next ? { pieGroupOthers: false, pieLabelSide: 'all' } : { pieLabelSide: 'right' }),
+        });
+    }, [patchPieOptions]);
+
+    const pieCalloutLabelStats = useMemo(() => {
+        if (!isPieDonutChart || !pieDonutSliceModel || !scShowLabels) return null;
+        const { pieSlices, pieTotal, rawSorted } = pieDonutSliceModel;
+        const sliceCount = pieSlices.length;
+        const chartTight = dimensions.height > 0 && (dimensions.height < 300 || dimensions.width < 340);
+        const chartCompact = dimensions.height > 0 && (dimensions.height < 420 || dimensions.width < 500);
+        const dense = sliceCount > 18;
+        const labelMargin = dense
+            ? (chartTight ? 36 : chartCompact ? 42 : 46)
+            : sliceCount > 8
+                ? (chartTight ? 30 : chartCompact ? 34 : 38)
+                : (chartTight ? 22 : chartCompact ? 26 : 32);
+        const compactLabelMode = sliceCount > 10;
+        const labelFont = Math.max(
+            7,
+            computeResponsiveFontSize(13, dimensions.width, dimensions.height, { min: 9, max: 15 })
+            - (compactLabelMode ? 1 : 0)
+            - (sliceCount > 20 ? 1 : 0)
+        );
+        const hasLegendPanel = false;
+        const maxOutside = computeMaxPieOutsideLabels({
+            sliceCount,
+            labelFont,
+            labelMargin,
+            plotHeight: dimensions.height || 280,
+            plotWidth: dimensions.width || 360,
+            hasLegendPanel,
+        });
+        const eligible = computePieOutsideLabelEligible(pieSlices, pieTotal, maxOutside, true);
+        return { shown: eligible.size, total: sliceCount };
+    }, [
+        isPieDonutChart,
+        pieDonutSliceModel,
+        scShowLabels,
+        dimensions.height,
+        dimensions.width,
+    ]);
 
     const hasActiveChartFilter = filterMapHasValues(chartFilterMap);
     const hasNoChartRows = !Array.isArray(processedChartData) || processedChartData.length === 0;
     const isCrossFilterActive =
-        reportCrossFilterEnabled || hasActiveChartFilter || filterMapHasValues(filters);
+        reportCrossFilterEnabled || hasActiveChartFilter || filterMapHasValues(effectiveCrossFilterMap);
+
+    const showChartNotice = useCallback((message) => {
+        setChartNotice(message);
+        if (chartNoticeTimerRef.current) window.clearTimeout(chartNoticeTimerRef.current);
+        chartNoticeTimerRef.current = window.setTimeout(() => setChartNotice(''), 2200);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (chartNoticeTimerRef.current) window.clearTimeout(chartNoticeTimerRef.current);
+        };
+    }, []);
 
     const activeReportTheme = reportTheme || graphDefinition.options?.reportTheme || 'theme_default';
     const isOsaPurpleTheme = activeReportTheme === 'theme_default';
@@ -442,6 +1563,22 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         return [...names];
     }, [data, dataFetchNonce, isDrillingActive, drillLevelIndex, drillPath.length, expandModeActive]);
 
+    const categoryColorMap = useMemo(() => {
+        const ordered = [];
+        const pushName = (name) => {
+            const s = String(name ?? '').trim();
+            if (s) ordered.push(s);
+        };
+        if (Array.isArray(processedChartData)) {
+            processedChartData.forEach((d) => pushName(d?.name));
+        }
+        rawLegendValues.forEach(pushName);
+        if (pieDonutSliceModel?.pieSlices) {
+            pieDonutSliceModel.pieSlices.forEach((d) => pushName(d?.name));
+        }
+        return buildCategoryColorMap(ordered, reportPalette);
+    }, [processedChartData, rawLegendValues, pieDonutSliceModel, reportPalette]);
+
     // legendValues used for rendering the chart itself (filtered)
     const legendValues = useMemo(() => {
         if (!processedChartData || !Array.isArray(processedChartData)) return [];
@@ -453,11 +1590,13 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (!barTypes.includes(graphDefinition.graph_type)) return null;
         if (!Array.isArray(processedChartData) || processedChartData.length === 0) return null;
         const hierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
-        const plotWidth = dimensions.width > 0 ? Math.max(100, dimensions.width - 68) : 420;
+        const plotWidth = resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
         return computeXAxisLayout(processedChartData, {
             expandModeActive,
-            compactMode: hierarchyActive,
+            compactMode: hierarchyActive || isDashboardCanvas,
             chartWidth: plotWidth,
+            focusView: isFocusView,
+            dashboardCard: isDashboardCanvas,
         });
     }, [
         graphDefinition.graph_type,
@@ -466,6 +1605,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         expandModeActive,
         drillLevelIndex,
         drillPath.length,
+        isDashboardCanvas,
+        isFocusView,
     ]);
 
     const isDrillDownApplied = drillLevelIndex > 0 || drillPath.length > 0;
@@ -473,8 +1614,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         && graphDefinition.options?.showLegend !== false
         && rawLegendValues.length > 0;
 
-    // Must match graphDefinition.x_axis so legend clicks filter bars (incl. "City | Region" expand mode)
-    const legendFilterDimension = graphDefinition.x_axis || effectiveDimFields[0] || 'series';
+    const legendFilterDimension = categoryFilterField || 'series';
 
     const setDrillLevelIndex = (val) => {
         const nextVal = typeof val === 'function' ? val(drillLevelIndex) : val;
@@ -524,7 +1664,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         }
     };
 
-    const updateDrillState = (updates) => {
+    function updateDrillState(updates) {
         if (onUpdate) {
             onUpdate({
                 options: {
@@ -533,7 +1673,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 }
             });
         }
-    };
+    }
 
     const graphOptionsRef = useRef(graphDefinition.options);
     graphOptionsRef.current = graphDefinition.options;
@@ -568,18 +1708,136 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (!restored) scheduleSilentRefetchIfNeeded();
     }, [setHighlightedItem, instantRestoreUnfilteredChart, scheduleSilentRefetchIfNeeded]);
 
+    useEffect(() => {
+        if (loading || crossFilterRefreshing) return;
+        if (!hasNoChartRows) return;
+
+        const hasRecoverableState = isDrillingActive || hasActiveChartFilter;
+        if (!hasRecoverableState) return;
+
+        // Guard: data must have actually finished loading (not null = still initialising).
+        // Also require a saved baseline to restore from — otherwise we have nothing to show.
+        if (data === null) return;
+        const baselineRows = extractChartRows(unfilteredBaselineRef.current || baselineChartDataRef.current);
+        if (baselineRows.length === 0) return;
+
+        const rollbackKey = JSON.stringify({
+            v: graphDefinition.id,
+            level: drillLevelIndex,
+            path: drillPath,
+            expand: expandModeActive,
+            filters: visualFilterRules,
+        });
+        if (lastRollbackKeyRef.current === rollbackKey) return;
+        lastRollbackKeyRef.current = rollbackKey;
+
+        showChartNotice('No matching data. Reverted to previous state.');
+
+        if (isDrillingActive) {
+            // Immediately paint baseline so user never sees a blank chart.
+            instantRestoreUnfilteredChart();
+
+            if (drillHistory.length > 0) {
+                const prevState = drillHistory[drillHistory.length - 1] || {};
+                updateDrillState({
+                    drillHistory: drillHistory.slice(0, -1),
+                    drillPath: Array.isArray(prevState.drillPath) ? prevState.drillPath : [],
+                    drillLevelIndex: Number.isFinite(prevState.drillLevelIndex) ? prevState.drillLevelIndex : 0,
+                    expandModeActive: Boolean(prevState.expandModeActive),
+                    drillModeActive: Boolean(prevState.drillModeActive),
+                });
+                return;
+            }
+
+            updateDrillState({
+                drillLevelIndex: 0,
+                drillPath: [],
+                drillHistory: [],
+                expandModeActive: false,
+            });
+            return;
+        }
+
+        if (hasActiveChartFilter) {
+            resetChartToUnfiltered();
+            setVisualFilterRules([]);
+            if (onUpdate) {
+                onUpdate({
+                    options: {
+                        ...(graphDefinition.options || {}),
+                        filters: [],
+                    },
+                    cached_data: null,
+                });
+            }
+        }
+    }, [
+        loading,
+        crossFilterRefreshing,
+        hasNoChartRows,
+        data,
+        isDrillingActive,
+        hasActiveChartFilter,
+        graphDefinition.id,
+        graphDefinition.options,
+        drillLevelIndex,
+        drillPath,
+        expandModeActive,
+        visualFilterRules,
+        drillHistory,
+        resetChartToUnfiltered,
+        onUpdate,
+        showChartNotice,
+        instantRestoreUnfilteredChart,
+    ]);
+
+    const syncCrossFilterFromRules = useCallback((nextFilters) => {
+        if (!isCrossFilterLinked) return;
+        const appliedRules = normalizeFilterRules(nextFilters).filter(
+            (f) => f?.field && f.operator === 'equals' && f.value != null && String(f.value).trim() !== ''
+        );
+        if (appliedRules.length > 0) {
+            onApplyCrossFilter?.(graphDefinition.id, appliedRules);
+            return;
+        }
+        if (reportCrossFilterEnabled || crossFilterSourceVisualId === graphDefinition.id) {
+            onClearCrossFilter?.();
+        }
+    }, [
+        isCrossFilterLinked,
+        onApplyCrossFilter,
+        onClearCrossFilter,
+        graphDefinition.id,
+        reportCrossFilterEnabled,
+        crossFilterSourceVisualId,
+    ]);
+
     /** Per-visual slicer — returns updated filter rules array */
-    const applyVisualDimensionFilter = useCallback((dimension, next) => {
+    const applyVisualDimensionFilter = useCallback((dimension, next, filterMode = 'toggle') => {
         if (!dimension) return [];
         const optsNow = graphOptionsRef.current || graphDefinition.options || {};
         const current = Array.isArray(optsNow.filters) ? optsNow.filters : [];
-        let nextFilters = current.filter((f) => f?.field !== dimension);
-        if (next && next !== '__all__') {
+        let nextFilters = current;
+        if (next === '__all__') {
+            nextFilters = current.filter((f) => f?.field !== dimension);
+        } else if (filterMode === 'toggle') {
+            const exists = current.some(
+                (f) => f?.field === dimension && String(f.value) === String(next)
+            );
+            nextFilters = exists
+                ? current.filter((f) => !(f?.field === dimension && String(f.value) === String(next)))
+                : [
+                    ...current,
+                    { field: dimension, operator: 'equals', value: String(next) },
+                ];
+        } else {
             nextFilters = [
-                ...nextFilters,
+                ...current.filter((f) => f?.field !== dimension),
                 { field: dimension, operator: 'equals', value: String(next) },
             ];
         }
+        const dimensionCleared = !nextFilters.some((f) => f?.field === dimension);
+        const allFiltersCleared = nextFilters.length === 0;
         const nextOptions = {
             ...optsNow,
             filters: nextFilters,
@@ -589,13 +1847,12 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (onUpdate) {
             onUpdate({
                 options: nextOptions,
-                ...(next === '__all__' ? { cached_data: null } : {}),
+                ...((dimensionCleared || allFiltersCleared) ? { cached_data: null } : {}),
+                ...(next && next !== '__all__' ? { openFiltersPane: true } : {}),
             });
         }
-        if (next === '__all__') {
-            if (crossFilterSourceVisualId === graphDefinition.id || reportCrossFilterEnabled) {
-                clearReportCrossFilter();
-            }
+        syncCrossFilterFromRules(nextFilters);
+        if (dimensionCleared || allFiltersCleared) {
             skipFilterPropSyncRef.current = true;
             setVisualFilterRules(nextFilters);
             if (!instantRestoreUnfilteredChart()) scheduleSilentRefetchIfNeeded();
@@ -604,10 +1861,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     }, [
         onUpdate,
         graphDefinition.options,
-        graphDefinition.id,
-        crossFilterSourceVisualId,
-        reportCrossFilterEnabled,
-        clearReportCrossFilter,
+        syncCrossFilterFromRules,
         instantRestoreUnfilteredChart,
         scheduleSilentRefetchIfNeeded,
     ]);
@@ -618,9 +1872,6 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         const current = Array.isArray(optsNow.filters) ? optsNow.filters : [];
         const drop = new Set([dim, ...effectiveDimFields].filter(Boolean));
         const nextFilters = current.filter((f) => !drop.has(f?.field));
-        if (crossFilterSourceVisualId === graphDefinition.id || reportCrossFilterEnabled) {
-            clearReportCrossFilter();
-        }
         skipFilterPropSyncRef.current = true;
         graphOptionsRef.current = { ...optsNow, filters: nextFilters };
         flushSync(() => {
@@ -638,16 +1889,14 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 ...(rowCount <= 1 ? { cached_data: null } : {}),
             });
         }
+        syncCrossFilterFromRules(nextFilters);
         if (rowCount <= 1) scheduleSilentRefetchIfNeeded();
     }, [
         legendFilterDimension,
         effectiveDimFields,
         onUpdate,
         graphDefinition.options,
-        graphDefinition.id,
-        crossFilterSourceVisualId,
-        clearReportCrossFilter,
-        reportCrossFilterEnabled,
+        syncCrossFilterFromRules,
         setHighlightedItem,
         instantRestoreUnfilteredChart,
         getUnfilteredSnapshot,
@@ -660,6 +1909,18 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     );
     const hasVisualCategoryFilter = visualCategoryFilters.length > 0;
 
+    const categoryMarkIsDimmed = useCallback(
+        (name) =>
+            visualCategoryFilters.length > 0
+            && !visualCategoryFilters.some((v) => String(v) === String(name)),
+        [visualCategoryFilters]
+    );
+
+    const categoryMarkIsSelected = useCallback(
+        (name) => visualCategoryFilters.some((v) => String(v) === String(name)),
+        [visualCategoryFilters]
+    );
+
     /** Show chip legend row when multiple categories exist, or when filtered so ✕ Clear is available. */
     const showLegendFilterRow = useMemo(() => {
         if (rawLegendValues.length === 0) return false;
@@ -667,8 +1928,99 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         return hasVisualCategoryFilter || hasActiveChartFilter;
     }, [rawLegendValues.length, hasVisualCategoryFilter, hasActiveChartFilter]);
 
-    const chartCategoryClickLockRef = useRef(0);
+    const [legendHeaderHost, setLegendHeaderHost] = useState(null);
+
+    useLayoutEffect(() => {
+        if (!legendHeaderSlotId) {
+            setLegendHeaderHost(null);
+            return;
+        }
+        setLegendHeaderHost(document.getElementById(legendHeaderSlotId));
+    }, [legendHeaderSlotId, graphDefinition.id, rawLegendValues.length, showLegendFilterRow]);
+
+    const legendInHeader = Boolean(legendHeaderHost);
+
+    /** Compact color-dot rail for all category legends (labels on hover). */
+    const chartLegendVariant = 'compact';
+
+    const renderInteractiveLegend = useCallback(({ payload } = {}) => {
+        const fromPayload = (payload || [])
+            .map((entry) => entry?.value)
+            .filter((v) => v != null && String(v).trim() !== '');
+        const values = rawLegendValues.length > 0 ? rawLegendValues : fromPayload;
+        if (!values.length || !legendFilterDimension) return null;
+        return (
+            <LegendComponent
+                dimension={legendFilterDimension}
+                values={values}
+                maxItems={values.length > 8 ? 8 : 16}
+                variant={chartLegendVariant}
+                layout="horizontal"
+                filterScope="visual"
+                visualFilters={visualFilterRules}
+                onVisualFilterChange={applyVisualDimensionFilter}
+                onFilterClear={handleLegendFilterClear}
+                colorPalette={reportPalette}
+                categoryColorMap={categoryColorMap}
+            />
+        );
+    }, [
+        rawLegendValues,
+        legendFilterDimension,
+        visualFilterRules,
+        applyVisualDimensionFilter,
+        handleLegendFilterClear,
+        reportPalette,
+        categoryColorMap,
+    ]);
+
     const pieSliceDataRef = useRef([]);
+
+    const hoverTimeoutRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+        };
+    }, []);
+
+    const clearPieDonutHover = useCallback(() => {
+        if (hoverTimeoutRef.current) {
+            clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = null;
+        }
+        setPieHoverSegment(null);
+    }, []);
+
+    const handlePiePointerExit = useCallback((e) => {
+        const related = e.relatedTarget;
+        if (related && e.currentTarget.contains(related)) return;
+        clearPieDonutHover();
+    }, [clearPieDonutHover]);
+
+    const handlePieDonutSliceHover = useCallback((data, index) => {
+        if (hoverTimeoutRef.current) {
+            clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = null;
+        }
+        if (crossFilterRefreshing) {
+            setPieHoverSegment(null);
+            return;
+        }
+        let entry = null;
+        if (typeof index === 'number' && pieSliceDataRef.current[index]) {
+            entry = pieSliceDataRef.current[index];
+        } else if (data?.payload && data.payload.name != null) {
+            entry = data.payload;
+        } else if (data?.name != null) {
+            entry = data;
+        }
+        if (!entry) {
+            setPieHoverSegment(null);
+            return;
+        }
+        setPieHoverSegment(entry);
+    }, [crossFilterRefreshing]);
 
     /**
      * Single path for legend chips, bar/column clicks, pie slices, scatter points, etc.
@@ -678,12 +2030,35 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (categoryValue === undefined || categoryValue === null || String(categoryValue).trim() === '') return;
         if (String(categoryValue) === 'Others' || String(categoryValue) === 'Unknown') return;
 
-        const now = Date.now();
-        if (now - chartCategoryClickLockRef.current < 280) return;
-        chartCategoryClickLockRef.current = now;
+        if (drillModeActive && effectiveDimFields.length > 1) {
+            const canAdvanceLevel = drillLevelIndex < effectiveDimFields.length - 1;
+            if (canAdvanceLevel) {
+                const currentField = effectiveDimFields[Math.min(drillLevelIndex, effectiveDimFields.length - 1)];
+                const nextPath = [
+                    ...drillPath,
+                    { field: currentField, value: String(categoryValue) },
+                ];
+                const historyEntry = {
+                    drillPath,
+                    drillLevelIndex,
+                    expandModeActive,
+                    drillModeActive,
+                };
+                updateDrillState({
+                    drillHistory: [...drillHistory, historyEntry].slice(-30),
+                    drillPath: nextPath,
+                    drillLevelIndex: Math.min(drillLevelIndex + 1, effectiveDimFields.length - 1),
+                    expandModeActive: true,
+                    drillModeActive: true,
+                });
+                return;
+            }
+        }
 
         const filterDimension = legendFilterDimension;
         if (!filterDimension) return;
+
+        if (onSelectVisual) onSelectVisual(graphDefinition.id);
 
         const currentVals = getVisualDimensionFilterValues(visualFilterRules, filterDimension);
         const pathKey = String(categoryValue);
@@ -697,15 +2072,10 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 saveBaselineRows(data, currentRows.length > 1);
             }
         }
-        applyVisualDimensionFilter(filterDimension, isFiltered ? '__all__' : categoryValue);
-
-        if (onSelectVisual) onSelectVisual(graphDefinition.id);
+        applyVisualDimensionFilter(filterDimension, categoryValue, 'toggle');
 
         if (isFiltered) {
-            if (reportCrossFilterEnabled && crossFilterSourceVisualId === graphDefinition.id) {
-                clearReportCrossFilter();
-                restoreUnfilteredChartData();
-            }
+            restoreUnfilteredChartData();
             return;
         }
 
@@ -722,6 +2092,12 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             });
         }
     }, [
+        drillModeActive,
+        effectiveDimFields,
+        drillLevelIndex,
+        drillPath,
+        drillHistory,
+        updateDrillState,
         graphDefinition.id,
         graphDefinition.graph_type,
         graphDefinition.x_axis,
@@ -730,9 +2106,6 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         visualFilterRules,
         applyVisualDimensionFilter,
         onSelectVisual,
-        clearReportCrossFilter,
-        crossFilterSourceVisualId,
-        reportCrossFilterEnabled,
         restoreUnfilteredChartData,
         onClick,
         data,
@@ -742,13 +2115,42 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     /** Pie/donut slice — delegates to shared category filter. */
     const handlePieDonutSliceClick = useCallback((sliceEntry) => {
         if (!sliceEntry || sliceEntry.__others) return;
-        applyCategoryClickFilter(sliceEntry.name, sliceEntry);
-    }, [applyCategoryClickFilter]);
+        const name = sliceEntry.name ?? sliceEntry.payload?.name;
+        if (name == null) return;
+        clearPieDonutHover();
+        applyCategoryClickFilter(name, {
+            ...sliceEntry,
+            name,
+            value: sliceEntry._rawValue ?? sliceEntry.value,
+        });
+    }, [applyCategoryClickFilter, clearPieDonutHover]);
+
+    /** Resolve bar/line/scatter click payloads (Recharts passes several shapes). */
+    const resolveCategoryClickEntry = useCallback((data, index) => {
+        if (!data) return null;
+        const payload = data?.payload ?? data;
+        if (payload && !payload.__others && payload.name != null) return payload;
+        if (data?.name != null && !data.__others) return data;
+        if (data?.activePayload?.length > 0) {
+            const fromActive = data.activePayload[0]?.payload;
+            if (fromActive && !fromActive.__others) return fromActive;
+        }
+        if (data?.activeLabel != null && String(data.activeLabel).trim() !== '') {
+            const label = String(data.activeLabel);
+            const rows = extractChartRows(processedChartData);
+            const match = rows.find((r) => String(r?.name) === label);
+            return match ?? { name: label, value: null };
+        }
+        const rows = extractChartRows(processedChartData);
+        if (typeof index === 'number' && rows[index] && !rows[index].__others) return rows[index];
+        return null;
+    }, [processedChartData]);
 
     /** Bar, column, line, area, scatter — direct click on marks. */
     const handleRechartsCategoryClick = useCallback((data, index, e) => {
         e?.stopPropagation?.();
-        const entry = data?.payload ?? data;
+        e?.preventDefault?.();
+        const entry = resolveCategoryClickEntry(data, index);
         if (!entry || entry.__others) return;
         const name = entry.name ?? data?.name;
         if (name === undefined || name === null) return;
@@ -757,7 +2159,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             name,
             value: entry.value ?? data?.value,
         });
-    }, [applyCategoryClickFilter]);
+    }, [applyCategoryClickFilter, resolveCategoryClickEntry]);
 
     const resolvePieSliceEntry = useCallback((sectorProps, index) => {
         const payload = sectorProps?.payload;
@@ -773,21 +2175,42 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     const renderPieSliceSector = useCallback((sectorProps) => {
         const index = sectorProps?.index;
         const entry = resolvePieSliceEntry(sectorProps, index);
+        const name = entry?.name;
+
+        const activeFilters = getVisualDimensionFilterValues(visualFilterRules, legendFilterDimension);
+        const isSelected = activeFilters.some((v) => String(v) === String(name));
+        const isHovered = pieHoverSegment && String(pieHoverSegment.name) === String(name);
+
+        let extraRadius = 0;
+        if (isSelected) {
+            extraRadius = 6;
+        } else if (isHovered) {
+            extraRadius = 3;
+        }
+
+        const outerRadius = (sectorProps.outerRadius || 0) + extraRadius;
+
         const fireSliceClick = (e) => {
             e?.stopPropagation?.();
             e?.preventDefault?.();
             if (entry) handlePieDonutSliceClick(entry);
         };
+        const handleSliceEnter = () => {
+            handlePieDonutSliceHover(sectorProps?.payload ?? sectorProps, index);
+        };
         return (
             <Sector
                 {...sectorProps}
+                outerRadius={outerRadius}
                 className="pie-donut-slice-sector recharts-pie-sector"
                 cursor="pointer"
+                onMouseEnter={handleSliceEnter}
+                onMouseMove={handleSliceEnter}
                 onMouseDown={fireSliceClick}
                 onClick={fireSliceClick}
             />
         );
-    }, [handlePieDonutSliceClick, resolvePieSliceEntry]);
+    }, [handlePieDonutSliceClick, handlePieDonutSliceHover, resolvePieSliceEntry, visualFilterRules, legendFilterDimension, pieHoverSegment]);
 
     // Micro-rendering thresholds — use actual measured size, but treat 0 as "not yet measured" (not micro)
     const isSmall = dimensions.width > 0 && (dimensions.width < 300 || dimensions.height < 220);
@@ -820,10 +2243,10 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     }, [graphDefinition.id]);
 
     useEffect(() => {
-        // Show All: render callout paths for every slice (all quadrants).
-        if (scShowAll) setScLabelSide('all');
-        else setScLabelSide('right');
-    }, [scShowAll, graphDefinition.id]);
+        if (isDashboardCanvas && scShowLabels) {
+            setScLegendPanelCollapsed(true);
+        }
+    }, [isDashboardCanvas, scShowLabels, graphDefinition.id]);
 
     const recenterZoomViewport = useCallback(() => {
         const el = zoomViewportRef.current;
@@ -851,6 +2274,21 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     });
 
     const prevDataDepsRef = useRef(dataDeps);
+    const prevReportCrossFilterRevisionRef = useRef(reportCrossFilterRevision);
+
+    useEffect(() => {
+        if (prevReportCrossFilterRevisionRef.current === reportCrossFilterRevision) return;
+        const prevRevision = prevReportCrossFilterRevisionRef.current;
+        prevReportCrossFilterRevisionRef.current = reportCrossFilterRevision;
+        if (!isCrossFilterLinked) return;
+        if (reportCrossFilterEnabled && filterMapHasValues(effectiveCrossFilterMap)) {
+            setDataFetchNonce((n) => n + 1);
+            return;
+        }
+        if (prevRevision && !reportCrossFilterEnabled) {
+            setDataFetchNonce((n) => n + 1);
+        }
+    }, [reportCrossFilterRevision, reportCrossFilterEnabled, effectiveCrossFilterMap, isCrossFilterLinked]);
 
     const wasCrossFilterSourceRef = useRef(false);
     const prevReportCrossEnabledRef = useRef(reportCrossFilterEnabled);
@@ -861,11 +2299,27 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         }
     }, [crossFilterSourceVisualId, graphDefinition.id]);
 
-    const restoreAfterCrossFilterUnlink = useCallback(() => {
-        instantRestoreUnfilteredChart();
-        const optsNow = graphOptionsRef.current || {};
-        const current = Array.isArray(optsNow.filters) ? optsNow.filters : [];
-        if (onUpdate && current.length > 0) {
+    useEffect(() => {
+        const wasEnabled = prevReportCrossEnabledRef.current;
+        prevReportCrossEnabledRef.current = reportCrossFilterEnabled;
+        if (!isCrossFilterLinked) return;
+        if (!wasEnabled || reportCrossFilterEnabled) return;
+
+        wasCrossFilterSourceRef.current = false;
+        skipFilterPropSyncRef.current = true;
+        setHighlightedItem(null);
+        setVisualFilterRules([]);
+
+        const { rowCount } = getUnfilteredSnapshot();
+        const restored = instantRestoreUnfilteredChart();
+        if (!restored || rowCount <= 1) {
+            silentRefetchRef.current = true;
+            forceUnfilteredFetchRef.current = true;
+            setDataFetchNonce((n) => n + 1);
+        }
+
+        const optsNow = graphOptionsRef.current || graphDefinition.options || {};
+        if (onUpdate && Array.isArray(optsNow.filters) && optsNow.filters.length > 0) {
             onUpdate({
                 options: {
                     ...optsNow,
@@ -873,25 +2327,15 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 },
             });
         }
-    }, [onUpdate, instantRestoreUnfilteredChart]);
-
-    useEffect(() => {
-        const wasEnabled = prevReportCrossEnabledRef.current;
-        prevReportCrossEnabledRef.current = reportCrossFilterEnabled;
-        if (!wasEnabled || reportCrossFilterEnabled) return;
-        skipFilterPropSyncRef.current = true;
-        if (wasCrossFilterSourceRef.current || crossFilterSourceVisualId === graphDefinition.id) {
-            wasCrossFilterSourceRef.current = false;
-            restoreAfterCrossFilterUnlink();
-        }
-        if (!instantRestoreUnfilteredChart()) scheduleSilentRefetchIfNeeded();
     }, [
         reportCrossFilterEnabled,
-        crossFilterSourceVisualId,
+        isCrossFilterLinked,
         graphDefinition.id,
-        restoreAfterCrossFilterUnlink,
+        graphDefinition.options,
+        setHighlightedItem,
         instantRestoreUnfilteredChart,
-        scheduleSilentRefetchIfNeeded,
+        getUnfilteredSnapshot,
+        onUpdate,
     ]);
 
     useEffect(() => {
@@ -905,7 +2349,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         const measureFields = graphDefinition?.options?.measure_fields || null;
         const cleanDimensionFieldsRaw = (Array.isArray(dimensionFields) ? dimensionFields : [])
             .filter((d) => typeof d === 'string' ? d.trim() !== '' : Boolean(d));
-            
+
         let cleanDimensionFields = cleanDimensionFieldsRaw;
         let activeXAxis = x_axis;
 
@@ -929,6 +2373,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             y_axis,
             aggregation
         );
+        const hasQuickMeasureField = measureFieldsForApi.some((m) => m?.template_id);
         // Keep a tiny minimum loader to avoid flicker, but never force a 2s delay.
         const waitMinLoader = async (startedAt) => {
             const elapsed = Date.now() - startedAt;
@@ -947,7 +2392,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         // If the data is already provided in the graph definition, use it directly
         // However, bypass the cache if the user is actively drilling down, so we fetch fresh sliced data
         const isDrilling = isDrillingActive;
-        const activeFiltersForFetch = useServerCrossFilter ? filters : {};
+        const activeFiltersForFetch = useServerCrossFilter ? effectiveCrossFilterMap : {};
         const hasSlicerFilters = filterMapHasValues(activeFiltersForFetch);
         const hasPriorChartData = Array.isArray(baselineChartDataRef.current) && baselineChartDataRef.current.length > 0;
         const isCrossFilterRefresh = hasSlicerFilters && hasPriorChartData;
@@ -972,7 +2417,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 || JSON.stringify(prevDeps.measure_fields) !== JSON.stringify(nextDeps.measure_fields)
             );
         const isFieldWellSoftRefresh = hasPriorChartData && !isDrilling && onlyMeasureOrAggChanged;
-        const isSoftRefresh = isCrossFilterRefresh || isFieldWellSoftRefresh;
+        const isDrillSoftRefresh = hasPriorChartData && isDrilling;
+        const isSoftRefresh = isCrossFilterRefresh || isFieldWellSoftRefresh || isDrillSoftRefresh;
         const crossFilterJustCleared = Boolean(prevCrossFiltersFetchKeyRef.current) && !crossFiltersFetchKey;
         prevCrossFiltersFetchKeyRef.current = crossFiltersFetchKey;
         const forceUnfilteredFetch = forceUnfilteredFetchRef.current;
@@ -981,16 +2427,20 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (isSilentRefetch) silentRefetchRef.current = false;
         const { rowCount: baselineRowCount } = getUnfilteredSnapshot();
 
-        // Clear / unlink: use in-memory snapshot; skip API unless snapshot is missing or single-point.
-        if ((crossFilterJustCleared || forceUnfilteredFetch) && baselineRowCount > 1) {
-            instantRestoreUnfilteredChart();
-            return () => abortController.abort();
+        // Clear / unlink: restore from full baseline when possible; otherwise refetch unfiltered data.
+        if (crossFilterJustCleared || forceUnfilteredFetch) {
+            if (baselineRowCount > 1) {
+                instantRestoreUnfilteredChart();
+                return () => abortController.abort();
+            }
+            forceUnfilteredFetchRef.current = true;
         }
 
         if (
             cached_data
             && !isDrilling
             && !hasSlicerFilters
+            && !hasQuickMeasureField
             && !dataDepsChanged
             && !crossFilterJustCleared
             && !forceUnfilteredFetch
@@ -1057,7 +2507,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 setError(null);
                 setConfigHint(null);
                 try {
-                    const response = await fetch(`/api/files/${fileId}/graph-data`, {
+                    const response = await fetch(`/analytics/api/files/${fileId}/graph-data`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         signal: abortController.signal,
@@ -1074,7 +2524,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     });
 
                     if (!response.ok) {
-                        setData([]);
+                        if (!isSoftRefresh) setData([]);
                         setError(null);
                         setLoading(false);
                         return;
@@ -1101,13 +2551,13 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             if (!isDrilling && !hasSlicerFilters) saveBaselineRows(result, true);
                         }
                     } else {
-                        setData([]);
+                        if (!isSoftRefresh) setData([]);
                         setError(null);
                     }
                 } catch (err) {
                     if (err?.name === 'AbortError') return;
                     console.error('Custom visual data fetch failed:', err);
-                    setData([]);
+                    if (!isSoftRefresh) setData([]);
                     setError(null);
                 } finally {
                     if (!abortController.signal.aborted) {
@@ -1172,6 +2622,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 else if (isSoftRefresh) setCrossFilterRefreshing(true);
                 else setLoading(true);
                 setConfigHint(null);
+                setError(null);
 
                 const payload = {
                     graph_type,
@@ -1184,7 +2635,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     active_filters: activeFiltersForFetch,
                 };
 
-                const response = await fetch(`/api/files/${fileId}/graph-data`, {
+                const response = await fetch(`/analytics/api/files/${fileId}/graph-data`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     signal: abortController.signal,
@@ -1195,13 +2646,13 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
 
                 if (!response.ok) {
                     console.warn('Graph data request failed:', result?.detail || result?.message || response.status);
-                    if (!isCrossFilterRefresh) setData([]);
-                    setError(null);
+                    if (!isSoftRefresh) setData([]);
+                    setError(result?.detail || result?.message || `Error ${response.status}: Failed to load visual data`);
                     return;
                 }
 
                 if (!result) {
-                    if (!isCrossFilterRefresh) setData([]);
+                    if (!isSoftRefresh) setData([]);
                     setError(null);
                     return;
                 }
@@ -1238,7 +2689,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 }
 
                 if (!Array.isArray(result.labels)) {
-                    if (!isCrossFilterRefresh) setData([]);
+                    if (!isSoftRefresh) setData([]);
                     setError(null);
                     return;
                 }
@@ -1253,7 +2704,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 if (transformedData.length > 0) {
                     setData(transformedData);
                     if (!isDrilling && !hasSlicerFilters) saveBaselineRows(transformedData, true);
-                } else if (!isCrossFilterRefresh) {
+                } else if (!isSoftRefresh) {
                     setData([]);
                     setError(null);
                 }
@@ -1276,8 +2727,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             } catch (err) {
                 if (err?.name === 'AbortError') return;
                 console.error('Graph data fetch failed:', err);
-                if (!isCrossFilterRefresh) setData([]);
-                setError(null);
+                if (!isSoftRefresh) setData([]);
+                setError(err?.message || 'Network error loading visual data');
             } finally {
                 if (!abortController.signal.aborted) {
                     if (isSilentRefetch) setLoading(false);
@@ -1297,37 +2748,24 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         fileId,
         dataDeps,
         crossFiltersFetchKey,
+        reportCrossFilterRevision,
         dataFetchNonce,
+        useServerCrossFilter,
         saveBaselineRows,
         isDrillingActive,
         instantRestoreUnfilteredChart,
         getUnfilteredSnapshot,
     ]);
 
-    const handleClick = useCallback((state) => {
-        let payload = null;
-        if (state?.activePayload?.length > 0) {
-            payload = state.activePayload[0].payload;
-        } else if (state?.payload) {
-            payload = state.payload;
-        } else if (state?.name != null && state?.value !== undefined) {
-            payload = state;
-        }
-
-        let rawVal = null;
-        if (payload?.name !== undefined && payload?.name !== null) {
-            rawVal = payload.name;
-        } else if (state?.activeLabel !== undefined && state?.activeLabel !== null) {
-            rawVal = state.activeLabel;
-        } else if (payload?.value !== undefined && payload?.value !== null) {
-            rawVal = payload.value;
-        }
-
+    const handleClick = useCallback((state, index, e) => {
+        e?.stopPropagation?.();
+        e?.preventDefault?.();
+        const entry = resolveCategoryClickEntry(state, index);
+        if (!entry || entry.__others) return;
+        const rawVal = entry.name;
         if (rawVal === null || rawVal === undefined) return;
-        if (payload?.__others) return;
-
-        applyCategoryClickFilter(rawVal, payload);
-    }, [applyCategoryClickFilter]);
+        applyCategoryClickFilter(rawVal, entry);
+    }, [applyCategoryClickFilter, resolveCategoryClickEntry]);
 
     /** Normalizes Recharts bar/line vs pie slice click payloads into handleClick shape. */
     const handleChartPointerClick = (stateOrSlice) => {
@@ -1360,10 +2798,18 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     };
 
     const renderChart = () => {
-        const animation = !isExporting && !isDragging && !hasActiveChartFilter && !crossFilterRefreshing;
+        const animation = !isExporting && !window.isExportingReportPdf && !isDragging && !hasActiveChartFilter && !crossFilterRefreshing;
         const opts = graphDefinition.options || {};
+        const isKpiCard = graphDefinition.graph_type === 'kpiCard';
+        const matchedMeasure = resolveMeasureMetadata(graphDefinition.y_axis, measures, isKpiCard);
         const activeTheme = reportTheme || opts.reportTheme || 'theme_default';
-        const isDark = activeTheme === 'theme_dark';
+        const isDark = globalIsDark || activeTheme === 'theme_dark';
+        const chartNoFill = isChartNoFill(opts, reportNoFill);
+        const chartFillBackground = resolveChartFillBackground(
+            opts,
+            isDark ? 'var(--bg-secondary)' : '#ffffff',
+            reportNoFill
+        );
         const axisTickColor = isDark ? '#f1f5f9' : '#4b5563';
         const axisTitleColor = isDark ? '#f1f5f9' : '#4b5563';
         const gridColor = isDark ? '#334155' : '#e2e8f0';
@@ -1377,7 +2823,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         const tooltipText = isDark ? '#f1f5f9' : '#1e293b';
         const tooltipSubtext = isDark ? '#94a3b8' : '#64748b';
         const lineStrokeColor = isDark ? '#94a3b8' : '#1a1a1a';
-        
+
         const themeConfig = THEME_PALETTES[activeTheme] || THEME_PALETTES.theme_default;
         const isOsaPurple = activeTheme === 'theme_default' || themeConfig.useVibrantPalette;
         const palette = isOsaPurple ? VIBRANT_PALETTE : (themeConfig.palette || VIBRANT_PALETTE);
@@ -1390,36 +2836,16 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         );
         const categoryColor = (categoryName, index) => {
             if (opts.mainColor) return mainColor;
-            if (isOsaPurple) {
-                return getCategoryColor(categoryName, index, VIBRANT_PALETTE);
-            }
-            return getCategoryColor(categoryName, index, palette);
+            return resolveCategoryColor(categoryColorMap, categoryName, index, palette);
         };
 
-        const renderInteractiveLegend = ({ payload }) => {
-            const fromPayload = (payload || [])
-                .map((entry) => entry.value)
-                .filter((v) => v != null && String(v).trim() !== '');
-            const values = rawLegendValues.length > 0 ? rawLegendValues : fromPayload;
-            if (!values.length || !legendFilterDimension) return null;
-            return (
-                <LegendComponent
-                    dimension={legendFilterDimension}
-                    values={values}
-                    maxItems={values.length > 8 ? 6 : 12}
-                    variant="chips"
-                    layout="horizontal"
-                    filterScope="visual"
-                    visualFilters={visualFilterRules}
-                    onVisualFilterChange={applyVisualDimensionFilter}
-                    onFilterClear={handleLegendFilterClear}
-                    colorPalette={palette}
-                />
-            );
-        };
-        // ─────────────────────────────────────────────────────────────────────
+        const showEmbeddedRechartsLegend = opts.showLegend
+            && !isSmall
+            && !isHierarchyActive
+            && !showLegendFilterRow
+            && !suppressCanvasLegendRail;
 
-        const pieLabelFontSize = isMicro ? 9 : (isSmall ? 10 : 12);
+        const pieLabelFontSize = isMicro ? 11 : (isSmall ? 12 : 14);
         const pieLabelNameLimit = isMicro ? 8 : (isSmall ? 12 : 18);
         const pieMargin = isMicro
             ? { top: 10, right: 34, bottom: 10, left: 34 }
@@ -1428,7 +2854,13 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         const pieInnerRadius = graphDefinition.graph_type === 'donut'
             ? (isMicro ? '32%' : (isSmall ? '40%' : '50%'))
             : 0;
-        const formatNumber = (num, mode = 'compact') => {
+        const formatNumber = (num, mode = 'compact', seriesName = null) => {
+            const seriesMeasure = seriesName 
+                ? resolveMeasureMetadata(seriesName, measures, false)
+                : matchedMeasure;
+            if (seriesMeasure) {
+                return formatCustomMeasureValue(num, seriesMeasure);
+            }
             if (typeof num !== 'number' || !Number.isFinite(num)) return num;
             if (opts.numberFormat === 'integer') return Math.round(num).toLocaleString();
             if (opts.numberFormat === 'decimal') {
@@ -1465,7 +2897,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     <polyline
                         points={`${sx},${sy} ${mx},${my} ${ex},${ey}`}
                         fill="none"
-                        stroke="#000000"
+                        stroke={isDark ? '#cbd5e1' : '#000000'}
                         strokeWidth={1}
                     />
                     <text
@@ -1475,7 +2907,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         dominantBaseline="central"
                         fontSize={pieLabelFontSize}
                         fontWeight={500}
-                        fill="#000000"
+                        fill={isDark ? '#cbd5e1' : '#000000'}
                     >
                         {labelText}
                     </text>
@@ -1483,30 +2915,126 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             );
         };
 
-                if (graphDefinition.graph_type === 'table') {
+        if (graphDefinition.graph_type === 'table') {
             if (!data || !data.columns || !data.rows) return <div>Invalid table data</div>;
+            const ts = resolveTableStyle(opts.tableStyle, { isDark });
+            const hasFixedColumns = Object.keys(ts.columnWidths || {}).length > 0;
+            const cellPad = `${ts.cellPaddingY}px ${ts.cellPaddingX}px`;
+            const rowMinH = ts.rowHeight > 0 ? `${ts.rowHeight}px` : undefined;
+            const colWidthStyle = (col) => {
+                const w = ts.columnWidths?.[col];
+                if (w) return { width: `${w}px`, minWidth: `${w}px`, maxWidth: `${w}px` };
+                return { minWidth: `${ts.minColumnWidth}px` };
+            };
+
             return (
-                <div style={{ width: '100%', height: '100%', overflow: 'auto', borderRadius: '8px', border: `1px solid ${tableBorderColor}` }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
-                        <thead style={{ position: 'sticky', top: 0, backgroundColor: tableHeaderBg, zIndex: 1, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                <div
+                    className="bi-table-visual-scroll"
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        overflow: 'auto',
+                        borderRadius: '8px',
+                        border: `1px solid ${ts.borderColor || tableBorderColor}`,
+                        backgroundColor: ts.rowBg || chartFillBackground,
+                    }}
+                >
+                    <table
+                        className={`bi-table-visual${hasFixedColumns ? ' bi-table-visual--fixed-cols' : ''}`}
+                        style={{
+                            width: hasFixedColumns ? 'max-content' : '100%',
+                            minWidth: '100%',
+                            borderCollapse: 'collapse',
+                            textAlign: ts.textAlign,
+                            fontSize: `${ts.fontSize}px`,
+                            tableLayout: hasFixedColumns ? 'fixed' : 'auto',
+                        }}
+                    >
+                        <thead
+                            style={{
+                                position: ts.stickyHeader !== false ? 'sticky' : 'static',
+                                top: 0,
+                                backgroundColor: ts.headerBg || tableHeaderBg,
+                                zIndex: 1,
+                                boxShadow: ts.stickyHeader !== false ? '0 1px 2px rgba(0,0,0,0.05)' : undefined,
+                            }}
+                        >
                             <tr>
-                                {data.columns.map((col, i) => (
-                                    <th key={i} style={{ padding: '0.75rem 1rem', borderBottom: `1px solid ${tableBorderColor}`, color: tableHeaderTextColor, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                        {col}
-                                    </th>
-                                ))}
+                                {data.columns.map((col, i) => {
+                                    const m = resolveMeasureMetadata(col, measures, false);
+                                    return (
+                                        <th
+                                            key={i}
+                                            style={{
+                                                ...colWidthStyle(col),
+                                                padding: cellPad,
+                                                minHeight: rowMinH,
+                                                borderBottom: `1px solid ${ts.borderColor || tableBorderColor}`,
+                                                color: ts.headerText || tableHeaderTextColor,
+                                                fontWeight: 600,
+                                                whiteSpace: ts.wrapText === false ? 'nowrap' : 'normal',
+                                                verticalAlign: 'middle',
+                                            }}
+                                        >
+                                            {m ? m.display_name || m.name : col}
+                                        </th>
+                                    );
+                                })}
                             </tr>
                         </thead>
                         <tbody>
-                            {(processedChartData || data.rows).map((row, i) => (
-                                <tr key={i} style={{ transition: 'background-color 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = tableRowHover} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
-                                    {data.columns.map((col, j) => (
-                                        <td key={j} style={{ padding: '0.75rem 1rem', borderBottom: `1px solid ${tableCellBorder}`, color: tableCellText }}>
-                                            {row[col] !== null ? row[col].toString() : '-'}
-                                        </td>
-                                    ))}
-                                </tr>
-                            ))}
+                            {(processedChartData || data.rows).map((row, i) => {
+                                const baseBg = ts.stripedRows !== false && i % 2 === 1
+                                    ? (ts.altRowBg || (isDark ? '#1e293b' : '#f8fafc'))
+                                    : (ts.rowBg || 'transparent');
+                                return (
+                                    <tr
+                                        key={i}
+                                        className="bi-table-visual-row"
+                                        style={{
+                                            backgroundColor: baseBg,
+                                            transition: 'background-color 0.15s',
+                                            minHeight: rowMinH,
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.backgroundColor = ts.hoverRowBg || tableRowHover;
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.backgroundColor = baseBg;
+                                        }}
+                                    >
+                                        {data.columns.map((col, j) => {
+                                            const m = resolveMeasureMetadata(col, measures, false);
+                                            let cellText = '-';
+                                            if (row[col] !== null && row[col] !== undefined) {
+                                                if (m) {
+                                                    const formatted = formatCustomMeasureValue(row[col], m);
+                                                    cellText = formatted === 'BLANK' ? '-' : formatted;
+                                                } else {
+                                                    cellText = row[col].toString();
+                                                }
+                                            }
+                                            return (
+                                                <td
+                                                    key={j}
+                                                    style={{
+                                                        ...colWidthStyle(col),
+                                                        padding: cellPad,
+                                                        minHeight: rowMinH,
+                                                        borderBottom: `1px solid ${ts.cellBorderColor || tableCellBorder}`,
+                                                        color: ts.cellTextColor || tableCellText,
+                                                        whiteSpace: ts.wrapText === false ? 'nowrap' : 'normal',
+                                                        wordBreak: ts.wrapText !== false ? 'break-word' : 'normal',
+                                                        verticalAlign: 'middle',
+                                                    }}
+                                                >
+                                                    {cellText}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -1543,11 +3071,13 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (opts.sort === 'desc') chartData.sort((a, b) => b.value - a.value);
 
         const isHierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
-        const plotWidth = dimensions.width > 0 ? Math.max(100, dimensions.width - 68) : 420;
+        const plotWidth = resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
         const xLayout = computeXAxisLayout(chartData, {
             expandModeActive,
-            compactMode: isHierarchyActive,
+            compactMode: isHierarchyActive || isDashboardCanvas,
             chartWidth: plotWidth,
+            focusView: isFocusView,
+            dashboardCard: isDashboardCanvas,
         });
         const yAxisDomain = chartData.length > 0 && chartData.every((d) => Number(d?.value ?? 0) >= 0)
             ? [0, 'auto']
@@ -1567,26 +3097,42 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         const xTitleText = xAxisDisplayTitle;
         const yTitleText = yAxisDisplayTitle;
         const yAxisTitleLabel = showAxisTitles ? buildYAxisTitleLabel(yTitleText) : undefined;
-        const chartBottomMargin = computeChartBottomMargin(xLayout);
-        const yAxisTickWidth = showAxisTitles && yTitleText ? 58 : 50;
+        const chartBottomMargin = computeChartBottomMargin(isDashboardCanvas);
+        const chartPlotMargin = {
+            top: isDashboardCanvas ? 4 : 10,
+            right: isDashboardCanvas ? 6 : 10,
+            left: isDashboardCanvas ? 12 : 20,
+            bottom: isDashboardCanvas ? 4 : 8,
+        };
+        const barChartMargin = {
+            top: showBarDataLabels ? (isDashboardCanvas ? 14 : 22) : chartPlotMargin.top,
+            right: chartPlotMargin.right,
+            left: chartPlotMargin.left,
+            bottom: chartBottomMargin,
+        };
+        const yAxisTickWidth = showAxisTitles && yTitleText ? (isDashboardCanvas ? 48 : 58) : (isDashboardCanvas ? 42 : 50);
 
         const tooltipFormatter = (value, name, props) => {
-            const val = formatNumber(value, 'full');
+            const seriesMeasure = resolveMeasureMetadata(name, measures, false);
+            const val = seriesMeasure 
+                ? formatCustomMeasureValue(value, seriesMeasure)
+                : formatNumber(value, 'full', name);
             const percentage = totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) + '%' : null;
             const category = props?.payload?.name ?? name;
+            const displayTitle = seriesMeasure ? (seriesMeasure.display_name || seriesMeasure.name) : (name || yAxisDisplayTitle);
             return [
                 <div key="tt" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {category && (
+                    {category && category !== displayTitle && (
                         <div style={{ fontSize: '11px', color: tooltipSubtext, fontWeight: 600 }}>{category}</div>
                     )}
-                    <div style={{ fontWeight: 700, color: tooltipText }}>{yAxisDisplayTitle}: {val}</div>
+                    <div style={{ fontWeight: 700, color: tooltipText }}>{displayTitle}: {val}</div>
                     {percentage && (
                         <div style={{ fontSize: '11px', color: tooltipSubtext, opacity: 0.8 }}>
                             {percentage} of total
                         </div>
                     )}
                 </div>,
-                yAxisDisplayTitle
+                displayTitle
             ];
         };
 
@@ -1695,7 +3241,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
 
                 if (!data || !data.rows || data.rows.length === 0 || !measureField || dims.length === 0) {
                     return (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: isDark ? '#0f172a' : '#f8fafc', color: tooltipSubtext }}>
+                        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: chartFillBackground, color: tooltipSubtext }}>
                             <GitBranch size={48} color={axisTickColor} style={{ marginBottom: '16px' }} />
                             <div style={{ fontWeight: 600, fontSize: '14px', color: axisTitleColor }}>Decomposition Tree</div>
                             <div style={{ fontSize: '12px', marginTop: '8px', maxWidth: '300px', textAlign: 'center', lineHeight: '1.5' }}>
@@ -1830,7 +3376,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 };
 
                 return (
-                    <div className="decomp-tree-canvas" style={{ width: '100%', height: '100%', background: '#f8fafc', overflowX: 'auto', overflowY: 'auto' }}>
+                    <div className="decomp-tree-canvas" style={{ width: '100%', height: '100%', background: chartFillBackground, overflowX: 'auto', overflowY: 'auto' }}>
                         <div style={{ display: 'flex', alignItems: 'center', minWidth: 'max-content', padding: '40px' }}>
                             {renderNode(treeRoot)}
                         </div>
@@ -1967,7 +3513,12 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             case 'stackedColumn':
             case 'histogram':
                 return (
-                    <BarChart data={chartData} onClick={handleClick} style={{ cursor: 'pointer' }} margin={{ top: showBarDataLabels ? 22 : 10, right: 10, left: 20, bottom: chartBottomMargin }} className="chart-category-clickable">
+                    <BarChart
+                        data={chartData}
+                        style={{ cursor: 'pointer' }}
+                        margin={barChartMargin}
+                        className="chart-category-clickable"
+                    >
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={isDark ? 0.2 : 0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
                             <XAxis
@@ -1981,30 +3532,42 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 textAnchor={xLayout.textAnchor}
                                 height={xLayout.height}
                                 tickMargin={xLayout.tickMargin}
-                                tick={{ fill: axisTickColor, fontSize: xLayout.fontSize }}
-                                tickFormatter={(val) => formatXAxisTick(val, xLayout.fullLabels, xLayout.tickMaxLen)}
+                                tick={{
+                                    fill: axisTickColor,
+                                    fontSize: xLayout.fontSize,
+                                    fontWeight: (isFocusView || isDashboardCanvas) ? 500 : 400,
+                                    dy: xLayout.angle ? 2 : 0,
+                                }}
+                                tickFormatter={(val) => formatXAxisTick(
+                                    val,
+                                    xLayout.fullLabels,
+                                    xLayout.tickMaxLen,
+                                    xLayout.charsPerSlot,
+                                    xLayout.slotWidth,
+                                    xLayout.fontSize,
+                                )}
                             />
                         )}
                         {opts.showYAxis !== false && (
                             <YAxis
-                                fontSize={8}
+                                fontSize={isFocusView ? 10 : 8}
                                 tickLine={false}
                                 axisLine={false}
-                                tick={{ fill: axisTickColor, fontSize: 8 }}
+                                tick={{ fill: axisTickColor, fontSize: isFocusView ? 10 : 8 }}
                                 tickFormatter={(v) => formatNumber(v, 'axis')}
                                 width={yAxisTickWidth}
                                 domain={yAxisDomain}
                                 label={yAxisTitleLabel}
                             />
                         )}
-                        <Tooltip cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} />
+                        <Tooltip shared={false} cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} />
                         <Bar
                             dataKey="value"
                             name={yAxisDisplayTitle}
                             radius={[4, 4, 0, 0]}
                             isAnimationActive={animation}
                             fill={mainColor}
-                            stackId={graphDefinition.graph_type === 'stackedColumn' ? "a" : undefined}
+                            stackId={graphDefinition.graph_type === 'stackedColumn' ? 'a' : undefined}
                             className="chart-bar-marks"
                             onClick={handleRechartsCategoryClick}
                         >
@@ -2013,17 +3576,17 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     key={`cell-${index}`}
                                     fill={categoryColor(entry.name, index)}
                                     className="chart-bar-cell"
-                                    onClick={(_, __, e) => handleRechartsCategoryClick(entry, index, e)}
+                                    opacity={!Number(entry.value)
+                                        ? 0.4
+                                        : (categoryMarkIsDimmed(entry.name) ? 0.35 : 1)}
+                                    stroke={categoryMarkIsSelected(entry.name) ? '#fff' : 'none'}
+                                    strokeWidth={categoryMarkIsSelected(entry.name) ? 2 : 0}
                                 />
                             ))}
                             {showBarDataLabels && (
                                 <LabelList
                                     dataKey="value"
-                                    position="top"
-                                    formatter={(v) => formatNumber(v)}
-                                    fontSize={9}
-                                    fill={'#ffffff'}
-                                    fontWeight={600}
+                                    content={renderBarDataLabel(formatNumber)}
                                 />
                             )}
                         </Bar>
@@ -2035,6 +3598,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 const sparkMargin = { top: 6, right: 6, left: 6, bottom: 6 };
                 const sparkTooltip = (
                     <Tooltip
+                        shared={false}
                         cursor={false}
                         contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px' }}
                         formatter={(val) => [formatNumber(val), yAxisDisplayTitle || '']}
@@ -2128,7 +3692,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             }
             case 'line':
                 return (
-                    <LineChart data={chartData} onClick={handleClick} style={{ cursor: 'pointer' }} margin={{ top: 10, right: 10, left: 20, bottom: xLayout.bottom }} className="chart-category-clickable">
+                    <LineChart data={chartData} style={{ cursor: 'pointer' }} margin={chartPlotMargin} className="chart-category-clickable">
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={isDark ? 0.2 : 0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
                             <XAxis
@@ -2142,7 +3706,14 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 textAnchor={xLayout.textAnchor}
                                 height={xLayout.height}
                                 tick={{ fill: axisTickColor, fontSize: xLayout.fontSize }}
-                                tickFormatter={(val) => formatXAxisTick(val, xLayout.fullLabels)}
+                                tickFormatter={(val) => formatXAxisTick(
+                                    val,
+                                    xLayout.fullLabels,
+                                    xLayout.tickMaxLen,
+                                    xLayout.charsPerSlot,
+                                    xLayout.slotWidth,
+                                    xLayout.fontSize,
+                                )}
                                 label={!isMicro ? { value: opts.xLabel || graphDefinition.x_axis, position: 'insideBottom', offset: -10, fontSize: 10, fill: axisTitleColor, fontWeight: 600 } : undefined}
                             />
                         )}
@@ -2158,24 +3729,25 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 10, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip formatter={tooltipFormatter} />
-                        {opts.showLegend && !isSmall && !isHierarchyActive && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '8px', overflow: 'visible' }} />}
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '4px', overflow: 'visible' }} />}
                         <Line
                             type="monotone"
                             dataKey="value"
                             name={yAxisDisplayTitle}
                             stroke={mainColor}
                             strokeWidth={3}
-                            dot={{ r: 4, fill: mainColor, strokeWidth: 2, stroke: '#fff' }}
-                            activeDot={{ r: 6, strokeWidth: 0 }}
+                            dot={{ r: 4, fill: mainColor, strokeWidth: 2, stroke: '#fff', cursor: 'pointer' }}
+                            activeDot={{ r: 6, strokeWidth: 0, cursor: 'pointer', onClick: handleRechartsCategoryClick }}
                             isAnimationActive={animation}
+                            onClick={handleRechartsCategoryClick}
                         >
                         </Line>
                     </LineChart>
                 );
             case 'area':
                 return (
-                    <AreaChart data={chartData} onClick={handleClick} style={{ cursor: 'pointer' }} margin={{ top: 10, right: 10, left: 20, bottom: xLayout.bottom }} className="chart-category-clickable">
+                    <AreaChart data={chartData} style={{ cursor: 'pointer' }} margin={chartPlotMargin} className="chart-category-clickable">
                         <defs>
                             <linearGradient id={`colorValue-${graphDefinition.id}`} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor={mainColor} stopOpacity={0.3} />
@@ -2195,7 +3767,14 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 textAnchor={xLayout.textAnchor}
                                 height={xLayout.height}
                                 tick={{ fill: axisTickColor, fontSize: xLayout.fontSize }}
-                                tickFormatter={(val) => formatXAxisTick(val, xLayout.fullLabels)}
+                                tickFormatter={(val) => formatXAxisTick(
+                                    val,
+                                    xLayout.fullLabels,
+                                    xLayout.tickMaxLen,
+                                    xLayout.charsPerSlot,
+                                    xLayout.slotWidth,
+                                    xLayout.fontSize,
+                                )}
                                 label={!isMicro ? { value: opts.xLabel || graphDefinition.x_axis, position: 'insideBottom', offset: -10, fontSize: 10, fill: axisTitleColor, fontWeight: 600 } : undefined}
                             />
                         )}
@@ -2211,8 +3790,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 10, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip formatter={tooltipFormatter} />
-                        {opts.showLegend && !isSmall && !isHierarchyActive && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '8px', overflow: 'visible' }} />}
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '4px', overflow: 'visible' }} />}
                         <Area
                             type="monotone"
                             dataKey="value"
@@ -2222,6 +3801,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             fillOpacity={1}
                             fill={`url(#colorValue-${graphDefinition.id})`}
                             isAnimationActive={animation}
+                            activeDot={{ r: 6, strokeWidth: 0, cursor: 'pointer', onClick: handleRechartsCategoryClick }}
+                            onClick={handleRechartsCategoryClick}
                         >
                         </Area>
                     </AreaChart>
@@ -2237,43 +3818,62 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 }
                 // ── Smart Donut / Pie ───────────────────────────────────
                 const isDonut = graphDefinition.graph_type === 'donut';
-                const MAX_SHOW_ALL_RENDER_SLICES = 1200;
 
-                // 1. Process data — Top-N + Others + hidden slices filter
-                const rawSorted = [...chartData].sort((a, b) => b.value - a.value);
-                let processedData;
-                if (!scShowAll && rawSorted.length > scTopN) {
-                    const top = rawSorted.slice(0, scTopN).filter(d => !scHiddenSlices.has(d.name));
-                    if (scGroupOthers) {
-                        const othersVal = rawSorted.slice(scTopN).reduce((s, d) => s + (d.value || 0), 0)
-                            + rawSorted.filter(d => scHiddenSlices.has(d.name)).reduce((s, d) => s + (d.value || 0), 0);
-                        processedData = othersVal > 0 ? [...top, { name: 'Others', value: othersVal, __others: true }] : top;
-                    } else {
-                        processedData = top;
-                    }
-                } else {
-                    processedData = rawSorted.filter(d => !scHiddenSlices.has(d.name));
-                    if (processedData.length > MAX_SHOW_ALL_RENDER_SLICES) {
-                        // In Show All mode, avoid collapsing into one gray "Others" slice.
-                        // Keep multi-color slices for a Power BI-like dense look.
-                        processedData = processedData.slice(0, MAX_SHOW_ALL_RENDER_SLICES);
-                    }
+                // 1. Process data — same builder as toolbar controls (pieDonutSliceModel)
+                const sliceModel = buildPieDonutProcessedData(chartData, {
+                    scShowAll,
+                    scTopN,
+                    scGroupOthers,
+                    scHiddenSlices,
+                });
+                if (!sliceModel) {
+                    return (
+                        <div className="chart-empty sc-pie-empty">
+                            {isCrossFilterActive ? 'No data matches the current filter' : 'No data available'}
+                        </div>
+                    );
                 }
-
-                const pieSlices = processedData;
-                const pieTotal = pieSlices.reduce((s, d) => s + (Number(d.value) || 0), 0);
-                const nonZeroSliceCount = pieSlices.filter((d) => Number(d.value) > 0).length;
+                const {
+                    rawSorted,
+                    pieSlices,
+                    pieTotal,
+                    nonZeroSliceCount,
+                    scLabelCount,
+                } = sliceModel;
                 const hasZeroValueSlices = pieSlices.some((d) => !Number(d.value));
-                const scLabelCount = pieSlices.length;
                 const isHierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
-                const chartTight = dimensions.height > 0 && (dimensions.height < 300 || dimensions.width < 340);
-                const chartCompact = dimensions.height > 0 && (dimensions.height < 420 || dimensions.width < 500);
-                const useOutsideLabels = scShowLabels && scLabelCount > 0
-                    && (scShowAll || !(chartTight && scLabelCount > 5));
-                const labelsEnabled = useOutsideLabels;
-                const pieChartData = scShowAll
+                const chartTight = !isDashboardCanvas
+                    && dimensions.height > 0
+                    && (dimensions.height < 300 || dimensions.width < 340);
+                const chartCompact = !isDashboardCanvas
+                    && dimensions.height > 0
+                    && (dimensions.height < 420 || dimensions.width < 500);
+                const labelsEnabled = scShowLabels && scLabelCount > 0;
+                const pieSliceActiveFilters = getVisualDimensionFilterValues(visualFilterRules, legendFilterDimension);
+                const pieCategoryFiltered = pieSliceActiveFilters.length > 0;
+
+                let pieChartBase = scShowAll
                     ? pieSlices
-                    : (hasZeroValueSlices ? pieSlices.filter((d) => Number(d.value) > 0) : pieSlices);
+                    : (hasZeroValueSlices && !pieCategoryFiltered
+                        ? pieSlices.filter((d) => Number(d.value) > 0)
+                        : pieSlices);
+
+                /** Recharts Pie cannot draw negative arcs — use |value| for slice size, keep raw for labels. */
+                const pieChartDataRaw = pieChartBase.map((entry) => {
+                    const raw = Number(entry?.value) || 0;
+                    let arcValue = raw;
+                    const isSelected = pieSliceActiveFilters.some((v) => String(v) === String(entry.name));
+                    if (isSelected && raw <= 0) {
+                        arcValue = Math.abs(raw) || 1;
+                    } else if (raw < 0) {
+                        arcValue = Math.abs(raw);
+                    }
+                    return { ...entry, _rawValue: raw, value: arcValue };
+                }).filter((entry) => pieCategoryFiltered || scShowAll || Number(entry.value) > 0);
+
+                // Keep natural pie order to avoid long cross-chart connector jumps.
+                const pieChartData = pieChartDataRaw;
+
                 pieSliceDataRef.current = pieChartData;
                 if (pieChartData.length === 0) {
                     return (
@@ -2283,20 +3883,95 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     );
                 }
                 const pieChartTotal = pieChartData.reduce((s, d) => s + (Number(d.value) || 0), 0);
-                const pieSliceActiveFilters = getVisualDimensionFilterValues(visualFilterRules, legendFilterDimension);
+                const pieDisplayTotal = pieCategoryFiltered && pieChartData.length === 1
+                    ? (pieChartData[0]._rawValue ?? pieChartData[0].value)
+                    : pieSlices.reduce((s, d) => s + (Number(d._rawValue ?? d.value) || 0), 0);
                 const pieSliceIsDimmed = (name) =>
                     pieSliceActiveFilters.length > 0
                     && !pieSliceActiveFilters.some((v) => String(v) === String(name));
                 const pieChartSliceCount = pieChartData.length;
-                const showLegendPanel = rawSorted.length > 6 && !isMicro && !isDrillDownApplied
-                    && dimensions.width >= 520
-                    && dimensions.height >= 300;
-                // Bigger center hole only — colored slice band width unchanged from original
-                const DONUT_HOLE_BOOST = 8;
-                const effectiveInnerRadius = isDonut
-                    ? (isMicro ? `${32 + DONUT_HOLE_BOOST}%` : (isSmall ? `${40 + DONUT_HOLE_BOOST}%` : `${50 + DONUT_HOLE_BOOST}%`))
-                    : 0;
-
+                const pieCardCapacity = computePieCardLabelCapacity({
+                    plotWidth: dimensions.width || 300,
+                    plotHeight: dimensions.height || 280,
+                    sliceCount: pieChartSliceCount,
+                    labelFont: 10,
+                    isDashboardCanvas,
+                });
+                const piePreferAllLabels = isDashboardCanvas && (
+                    pieChartSliceCount <= 6
+                    || (pieCardCapacity.isMedium && pieChartSliceCount <= 8)
+                    || (pieCardCapacity.isLarge && pieChartSliceCount <= 12)
+                );
+                const showLegendPanel = false;
+                const legendPanelActive = showLegendPanel && !scLegendPanelCollapsed;
+                const showPieCalloutLabels = labelsEnabled;
+                const shrinkForLegend = (outerPct) => {
+                    if (!legendPanelActive) return outerPct;
+                    return Math.max(44, outerPct - 12);
+                };
+                // Donut ring width ~17% of plot — standard proportion; hole size comes from outer radius.
+                const donutInnerPct = (outerPct) => {
+                    const o = Number(outerPct) || 50;
+                    const ringWidth = isDashboardCanvas ? 17 : 15;
+                    return Math.max(20, o - ringWidth);
+                };
+                const resolvePieDonutRadii = () => {
+                    if (!isDonut) {
+                        if (!labelsEnabled) {
+                            if (isMicro) return { inner: 0, outer: '58%' };
+                            if (isDashboardCanvas) return { inner: 0, outer: shrinkForLegend(62) + '%' };
+                            if (chartTight) return { inner: 0, outer: shrinkForLegend(88) + '%' };
+                            if (chartCompact) return { inner: 0, outer: shrinkForLegend(84) + '%' };
+                            return { inner: 0, outer: shrinkForLegend(parseInt(pieOuterRadius, 10) || 74) + '%' };
+                        }
+                        const dense = pieChartSliceCount > 18;
+                        if (isDashboardCanvas) {
+                            const baseOuter = dense
+                                ? 40
+                                : (pieChartSliceCount <= 6 ? 50
+                                    : pieChartSliceCount <= 10 ? 46
+                                        : pieChartSliceCount <= 14 ? 42
+                                            : 38);
+                            const outer = shrinkForLegend(
+                                Math.min(56, baseOuter + pieCardCapacity.outerBoost)
+                            );
+                            return { inner: 0, outer: `${outer}%` };
+                        }
+                        if (dense) {
+                            if (chartTight) return { inner: 0, outer: `${shrinkForLegend(48)}%` };
+                            if (chartCompact) return { inner: 0, outer: `${shrinkForLegend(54)}%` };
+                            return { inner: 0, outer: `${shrinkForLegend(60)}%` };
+                        }
+                        if (chartTight) return { inner: 0, outer: `${shrinkForLegend(58)}%` };
+                        if (chartCompact) return { inner: 0, outer: `${shrinkForLegend(62)}%` };
+                        const baseOuter = isMicro ? 56 : isSmall ? 60 : 62;
+                        return { inner: 0, outer: `${shrinkForLegend(baseOuter)}%` };
+                    }
+                    if (!labelsEnabled) {
+                        const outerPct = isDashboardCanvas
+                            ? 62
+                            : (isMicro ? 72 : isSmall ? 80 : 88);
+                        const adjustedOuter = shrinkForLegend(outerPct);
+                        return {
+                            inner: `${donutInnerPct(adjustedOuter)}%`,
+                            outer: `${adjustedOuter}%`,
+                        };
+                    }
+                    const dense = pieChartSliceCount > 18;
+                    const donutBaseOuter = dense
+                        ? 50
+                        : (pieChartSliceCount <= 6 ? 54 : pieChartSliceCount <= 10 ? 52 : pieChartSliceCount <= 14 ? 50 : 48);
+                    const outerPct = isDashboardCanvas
+                        ? Math.min(58, donutBaseOuter + pieCardCapacity.outerBoost)
+                        : (dense
+                            ? (chartTight ? 48 : chartCompact ? 54 : 60)
+                            : (chartTight ? 66 : chartCompact ? 70 : 74));
+                    const adjustedOuter = shrinkForLegend(outerPct);
+                    return {
+                        inner: `${donutInnerPct(adjustedOuter)}%`,
+                        outer: `${adjustedOuter}%`,
+                    };
+                };
                 // 2. Slice color — from active report theme palette
                 const sliceColor = (name, index) => {
                     const src = pieChartData[index] ?? pieSlices.find((d) => d.name === name);
@@ -2306,46 +3981,47 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     return categoryColor(name, srcIndex >= 0 ? srcIndex : index);
                 };
 
-                // Callout labels — Show All: every slice with a value gets a leader line
-                const labelEligible = (() => {
-                    const eligible = new Set();
-                    if (scShowAll) {
-                        pieChartData.forEach((d, i) => {
-                            if (Number(d.value) > 0) eligible.add(i);
-                        });
-                        return eligible;
-                    }
-                    const ranked = pieChartData
-                        .map((d, i) => ({
-                            i,
-                            val: Number(d.value) || 0,
-                            pct: pieChartTotal > 0 ? ((Number(d.value) || 0) / pieChartTotal) * 100 : 0,
-                        }))
-                        .filter((row) => row.val > 0)
-                        .sort((a, b) => b.pct - a.pct);
-                    const cap = chartTight ? 5 : (chartCompact ? 8 : 12);
-                    const minPct = pieChartSliceCount > 6 ? 4 : 0;
-                    ranked.forEach((row, rank) => {
-                        if (rank < cap || row.pct >= minPct) eligible.add(row.i);
-                    });
-                    return eligible;
-                })();
+                const piePaddingAngleDeg = pieChartData.length > 50 ? 0 : pieChartData.length > 20 ? 1 : 2;
+                const totalSweepDeg = Math.max(1, 360 - pieChartData.length * piePaddingAngleDeg);
+
+                const pieSideMargin = labelsEnabled
+                    ? (() => {
+                        const dense = pieChartSliceCount > 18;
+                        const manyLabels = pieChartSliceCount > 24;
+                        const legendExtra = legendPanelActive ? (isDashboardCanvas ? 6 : 8) : 0;
+                        if (isDashboardCanvas) {
+                            const cw = dimensions.width || 300;
+                            const ch = Math.max(80, dimensions.height || 300);
+                            const minDim = Math.min(cw, ch);
+                            let marginRatio = pieCardCapacity.marginRatio;
+                            if (manyLabels) marginRatio = Math.max(marginRatio, 0.12);
+                            if (dense) marginRatio = Math.max(marginRatio, 0.11);
+                            if (minDim < 240) marginRatio += 0.02;
+                            const minSide = pieCardCapacity.isLarge ? 18 : pieCardCapacity.isMedium ? 20 : 22;
+                            return Math.max(minSide, Math.round(minDim * marginRatio)) + legendExtra;
+                        }
+                        if (manyLabels) return chartTight ? 44 : chartCompact ? 50 : 56;
+                        if (dense) return chartTight ? 36 : chartCompact ? 42 : 48;
+                        if (pieChartSliceCount > 8) return chartTight ? 28 : chartCompact ? 34 : 40;
+                        return chartTight ? 22 : chartCompact ? 26 : 32;
+                    })()
+                    : (isDashboardCanvas ? 2 : 4);
+                const pieVerticalMargin = labelsEnabled
+                    ? Math.max(isDashboardCanvas ? 10 : 14, Math.round(pieSideMargin * 0.5))
+                    : (isDashboardCanvas ? 2 : 4);
+                const labelMargin = pieSideMargin;
+                const { inner: effectiveInnerRadius, outer: effectiveOuterRadius } = resolvePieDonutRadii();
+                const pieChartMargin = {
+                    top: pieVerticalMargin,
+                    right: pieSideMargin,
+                    bottom: pieVerticalMargin,
+                    left: pieSideMargin,
+                };
 
                 // 3. Adaptive label strategy
                 const compactLabelMode = pieChartSliceCount > 10;
-                const maxVisibleLabels = pieChartSliceCount;
                 const showAllDense = scShowAll && scLabelCount > 24 && scLabelSide !== 'all';
                 const veryDenseShowAll = scShowAll && scLabelCount > 80 && scLabelSide !== 'all';
-                const activeLabelRegion = scLabelSide;
-                const denseLabelCountByRegion = {
-                    leftTop: 0,
-                    leftBottom: 0,
-                    rightTop: 0,
-                    rightBottom: 0
-                };
-                const maxDenseLabelsPerRegion = scShowAll && scLabelSide === 'all'
-                    ? pieChartSliceCount
-                    : (veryDenseShowAll ? 18 : 28);
                 const handleDenseRegionClick = (event) => {
                     if (!veryDenseShowAll) return;
                     const bounds = event.currentTarget.getBoundingClientRect();
@@ -2358,170 +4034,447 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     else if (!isLeft && isTop) setScLabelSide('rightTop');
                     else setScLabelSide('rightBottom');
                 };
-                const MIN_LABEL_GAP = scShowAll
-                    ? (pieChartSliceCount > 40 ? 10 : pieChartSliceCount > 20 ? 11 : 14)
-                    : (pieChartSliceCount > 20 ? 12 : 16);
-                const MAX_LABEL_DRIFT = scShowAll
-                    ? Math.min(80, 22 + Math.max(0, pieChartSliceCount - 10) * 1.5)
-                    : 22;
-                let pieLabelYLayout = null;
 
-                const buildPieLabelYLayout = (cx, cy, outerR) => {
+                const pieCalloutLabelFont = Math.max(
+                    isDashboardCanvas ? 8 : 9,
+                    computeResponsiveFontSize(
+                        isDashboardCanvas ? 11 : 14,
+                        dimensions.width,
+                        dimensions.height,
+                        { min: isDashboardCanvas ? 8 : 9, max: isDashboardCanvas ? 12 : 16 }
+                    )
+                    - (compactLabelMode && !piePreferAllLabels && !pieCardCapacity.isLarge ? 1 : 0)
+                    - (pieChartSliceCount > 16 && !pieCardCapacity.isLarge ? 1 : 0)
+                    - (isDashboardCanvas && pieCardCapacity.isLarge && pieChartSliceCount > 10 ? 1 : 0)
+                    - (pieChartSliceCount > 24 ? 1 : 0)
+                    - (pieChartSliceCount > 32 ? 1 : 0)
+                );
+                const legendFontSize = computeResponsiveFontSize(11, dimensions.width, dimensions.height, { min: 8, max: 13 });
+                const legendSearchFontSize = computeResponsiveFontSize(10, dimensions.width, dimensions.height, { min: 7, max: 12 });
+                const legendToggleFontSize = computeResponsiveFontSize(10, dimensions.width, dimensions.height, { min: 8, max: 12 });
+                const legendDotSize = Math.max(6, Math.min(10, Math.round(legendFontSize * 0.72)));
+                const geometricMaxLabels = computeMaxPieOutsideLabels({
+                    sliceCount: pieChartSliceCount,
+                    labelFont: pieCalloutLabelFont,
+                    labelMargin: pieSideMargin,
+                    plotHeight: dimensions.height || 280,
+                    plotWidth: dimensions.width || 360,
+                    hasLegendPanel: legendPanelActive,
+                });
+                const maxOutsideLabels = Math.min(
+                    pieChartSliceCount,
+                    Math.max(pieCardCapacity.maxLabels, geometricMaxLabels)
+                );
+                const labelEligible = computePieOutsideLabelEligible(
+                    pieChartData,
+                    pieChartTotal,
+                    maxOutsideLabels,
+                    scShowAll
+                    || piePreferAllLabels
+                    || (labelsEnabled && !isDashboardCanvas)
+                    || (isDashboardCanvas && pieCardCapacity.isLarge && pieChartSliceCount <= 14)
+                );
+                const getRadialLabelStyle = (cosA, sinA) => {
+                    const textAnchor = cosA >= 0 ? 'start' : 'end';
+                    const dx = cosA >= 0 ? 3 : -3;
+                    return { textAnchor, dx };
+                };
+
+                const pieCalloutValueFont = Math.max(8, pieCalloutLabelFont - 1);
+
+                const buildPieCalloutLines = (entryName, rawVal, pct, { isOthers = false, nameLimit = 32 } = {}) => {
+                    const displayName = isOthers
+                        ? 'Others'
+                        : (String(entryName).length > nameLimit
+                            ? `${String(entryName).slice(0, nameLimit - 1)}…`
+                            : String(entryName));
+                    const valueLine = `${formatNumber(rawVal)} (${pct}%)`;
+                    return { nameLine: displayName, valueLine };
+                };
+
+                let pieRadialLayoutCache = null;
+
+                const estimateRadialTextBBox = (cx, cy, cosA, sinA, labelDist, nameLine, valueLine) => {
+                    const { textAnchor, dx } = getRadialLabelStyle(cosA, sinA);
+                    const lx = cx + labelDist * cosA;
+                    const ly = cy + labelDist * sinA;
+                    const tx = lx + dx;
+                    const ty = ly;
+                    const nameW = Math.max(20, String(nameLine).length * pieCalloutLabelFont * 0.55);
+                    const valueW = Math.max(20, String(valueLine).length * pieCalloutValueFont * 0.5);
+                    const w = Math.max(nameW, valueW);
+                    const h = pieCalloutLabelFont + pieCalloutValueFont + 8;
+                    const pad = 4;
+                    let x1;
+                    let x2;
+                    if (textAnchor === 'start') {
+                        x1 = tx - pad;
+                        x2 = tx + w + pad;
+                    } else {
+                        x2 = tx + pad;
+                        x1 = x2 - w - pad * 2;
+                    }
+                    const y1 = ty - h / 2 - pad;
+                    const y2 = ty + h / 2 + pad;
+                    return { x1, y1, x2, y2 };
+                };
+
+                const radialBboxesOverlap = (a, b) =>
+                    a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+
+                /** Radial callouts along slice angle; stagger length only enough to avoid label overlap */
+                const buildCompactRadialLayout = (outerR, cx, cy, chartMargin) => {
                     const RADIAN = Math.PI / 180;
-                    const labelBlock = Math.max(MIN_LABEL_GAP, pieLabelFontSize + 6);
-                    const left = [];
-                    const right = [];
-                    let angle = 0;
+                    const baseExtra = Math.max(10, Math.min(20, outerR * 0.15));
+                    const staggerStep = pieChartSliceCount > 24 ? 4 : (pieCardCapacity.isLarge ? 5 : 6);
+                    const maxTier = pieCardCapacity.maxStaggerTiers;
+                    const edgePad = chartMargin + 2;
+                    const cardInset = isDashboardCanvas ? pieCardCapacity.cardInset : 4;
+                    const chartW = dimensions.width || cx * 2;
+                    const chartH = dimensions.height || cy * 2;
+                    const labelFitsChart = (bbox) =>
+                        bbox.x1 >= cardInset
+                        && bbox.x2 <= chartW - cardInset
+                        && bbox.y1 >= cardInset
+                        && bbox.y2 <= chartH - cardInset;
+                    const maxFromCenter = Math.min(
+                        cx - edgePad,
+                        cy - edgePad,
+                        outerR + baseExtra + maxTier * staggerStep + 12
+                    );
+                    const maxLabelDist = Math.max(
+                        outerR + baseExtra,
+                        Math.min(outerR + baseExtra + maxTier * staggerStep, maxFromCenter)
+                    );
+
+                    const items = [];
+                    let cursorDeg = 0;
                     pieChartData.forEach((entry, index) => {
                         const val = Number(entry.value) || 0;
-                        const sliceAngle = val > 0
-                            ? (val / (pieChartTotal || 1)) * 360
-                            : (scShowAll ? 1.2 : 0);
-                        if (val > 0 && labelEligible.has(index)) {
-                            const midAngle = angle + sliceAngle / 2;
-                            const naturalY = cy + (outerR + 10) * Math.sin(-midAngle * RADIAN);
-                            const bucket = Math.cos(-midAngle * RADIAN) >= 0 ? right : left;
-                            bucket.push({ index, naturalY });
+                        const sliceAngle = val > 0 ? (val / (pieChartTotal || 1)) * totalSweepDeg : 0;
+                        const midAngle = cursorDeg + sliceAngle / 2;
+                        if (labelEligible.has(index) && val > 0) {
+                            const rawVal = Number(entry?._rawValue ?? entry.value) || 0;
+                            const pct = pieChartTotal > 0 ? ((rawVal / pieChartTotal) * 100).toFixed(1) : '0.0';
+                            const isOthers = entry.name === 'Others' || entry.__others;
+                            const nameLimitLayout = isDashboardCanvas
+                                ? (pieCardCapacity.isLarge
+                                    ? (pieChartSliceCount > 10 ? 20 : 26)
+                                    : pieCardCapacity.isMedium
+                                        ? (pieChartSliceCount > 10 ? 14 : 18)
+                                        : (pieChartSliceCount > 10 ? 11 : 15))
+                                : (compactLabelMode ? 14 : 18);
+                            const { nameLine, valueLine } = buildPieCalloutLines(
+                                entry.name,
+                                rawVal,
+                                pct,
+                                { isOthers, nameLimit: nameLimitLayout }
+                            );
+                            const angleRad = -midAngle * RADIAN;
+                            items.push({
+                                index,
+                                midAngle,
+                                cosA: Math.cos(angleRad),
+                                sinA: Math.sin(angleRad),
+                                nameLine,
+                                valueLine,
+                                value: val,
+                                name: entry.name,
+                            });
                         }
-                        angle += sliceAngle;
+                        if (val > 0) cursorDeg += sliceAngle + piePaddingAngleDeg;
                     });
+
+                    // Prioritize selection and hover, then sort by value descending
+                    const placementOrder = [...items].sort((a, b) => {
+                        const aSelected = pieSliceActiveFilters.some((v) => String(v) === String(a.name));
+                        const bSelected = pieSliceActiveFilters.some((v) => String(v) === String(b.name));
+                        if (aSelected && !bSelected) return -1;
+                        if (!aSelected && bSelected) return 1;
+
+                        const aHovered = pieHoverSegment && String(pieHoverSegment.name) === String(a.name);
+                        const bHovered = pieHoverSegment && String(pieHoverSegment.name) === String(b.name);
+                        if (aHovered && !bHovered) return -1;
+                        if (!aHovered && bHovered) return 1;
+
+                        return b.value - a.value;
+                    });
+
                     const layout = new Map();
-                    const placeSide = (items) => {
-                        items.sort((a, b) => a.naturalY - b.naturalY);
-                        let lastY = -Infinity;
-                        items.forEach(({ index, naturalY }) => {
-                            let ly = naturalY;
-                            if (ly - lastY < labelBlock) ly = lastY + labelBlock;
-                            if (Math.abs(ly - naturalY) > MAX_LABEL_DRIFT) return;
-                            lastY = ly;
-                            layout.set(index, ly);
-                        });
-                    };
-                    placeSide(left);
-                    placeSide(right);
+                    const placed = [];
+
+                    placementOrder.forEach((item) => {
+                        let chosenDist = null;
+                        let chosenBBox = null;
+                        const isSelected = pieSliceActiveFilters.some((v) => String(v) === String(item.name));
+                        const isHovered = pieHoverSegment && String(pieHoverSegment.name) === String(item.name);
+
+                        for (let tier = 0; tier <= maxTier; tier += 1) {
+                            const dist = Math.min(maxLabelDist, outerR + baseExtra + tier * staggerStep);
+                            const bbox = estimateRadialTextBBox(
+                                cx, cy, item.cosA, item.sinA, dist, item.nameLine, item.valueLine
+                            );
+                            const overlaps = placed.some((p) => radialBboxesOverlap(bbox, p.bbox));
+                            if (!overlaps && labelFitsChart(bbox)) {
+                                chosenDist = dist;
+                                chosenBBox = bbox;
+                                break;
+                            }
+                        }
+
+                        const forceShow = piePreferAllLabels;
+                        if (chosenDist !== null) {
+                            layout.set(item.index, { labelDist: chosenDist, visible: true });
+                            placed.push({ bbox: chosenBBox });
+                        } else if ((forceShow || isSelected || isHovered)) {
+                            const dist = Math.min(maxLabelDist, outerR + baseExtra + (forceShow ? maxTier * staggerStep : 0));
+                            const bbox = estimateRadialTextBBox(
+                                cx, cy, item.cosA, item.sinA, dist, item.nameLine, item.valueLine
+                            );
+                            if (labelFitsChart(bbox)) {
+                                layout.set(item.index, { labelDist: dist, visible: true });
+                                placed.push({ bbox: bbox });
+                            } else {
+                                layout.set(item.index, { labelDist: null, visible: false });
+                            }
+                        } else {
+                            layout.set(item.index, { labelDist: null, visible: false });
+                        }
+                    });
                     return layout;
                 };
 
-                // 4. Label renderer — with vertical collision evasion
-                const renderAdaptiveLabel = (props) => {
-                    const { cx, cy, midAngle, outerRadius: or, startAngle, endAngle, name, value, index } = props;
-                    if (!labelsEnabled || !Number(value) || !labelEligible.has(index)) return null;
-                    const sliceAngle = Math.abs(endAngle - startAngle);
-                    if (sliceAngle < 0.5) return null;
-                    const RADIAN = Math.PI / 180;
-                    const dir = Math.cos(-midAngle * RADIAN) >= 0 ? 1 : -1;
-                    const outerR = typeof or === 'number' ? or : parseFloat(or);
-                    const lineStart = outerR + 3;
-                    const lineEnd = outerR + 12;
-                    const sx = cx + lineStart * Math.cos(-midAngle * RADIAN);
-                    const sy = cy + lineStart * Math.sin(-midAngle * RADIAN);
-                    const mx = cx + lineEnd * Math.cos(-midAngle * RADIAN);
-                    const my = cy + lineEnd * Math.sin(-midAngle * RADIAN);
-                    if (showAllDense && activeLabelRegion !== 'all') {
-                        const isLeft = dir === -1;
-                        const isTop = my < cy;
-                        const visibleBySide = (
-                            (activeLabelRegion === 'left' && isLeft) ||
-                            (activeLabelRegion === 'right' && !isLeft) ||
-                            (activeLabelRegion === 'leftTop' && isLeft && isTop) ||
-                            (activeLabelRegion === 'leftBottom' && isLeft && !isTop) ||
-                            (activeLabelRegion === 'rightTop' && !isLeft && isTop) ||
-                            (activeLabelRegion === 'rightBottom' && !isLeft && !isTop)
-                        );
-                        if (!visibleBySide) return null;
+                const getRadialLayoutItem = (outerR, cx, cy, index) => {
+                    const activeFilterKey = pieSliceActiveFilters.join(',');
+                    const hoverKey = pieHoverSegment ? pieHoverSegment.name : '';
+                    const cacheKey = `${outerR}|${cx}|${cy}|${labelMargin}|${activeFilterKey}|${hoverKey}`;
+                    if (!pieRadialLayoutCache || pieRadialLayoutCache.key !== cacheKey) {
+                        pieRadialLayoutCache = {
+                            key: cacheKey,
+                            layout: buildCompactRadialLayout(outerR, cx, cy, labelMargin),
+                        };
                     }
-                    const isLeft = dir === -1;
-                    const isTop = my < cy;
-                    const regionKey = isLeft ? (isTop ? 'leftTop' : 'leftBottom') : (isTop ? 'rightTop' : 'rightBottom');
-                    if (showAllDense) {
-                        if (denseLabelCountByRegion[regionKey] >= maxDenseLabelsPerRegion) return null;
-                    }
-                    if (!pieLabelYLayout) {
-                        pieLabelYLayout = buildPieLabelYLayout(cx, cy, outerR);
-                    }
-                    const presetY = pieLabelYLayout.get(index);
-                    const ly = presetY !== undefined ? presetY : my;
-                    const hingeX = mx + dir * 6;
-                    const lx = hingeX + dir * 3;
+                    return pieRadialLayoutCache.layout.get(index);
+                };
 
-                    const pct = pieChartTotal > 0 ? ((Number(value) / pieChartTotal) * 100).toFixed(1) : '0.0';
-                    const nameLimit = compactLabelMode ? 10 : (isMicro ? 8 : isSmall ? 12 : 16);
-                    const displayName = String(name).length > nameLimit
-                        ? `${String(name).slice(0, nameLimit - 1)}…`
-                        : String(name);
-                    const labelText = `${displayName} (${pct}%)`;
-                    const labelFont = Math.max(8, pieLabelFontSize - (compactLabelMode ? 1 : 0));
-                    if (showAllDense) {
-                        denseLabelCountByRegion[regionKey] += 1;
-                    }
-                    const linePoints = Math.abs(ly - my) > 2
-                        ? `${sx},${sy} ${mx},${my} ${hingeX},${my} ${hingeX},${ly}`
-                        : `${sx},${sy} ${mx},${my} ${hingeX},${my}`;
+                // 4. Label renderer — compact radial lines (fits inside card)
+                const renderAdaptiveLabel = (props) => {
+                    const { cx, cy, midAngle, outerRadius: or, name, value, index } = props;
+                    if (!showPieCalloutLabels) return null;
+                    const sliceEntry = pieChartData[index];
+                    const arcVal = Number(value) || 0;
+                    const rawVal = Number(sliceEntry?._rawValue ?? value) || 0;
+                    if (arcVal <= 0 && rawVal === 0) return null;
+
+                    const RADIAN = Math.PI / 180;
+                    const outerR = typeof or === 'number' ? or : parseFloat(or);
+                    if (!Number.isFinite(outerR)) return null;
+
+                    const layoutItem = getRadialLayoutItem(outerR, cx, cy, index);
+                    if (!layoutItem || !layoutItem.visible || !layoutItem.labelDist) return null;
+
+                    const labelDist = layoutItem.labelDist;
+
+                    const cosA = Math.cos(-midAngle * RADIAN);
+                    const sinA = Math.sin(-midAngle * RADIAN);
+                    const sx = cx + outerR * cosA;
+                    const sy = cy + outerR * sinA;
+                    const lx = cx + labelDist * cosA;
+                    const ly = cy + labelDist * sinA;
+                    const { textAnchor, dx } = getRadialLabelStyle(cosA, sinA);
+                    const anchorX = lx + dx;
+
+                    const pct = pieChartTotal > 0 ? ((rawVal / pieChartTotal) * 100).toFixed(1) : '0.0';
+                    const isOthersSlice = name === 'Others' || sliceEntry?.__others;
+                    const isSelected = pieSliceActiveFilters.some((v) => String(v) === String(name));
+                    const isHovered = pieHoverSegment && String(pieHoverSegment.name) === String(name);
+                    const dashboardNameLimit = Math.max(
+                        18,
+                        Math.min(48, Math.round((Math.min(dimensions.width || 300, dimensions.height || 300) - pieSideMargin * 2) / 9))
+                    );
+                    const nameLimit = (isSelected || isHovered)
+                        ? 60
+                        : (isDashboardCanvas
+                            ? dashboardNameLimit
+                            : (compactLabelMode ? (chartTight ? 14 : 18) : (chartTight ? 16 : (chartCompact ? 20 : (isMicro ? 14 : isSmall ? 24 : 32)))));
+                    const { nameLine, valueLine } = buildPieCalloutLines(name, rawVal, pct, {
+                        isOthers: isOthersSlice,
+                        nameLimit,
+                    });
+                    const fullLabelTitle = isOthersSlice
+                        ? `Others: ${formatNumber(rawVal)} (${pct}%)`
+                        : `${name}: ${formatNumber(rawVal)} (${pct}%)`;
+                    const nameFill = isOthersSlice
+                        ? (isDark ? '#94a3b8' : '#64748b')
+                        : (isDark ? '#e2e8f0' : '#1e293b');
+                    const valueFill = isDark ? '#94a3b8' : '#64748b';
+
                     return (
                         <g className="pie-donut-callout">
-                            <polyline
-                                points={linePoints}
-                                fill="none"
-                                stroke={lineStrokeColor}
-                                strokeWidth={1}
+                            <line
+                                className={isOthersSlice ? 'pie-donut-callout__line--others' : undefined}
+                                x1={sx}
+                                y1={sy}
+                                x2={anchorX}
+                                y2={ly}
                             />
                             <text
-                                x={lx}
+                                x={anchorX}
                                 y={ly}
-                                textAnchor={dir === 1 ? 'start' : 'end'}
-                                dominantBaseline="central"
-                                fontSize={labelFont}
-                                fontWeight={500}
-                                fill={axisTitleColor}
+                                textAnchor={textAnchor}
+                                dominantBaseline="middle"
+                                fontSize={pieCalloutLabelFont}
+                                fill={nameFill}
                             >
-                                {labelText}
+                                <tspan x={anchorX} dy="-0.55em" fontWeight={700}>{nameLine}</tspan>
+                                <tspan
+                                    x={anchorX}
+                                    dy="1.2em"
+                                    fontSize={pieCalloutValueFont}
+                                    fontWeight={500}
+                                    fill={valueFill}
+                                >
+                                    {valueLine}
+                                </tspan>
+                                <title>{fullLabelTitle}</title>
                             </text>
                         </g>
                     );
                 };
 
-                // 5. Custom tooltip — only while hovering a slice
-                const CustomPieTooltip = ({ active, payload }) => {
-                    if (!pieHoverSegment || !active || !payload || !payload.length) return null;
-                    const entry = payload[0];
-                    const val = entry.value;
-                    const pct = pieTotal > 0 ? ((val / pieTotal) * 100).toFixed(1) : '0.0';
+                const renderPieDonutTooltip = ({ active, payload: tooltipPayload }) => {
+                    if (!active || !tooltipPayload?.length || crossFilterRefreshing) return null;
+                    const sliceEntry = tooltipPayload[0]?.payload;
+                    if (!sliceEntry?.name) return null;
+                    const rawVal = Number(sliceEntry._rawValue ?? sliceEntry.value) || 0;
+                    const pct = pieChartTotal > 0
+                        ? ((Math.abs(rawVal) / pieChartTotal) * 100).toFixed(1)
+                        : '0.0';
+
+                    const sortedSlices = [...pieChartData].sort((a, b) => (Number(b._rawValue ?? b.value) || 0) - (Number(a._rawValue ?? a.value) || 0));
+                    const rank = sortedSlices.findIndex((d) => d.name === sliceEntry.name) + 1;
+                    const totalRankCount = sortedSlices.length;
+
+                    const averageValue = pieChartTotal / (pieChartData.length || 1);
+                    const compToAvg = averageValue > 0 ? (rawVal / averageValue) : 0;
+                    const avgStr = compToAvg >= 1
+                        ? `${((compToAvg - 1) * 100).toFixed(0)}% above average`
+                        : `${((1 - compToAvg) * 100).toFixed(0)}% below average`;
+
                     return (
-                        <div className="pie-donut-hover-tooltip">
-                            <div className="pie-donut-hover-tooltip__label">{entry.name}</div>
-                            <div className="pie-donut-hover-tooltip__value">{formatNumber(val)}</div>
-                            <div className="pie-donut-hover-tooltip__pct">{pct}% of total</div>
+                        <div className="pie-donut-hover-tooltip pie-donut-hover-tooltip--cursor" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div className="pie-donut-hover-tooltip__label" style={{ borderBottom: '1px solid rgba(0,0,0,0.08)', paddingBottom: '4px', marginBottom: '4px', color: '#1e293b' }}>{String(sliceEntry.name)}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px' }}>
+                                <span style={{ color: '#64748b' }}>Value:</span>
+                                <span className="pie-donut-hover-tooltip__value" style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>{formatNumber(rawVal)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px' }}>
+                                <span style={{ color: '#64748b' }}>Share:</span>
+                                <span className="pie-donut-hover-tooltip__pct" style={{ fontSize: '12px', fontWeight: 600, color: '#0284c7' }}>{pct}% of total</span>
+                            </div>
+                            {sliceEntry.name !== 'Others' && !sliceEntry.__others && (
+                                <>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px' }}>
+                                        <span style={{ color: '#64748b' }}>Rank:</span>
+                                        <span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>#{rank} of {totalRankCount}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px' }}>
+                                        <span style={{ color: '#64748b' }}>VS Avg:</span>
+                                        <span style={{ color: compToAvg >= 1 ? '#059669' : '#dc2626', fontSize: '11px', fontWeight: 600 }}>{avgStr}</span>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     );
                 };
 
-                const pieTooltipPayload = pieHoverSegment
-                    ? [{
-                        name: pieHoverSegment.name,
-                        value: pieHoverSegment.value,
-                        payload: pieHoverSegment,
-                    }]
-                    : [];
 
-                const clearPieHover = () => setPieHoverSegment(null);
-                const handlePieSliceEnter = (segment) => {
-                    if (!segment || segment.__others) {
-                        clearPieHover();
-                        return;
-                    }
-                    setPieHoverSegment(segment);
+
+                const pieSliceTooltipFormatter = (value, name, item) => {
+                    const entry = item?.payload ?? item;
+                    const rawVal = Number(entry?._rawValue ?? value) || 0;
+                    const pct = pieChartTotal > 0
+                        ? ((Math.abs(rawVal) / pieChartTotal) * 100).toFixed(1)
+                        : '0.0';
+                    return [formatNumber(rawVal), `${name ?? entry?.name ?? ''} (${pct}%)`];
                 };
 
                 // 6. Center label for donut (hover shows slice; default shows total)
                 const centerLabel = pieHoverSegment
-                    ? { name: String(pieHoverSegment.name), val: pieHoverSegment.value, pct: pieTotal > 0 ? ((pieHoverSegment.value / pieTotal) * 100).toFixed(1) : '0' }
+                    ? {
+                        name: String(pieHoverSegment.name),
+                        val: pieHoverSegment._rawValue ?? pieHoverSegment.value,
+                        pct: pieChartTotal > 0
+                            ? ((Math.abs(Number(pieHoverSegment._rawValue ?? pieHoverSegment.value) || 0) / pieChartTotal) * 100).toFixed(1)
+                            : '0',
+                    }
                     : {
-                        name: scShowAll ? `${scLabelCount} categories` : 'Total',
-                        val: pieTotal,
-                        pct: scShowAll && nonZeroSliceCount < scLabelCount
-                            ? `${nonZeroSliceCount} w/ data`
-                            : '100',
+                        name: pieCategoryFiltered && pieChartData.length === 1
+                            ? String(pieChartData[0].name)
+                            : (scShowAll ? `${scLabelCount} categories` : 'Total'),
+                        val: pieCategoryFiltered && pieChartData.length === 1
+                            ? (pieChartData[0]._rawValue ?? pieChartData[0].value)
+                            : pieDisplayTotal,
+                        pct: pieCategoryFiltered && pieChartData.length === 1
+                            ? '100'
+                            : (scShowAll && nonZeroSliceCount < scLabelCount
+                                ? `${nonZeroSliceCount} w/ data`
+                                : '100'),
                     };
+
+                const centerValueText = formatNumber(centerLabel.val);
+                const centerPctText = String(centerLabel.pct).includes('%') || String(centerLabel.pct).includes('w/')
+                    ? String(centerLabel.pct)
+                    : `${centerLabel.pct}%`;
+
+                const renderDonutCenterLabel = (labelProps) => {
+                    const viewBox = labelProps?.viewBox ?? {};
+                    const cx = Number(labelProps?.cx ?? viewBox?.cx);
+                    const cy = Number(labelProps?.cy ?? viewBox?.cy);
+                    const innerRadius = Number(labelProps?.innerRadius ?? viewBox?.innerRadius);
+                    if (!Number.isFinite(cx) || !Number.isFinite(cy) || innerRadius <= 0) return null;
+
+                    const donutType = computeDonutCenterTypography({
+                        innerRadiusPx: innerRadius,
+                        nameText: centerLabel.name,
+                        valueText: centerValueText,
+                        pctText: centerPctText,
+                    });
+                    const lines = buildDonutCenterLabelLines(
+                        donutType,
+                        cx,
+                        cy,
+                        centerValueText,
+                        centerPctText,
+                    );
+                    const clipId = `donut-center-clip-${graphDefinition.id}`;
+
+                    return (
+                        <g className="donut-center-label" style={{ pointerEvents: 'none' }}>
+                            <defs>
+                                <clipPath id={clipId}>
+                                    <circle cx={cx} cy={cy} r={innerRadius * 0.9} />
+                                </clipPath>
+                            </defs>
+                            <g clipPath={`url(#${clipId})`}>
+                                {lines.map((line) => (
+                                    <text
+                                        key={line.kind}
+                                        x={line.x}
+                                        y={line.y}
+                                        textAnchor="middle"
+                                        dominantBaseline="middle"
+                                        fontSize={line.fontSize}
+                                        fontWeight={line.weight}
+                                        fill={line.kind === 'value' ? axisTitleColor : tooltipSubtext}
+                                    >
+                                        {line.text}
+                                    </text>
+                                ))}
+                            </g>
+                        </g>
+                    );
+                };
 
                 // 7. Filtered legend items
                 const legendSearch = scLegendSearch.toLowerCase();
@@ -2529,180 +4482,116 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     !legendSearch || String(d.name).toLowerCase().includes(legendSearch)
                 );
 
-                // 8. Controls bar
-                const ControlsBar = () => (
-                    <div className="sc-controls-bar">
-                        <label className="sc-toggle">
-                            <input type="checkbox" checked={scShowLabels} onChange={e => setScShowLabels(e.target.checked)} />
-                            <span>Labels</span>
-                        </label>
-                        <label className="sc-toggle">
-                            <input type="checkbox" checked={scGroupOthers} onChange={e => setScGroupOthers(e.target.checked)} disabled={scShowAll} />
-                            <span>Group Others</span>
-                        </label>
-                        <label className="sc-toggle">
-                            <input type="checkbox" checked={scShowAll} onChange={e => setScShowAll(e.target.checked)} />
-                            <span>Show All</span>
-                        </label>
-                        {showAllDense && (
-                            <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                                {veryDenseShowAll && (
-                                    <span style={{ fontSize: 10, color: '#64748b' }}>Dense mode: click any chart side for that corner labels</span>
-                                )}
-                                {!veryDenseShowAll && (
-                                    <>
-                                <button
-                                    type="button"
-                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, border: '1px solid #cbd5e1', background: scLabelSide === 'leftTop' ? '#eef2ff' : '#fff', color: '#334155', cursor: 'pointer' }}
-                                    onClick={() => setScLabelSide('leftTop')}
-                                >
-                                    Left Top
-                                </button>
-                                <button
-                                    type="button"
-                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, border: '1px solid #cbd5e1', background: scLabelSide === 'leftBottom' ? '#eef2ff' : '#fff', color: '#334155', cursor: 'pointer' }}
-                                    onClick={() => setScLabelSide('leftBottom')}
-                                >
-                                    Left Bottom
-                                </button>
-                                <button
-                                    type="button"
-                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, border: '1px solid #cbd5e1', background: scLabelSide === 'rightTop' ? '#eef2ff' : '#fff', color: '#334155', cursor: 'pointer' }}
-                                    onClick={() => setScLabelSide('rightTop')}
-                                >
-                                    Right Top
-                                </button>
-                                <button
-                                    type="button"
-                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, border: '1px solid #cbd5e1', background: scLabelSide === 'rightBottom' ? '#eef2ff' : '#fff', color: '#334155', cursor: 'pointer' }}
-                                    onClick={() => setScLabelSide('rightBottom')}
-                                >
-                                    Right Bottom
-                                </button>
-                                <button
-                                    type="button"
-                                    style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, border: '1px solid #cbd5e1', background: scLabelSide === 'all' ? '#eef2ff' : '#fff', color: '#334155', cursor: 'pointer' }}
-                                    onClick={() => setScLabelSide('all')}
-                                >
-                                    All
-                                </button>
-                                    </>
-                                )}
-                            </div>
-                        )}
-                        {!scShowAll && (
-                            <label className="sc-slider-label">
-                                <span>Top {scTopN}</span>
+                const legendPanelNode = showLegendPanel ? (
+                    <div
+                        className={`sc-legend-panel${scLegendPanelCollapsed ? ' sc-legend-panel--collapsed' : ''}`}
+                        style={{
+                            '--sc-legend-font-size': `${legendFontSize}px`,
+                            '--sc-legend-search-font-size': `${legendSearchFontSize}px`,
+                            '--sc-legend-toggle-font-size': `${legendToggleFontSize}px`,
+                            '--sc-legend-dot-size': `${legendDotSize}px`,
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            className="sc-legend-panel-toggle"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={toggleLegendPanelCollapsed}
+                            title={scLegendPanelCollapsed ? 'Expand legend' : 'Collapse legend'}
+                            aria-expanded={!scLegendPanelCollapsed}
+                            aria-label={scLegendPanelCollapsed ? 'Expand legend' : 'Collapse legend'}
+                        >
+                            <span className="sc-legend-panel-toggle-label">Legend</span>
+                            <span className="sc-legend-panel-toggle-icon" aria-hidden="true">
+                                {scLegendPanelCollapsed ? '‹' : '›'}
+                            </span>
+                        </button>
+                        {!scLegendPanelCollapsed && (
+                            <>
                                 <input
-                                    type="range" min={5} max={100} step={5}
-                                    value={scTopN}
-                                    onChange={e => setScTopN(Number(e.target.value))}
-                                    className="sc-slider"
+                                    type="text"
+                                    placeholder="Search…"
+                                    value={scLegendSearch}
+                                    onChange={e => {
+                                        setScLegendSearch(e.target.value);
+                                    }}
+                                    className="sc-legend-search"
                                 />
-                            </label>
+                                <div className="sc-legend-list">
+                                    {legendItems.map((item) => {
+                                        const isSelected = pieSliceActiveFilters.some((v) => String(v) === String(item.name));
+                                        const isDimmed = pieSliceActiveFilters.length > 0 && !isSelected;
+                                        const itemIdx = rawSorted.indexOf(item);
+                                        const color = sliceColor(item.name, itemIdx >= 0 ? itemIdx : 0);
+                                        const pct = pieTotal > 0 ? ((item.value / pieTotal) * 100).toFixed(1) : '0.0';
+                                        return (
+                                            <div
+                                                key={item.name}
+                                                className={`sc-legend-item${isSelected ? ' sc-legend-item--selected' : ''}${isDimmed ? ' sc-legend-item--dimmed' : ''}`}
+                                                onMouseEnter={() => handlePieDonutSliceHover(item, rawSorted.indexOf(item))}
+                                                onMouseLeave={clearPieDonutHover}
+                                                onClick={() => {
+                                                    handlePieDonutSliceClick(item);
+                                                }}
+                                                title={`${item.name}: ${formatNumber(item.value)} (${pct}%)`}
+                                            >
+                                                <span className="sc-legend-dot" style={{ background: color }} />
+                                                <span className="sc-legend-name" style={{ fontWeight: isSelected ? 700 : 400 }}>{String(item.name)}</span>
+                                                <span className="sc-legend-val">{pct}%</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </>
                         )}
-                        <span className="sc-info">
-                            {scShowAll
-                                ? `${scLabelCount} categories · ${nonZeroSliceCount} with values · total ${formatNumber(pieTotal)}`
-                                : `${pieSlices.length}/${Math.max(rawSorted.length, scTotalPoints)} shown`}
-                            {scShowAll && rawSorted.length > MAX_SHOW_ALL_RENDER_SLICES ? ' (render-capped)' : ''}
-                        </span>
                     </div>
-                );
-
-                // 9. Scrollable legend panel
-                const LegendPanel = () => (
-                    <div className="sc-legend-panel">
-                        <input
-                            type="text"
-                            placeholder="Search…"
-                            value={scLegendSearch}
-                            onChange={e => setScLegendSearch(e.target.value)}
-                            className="sc-legend-search"
-                        />
-                        <div className="sc-legend-list">
-                            {legendItems.map((item) => {
-                                const isHidden = scHiddenSlices.has(item.name);
-                                const itemIdx = rawSorted.indexOf(item);
-                                const color = sliceColor(item.name, itemIdx >= 0 ? itemIdx : 0);
-                                const pct = pieTotal > 0 ? ((item.value / pieTotal) * 100).toFixed(1) : '0.0';
-                                return (
-                                    <div
-                                        key={item.name}
-                                        className={`sc-legend-item${isHidden ? ' sc-hidden' : ''}`}
-                                        onClick={() => {
-                                            setScHiddenSlices(prev => {
-                                                const next = new Set(prev);
-                                                next.has(item.name) ? next.delete(item.name) : next.add(item.name);
-                                                return next;
-                                            });
-                                        }}
-                                        title={`${item.name}: ${formatNumber(item.value)} (${pct}%)`}
-                                    >
-                                        <span className="sc-legend-dot" style={{ background: color }} />
-                                        <span className="sc-legend-name">{String(item.name).length > 18 ? String(item.name).slice(0, 16) + '…' : item.name}</span>
-                                        <span className="sc-legend-val">{pct}%</span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                );
+                ) : null;
 
                 // 10. Render
-                // Margin: ensure enough space for labels outside the ring
-                // When labels ON → large margins so leader-lines are not clipped
-                // When labels OFF or too many slices → compact margins
-                const labelMargin = labelsEnabled
-                    ? (scShowAll && pieChartSliceCount > 15
-                        ? (chartTight ? 28 : chartCompact ? 36 : 52)
-                        : (chartTight ? 22 : chartCompact ? 30 : (isHierarchyActive ? 32 : 44)))
-                    : 4;
-                const pieChartMargin = {
-                    top: labelMargin,
-                    right: labelMargin,
-                    bottom: labelMargin,
-                    left: labelMargin,
-                };
-                const effectiveOuterRadius = (() => {
-                    const donutOuterBoost = isDonut ? DONUT_HOLE_BOOST : 0;
-                    if (!labelsEnabled) {
-                        if (isMicro) return '58%';
-                        if (chartTight) return '92%';
-                        if (chartCompact) return '88%';
-                        return isDonut ? `${86 + donutOuterBoost}%` : pieOuterRadius;
-                    }
-                    if (chartTight) return '66%';
-                    if (chartCompact) return '70%';
-                    if (isMicro) return `${50 + donutOuterBoost}%`;
-                    if (isSmall) return `${58 + donutOuterBoost}%`;
-                    return `${68 + donutOuterBoost}%`;
-                })();
                 const chartPortion = (
-                    <PieChart
-                        margin={pieChartMargin}
-                        onMouseLeave={clearPieHover}
-                    >
+                    <PieChart margin={pieChartMargin}>
+                        <Tooltip
+                            shared={false}
+                            content={renderPieDonutTooltip}
+                            formatter={pieSliceTooltipFormatter}
+                            wrapperStyle={{ zIndex: 60, outline: 'none', pointerEvents: 'none' }}
+                            contentStyle={{
+                                background: 'transparent',
+                                border: 'none',
+                                padding: 0,
+                                boxShadow: 'none',
+                            }}
+                            itemStyle={{ color: '#e2e8f0' }}
+                            labelStyle={{ color: '#94a3b8', fontWeight: 600 }}
+                        />
                         <Pie
+                            key={`pie-${scShowAll ? 'all' : `top${scTopN}`}-${scGroupOthers ? 'grp' : 'flat'}-${pieChartData.length}`}
                             data={pieChartData}
                             innerRadius={effectiveInnerRadius}
                             outerRadius={effectiveOuterRadius}
-                            minAngle={scShowAll && hasZeroValueSlices ? 1.2 : 0}
-                            paddingAngle={pieChartData.length > 50 ? 0 : pieChartData.length > 20 ? 1 : 2}
+                            minAngle={
+                                pieCategoryFiltered && pieChartData.length === 1
+                                    ? 3
+                                    : (scShowAll && hasZeroValueSlices ? 1.2 : 0)
+                            }
+                            paddingAngle={piePaddingAngleDeg}
                             dataKey="value"
                             nameKey="name"
                             shape={renderPieSliceSector}
-                            activeShape={crossFilterRefreshing ? undefined : renderPieSliceSector}
                             onClick={(sliceData, index, e) => {
                                 e?.stopPropagation?.();
                                 const entry = pieChartData[index] ?? sliceData;
                                 if (entry) handlePieDonutSliceClick(entry);
                             }}
-                            onMouseEnter={handlePieSliceEnter}
-                            onMouseLeave={clearPieHover}
+                            onMouseEnter={handlePieDonutSliceHover}
+                            onMouseLeave={clearPieDonutHover}
                             style={{ cursor: 'pointer' }}
-                            isAnimationActive={animation && pieChartData.length <= 100}
-                            label={labelsEnabled ? renderAdaptiveLabel : false}
+                            isAnimationActive={false}
+                            label={showPieCalloutLabels ? renderAdaptiveLabel : false}
                             labelLine={false}
                         >
                             {pieChartData.map((entry, index) => (
@@ -2729,72 +4618,73 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                     }
                                 />
                             ))}
+                            {isDonut && (
+                                <Label content={renderDonutCenterLabel} position="center" />
+                            )}
                         </Pie>
-                        <Tooltip
-                            active={Boolean(pieHoverSegment) && !crossFilterRefreshing}
-                            payload={pieTooltipPayload}
-                            content={<CustomPieTooltip />}
-                            cursor={false}
-                            isAnimationActive={false}
-                            animationDuration={0}
-                            wrapperStyle={{ pointerEvents: 'none', outline: 'none', zIndex: 30 }}
-                        />
-                        {isDonut && (
-                            <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" style={{ pointerEvents: 'none' }}>
-                                <tspan x="50%" dy="-0.6em" fontSize={isMicro ? 9 : isSmall ? 11 : 13} fontWeight={600} fill={tooltipSubtext}>
-                                    {String(centerLabel.name).length > 14 ? String(centerLabel.name).slice(0, 12) + '…' : centerLabel.name}
-                                </tspan>
-                                <tspan x="50%" dy="1.4em" fontSize={isMicro ? 11 : (isSmall || isHierarchyActive ? 12 : 18)} fontWeight={800} fill={axisTitleColor}>
-                                    {formatNumber(centerLabel.val)}
-                                </tspan>
-                                <tspan x="50%" dy="1.2em" fontSize={isMicro ? 8 : 10} fill={tooltipSubtext}>
-                                    {String(centerLabel.pct).includes('%') || String(centerLabel.pct).includes('w/')
-                                        ? centerLabel.pct
-                                        : `${centerLabel.pct}%`}
-                                </tspan>
-                            </text>
-                        )}
                     </PieChart>
                 );
 
+                const handleChartBackgroundClick = (e) => {
+                    if (veryDenseShowAll) {
+                        handleDenseRegionClick(e);
+                        return;
+                    }
+                    if (!e.target.closest('.recharts-pie-sector, .pie-donut-slice-sector, .pie-donut-slice-cell, .sc-legend-item')) {
+                        const filterDimension = legendFilterDimension;
+                        if (filterDimension) {
+                            applyVisualDimensionFilter(filterDimension, '__all__');
+                            restoreUnfilteredChartData();
+                        }
+                    }
+                };
+
                 return (
-                    <div className={`sc-chart-wrapper${isHierarchyActive ? ' sc-chart-wrapper--drill-active' : ''}${chartCompact ? ' sc-chart-wrapper--compact-card' : ''}`}>
-                        {graphDefinition.options?.showLegend !== false && showLegendFilterRow && (
+                    <div
+                        key={`sc-pie-${scShowAll ? 'all' : `n${scTopN}`}-${scGroupOthers ? 'g' : 'f'}-${pieChartData.length}`}
+                        className={`sc-chart-wrapper${isHierarchyActive ? ' sc-chart-wrapper--drill-active' : ''}${(chartCompact || isDashboardCanvas) ? ' sc-chart-wrapper--compact-card' : ''}${labelsEnabled ? ' sc-chart-wrapper--pie-labels' : ''}`}
+                        onPointerLeave={handlePiePointerExit}
+                    >
+                        {graphDefinition.options?.showLegend !== false && showLegendFilterRow && !legendInHeader && !isFocusView && !suppressCanvasLegendRail && (
                             <div className="sc-legend-filter-row">
                                 <LegendComponent
                                     dimension={legendFilterDimension}
                                     values={rawLegendValues}
                                     maxItems={rawLegendValues.length > 8 ? 6 : 12}
-                                    variant="chips"
+                                    variant={chartLegendVariant}
                                     filterScope="visual"
                                     visualFilters={visualFilterRules}
                                     onVisualFilterChange={applyVisualDimensionFilter}
                                     onFilterClear={handleLegendFilterClear}
                                     colorPalette={palette}
+                                    categoryColorMap={categoryColorMap}
                                 />
                             </div>
                         )}
-                        {!isMicro && <ControlsBar />}
-                        <div className={`sc-chart-body${showLegendPanel ? '' : ' sc-chart-body--full'}`}>
+                        <div className={`sc-chart-body${showLegendPanel ? '' : ' sc-chart-body--full'}${scLegendPanelCollapsed ? ' sc-chart-body--legend-collapsed' : ''}`}>
                             <div
                                 className={`sc-chart-area${pieHoverSegment ? ' sc-chart-area--slice-hover' : ''}`}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={handleDenseRegionClick}
-                                onMouseLeave={clearPieHover}
-                                style={veryDenseShowAll ? { cursor: 'crosshair' } : { cursor: 'pointer' }}
+                                onMouseDown={(e) => {
+                                    if (!isDashboardCanvas && e.target?.closest?.('.recharts-pie-sector, .pie-donut-slice-sector, .pie-donut-slice-cell')) {
+                                        e.stopPropagation();
+                                    }
+                                }}
+                                onClick={handleChartBackgroundClick}
+                                onPointerLeave={handlePiePointerExit}
+                                style={{ cursor: 'pointer' }}
                             >
                                 <ResponsiveContainer width="100%" height="100%">
                                     {chartPortion}
                                 </ResponsiveContainer>
                             </div>
-                            {showLegendPanel && <LegendPanel />}
+                            {legendPanelNode}
                         </div>
                     </div>
                 );
             }
             case 'scatter':
                 return (
-                    <ScatterChart margin={{ top: 10, right: 10, bottom: 25, left: 10 }} onClick={handleClick} className="chart-category-clickable">
+                    <ScatterChart margin={{ top: 10, right: 10, bottom: 25, left: 10 }} className="chart-category-clickable">
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
                             <XAxis
@@ -2829,25 +4719,54 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         />
                     </ScatterChart>
                 );
-            case 'radar':
+            case 'radar': {
+                const radarData = buildRadarProcessedData(chartData, scShowAll);
+                const radarActiveFilters = getVisualDimensionFilterValues(visualFilterRules, legendFilterDimension);
+                const radarVisibleIndices = computeRadarTicksVisibility(radarData, radarHoveredName, radarActiveFilters);
+
+                const handleRadarMouseMove = (state) => {
+                    if (state && state.activeLabel) {
+                        setRadarHoveredName(state.activeLabel);
+                    } else {
+                        setRadarHoveredName(null);
+                    }
+                };
+
                 return (
-                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={chartData} onClick={handleClick} className="chart-category-clickable">
+                    <RadarChart
+                        cx="50%"
+                        cy="50%"
+                        outerRadius="80%"
+                        data={radarData}
+                        onClick={handleClick}
+                        onMouseMove={handleRadarMouseMove}
+                        onMouseLeave={() => setRadarHoveredName(null)}
+                        className="chart-category-clickable"
+                    >
                         <PolarGrid strokeOpacity={0.1} stroke={gridColor} />
-                        <PolarAngleAxis dataKey="name" tick={{ fill: axisTickColor, fontSize: 10 }} />
-                        <PolarRadiusAxis tickFormatter={(v) => formatNumber(v, 'axis')} tick={{ fill: axisTickColor, fontSize: 8 }} />
+                        <PolarAngleAxis
+                            dataKey="name"
+                            tick={<RadarAngleTick visibleIndices={radarVisibleIndices} hoveredName={radarHoveredName} selectedFilters={radarActiveFilters} axisTickColor={axisTickColor} />}
+                        />
+                        <PolarRadiusAxis
+                            tickFormatter={(v) => formatNumber(v, 'axis')}
+                            tick={{ fill: axisTickColor, fontSize: 8 }}
+                        />
                         <Radar
                             name={yAxisDisplayTitle}
                             dataKey="value"
                             stroke={mainColor}
                             fill={mainColor}
-                            fillOpacity={0.6}
+                            fillOpacity={radarActiveFilters.length > 0 || radarHoveredName !== null ? 0.35 : 0.6}
                             isAnimationActive={animation}
-                        >
-                        </Radar>
-                        <Tooltip formatter={tooltipFormatter} />
-                        {opts.showLegend && !isSmall && <Legend content={renderInteractiveLegend} verticalAlign="bottom" height={42} />}
+                            dot={<CustomRadarDot hoveredName={radarHoveredName} selectedFilters={radarActiveFilters} mainColor={mainColor} formatNumber={formatNumber} />}
+                            activeDot={false}
+                        />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} verticalAlign="bottom" height={36} />}
                     </RadarChart>
                 );
+            }
             case 'polarArea':
                 return (
                     <PieChart>
@@ -2866,8 +4785,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             ))}
                         </Pie>
                         <PolarGrid opacity={0.1} />
-                        <Tooltip formatter={tooltipFormatter} />
-                        {opts.showLegend && !isSmall && <Legend content={renderInteractiveLegend} verticalAlign="bottom" height={42} />}
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} verticalAlign="bottom" height={36} />}
                     </PieChart>
                 );
             case 'treemap':
@@ -2883,12 +4802,12 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         {chartData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={mainColor} fillOpacity={1 - (index / chartData.length) * 0.6} />
                         ))}
-                        <Tooltip formatter={tooltipFormatter} />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
                     </Treemap>
                 );
             case 'composed':
                 return (
-                    <ComposedChart data={chartData} onClick={handleClick} style={{ cursor: 'pointer' }} margin={{ top: 10, right: 10, left: 20, bottom: 25 }} className="chart-category-clickable">
+                    <ComposedChart data={chartData} style={{ cursor: 'pointer' }} margin={{ ...chartPlotMargin, bottom: chartBottomMargin }} className="chart-category-clickable">
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
                             <XAxis
@@ -2915,25 +4834,27 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 10, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip formatter={tooltipFormatter} />
-                        {opts.showLegend && !isSmall && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '8px', overflow: 'visible' }} />}
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '4px', overflow: 'visible' }} />}
                         <Bar dataKey="value" name={yAxisDisplayTitle} barSize={20} fill={mainColor} opacity={0.4} radius={[4, 4, 0, 0]} onClick={handleRechartsCategoryClick} />
                         <Line type="monotone" dataKey="value" name={yAxisDisplayTitle} stroke={mainColor} strokeWidth={3} dot={{ r: 4 }} onClick={handleRechartsCategoryClick} />
                     </ComposedChart>
                 );
             case 'funnel':
                 return (
-                    <BarChart layout="vertical" data={data} onClick={handleClick} margin={{ top: 5, right: 20, left: -20, bottom: 5 }} className="chart-category-clickable">
+                    <BarChart layout="vertical" data={data} margin={{ top: 5, right: 20, left: -20, bottom: 5 }} className="chart-category-clickable">
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.1} stroke={gridColor} />
                         <XAxis type="number" hide />
                         <YAxis dataKey="name" type="category" fontSize={8} width={60} tick={{ fill: axisTickColor, fontSize: 8 }} />
-                        <Tooltip />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
                         <Bar dataKey="value" isAnimationActive={animation} onClick={handleRechartsCategoryClick}>
                             {data.map((entry, index) => (
                                 <Cell
                                     key={`cell-${index}`}
                                     fill={palette[index % palette.length]}
-                                    onClick={(_, __, e) => handleRechartsCategoryClick(entry, index, e)}
+                                    opacity={categoryMarkIsDimmed(entry.name) ? 0.35 : 1}
+                                    stroke={categoryMarkIsSelected(entry.name) ? '#fff' : 'none'}
+                                    strokeWidth={categoryMarkIsSelected(entry.name) ? 2 : 0}
                                 />
                             ))}
                         </Bar>
@@ -2951,23 +4872,25 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         node={{ stroke: '#fff', strokeWidth: 1, fill: mainColor }}
                         link={{ stroke: mainColor, fillOpacity: 0.2 }}
                     >
-                        <Tooltip />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
                     </Sankey>
                 );
             case 'waterfall':
                 return (
-                    <BarChart data={chartData} onClick={handleClick} margin={{ top: 10, right: 10, left: 20, bottom: 25 }} className="chart-category-clickable">
+                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 20, bottom: 25 }} className="chart-category-clickable">
                         <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} stroke={gridColor} />
                         <XAxis dataKey="name" fontSize={8} tick={{ fill: axisTickColor, fontSize: 8 }} height={35} label={!isMicro ? { value: opts.xLabel || graphDefinition.x_axis, position: 'insideBottom', offset: -10, fontSize: 9, fill: axisTitleColor, fontWeight: 600 } : undefined} />
                         <YAxis tickFormatter={(v) => formatNumber(v, 'axis')} fontSize={8} tick={{ fill: axisTickColor, fontSize: 8 }} width={50} label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined} />
-                        <Tooltip />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
                         <Bar dataKey="base" stackId="a" fill="transparent" />
                         <Bar dataKey="value" stackId="a" onClick={handleRechartsCategoryClick}>
                             {chartData.map((entry, index) => (
                                 <Cell
                                     key={`cell-${index}`}
                                     fill={entry.value >= 0 ? (opts.positiveColor || themeConfig.positive) : (opts.negativeColor || themeConfig.negative)}
-                                    onClick={(_, __, e) => handleRechartsCategoryClick(entry, index, e)}
+                                    opacity={categoryMarkIsDimmed(entry.name) ? 0.35 : 1}
+                                    stroke={categoryMarkIsSelected(entry.name) ? '#fff' : 'none'}
+                                    strokeWidth={categoryMarkIsSelected(entry.name) ? 2 : 0}
                                 />
                             ))}
                         </Bar>
@@ -2994,8 +4917,10 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 <Cell key={`cell-${index}`} fill={palette[index % palette.length]} />
                             ))}
                         </RadialBar>
-                        <Tooltip />
-                        <Legend content={renderInteractiveLegend} layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ overflow: 'visible' }} />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        {showEmbeddedRechartsLegend && (
+                            <Legend content={renderInteractiveLegend} layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ overflow: 'visible' }} />
+                        )}
                     </RadialBarChart>
                 );
             case 'gauge':
@@ -3062,7 +4987,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} contentStyle={{ backgroundColor: tooltipBg, color: tooltipText, borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }} />
+                        <Tooltip shared={false} cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} contentStyle={{ backgroundColor: tooltipBg, color: tooltipText, borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }} />
                         <Line type="stepBefore" dataKey="value" name={yAxisDisplayTitle} stroke={mainColor} strokeWidth={3} dot={{ r: 3, fill: mainColor, strokeWidth: 2, stroke: isDark ? 'var(--bg-elevated)' : '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={animation} />
                     </LineChart>
                 );
@@ -3070,7 +4995,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 // The values for RangeBar are guaranteed to be [[min, max]] arrays from the backend
                 // Recharts Bar handles array dataKeys inherently by drawing from index 0 to index 1
                 return (
-                    <BarChart data={chartData} onClick={handleClick} margin={{ top: 10, right: 10, left: 20, bottom: 25 }} className="chart-category-clickable">
+                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 20, bottom: 25 }} className="chart-category-clickable">
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
                             <XAxis
@@ -3090,18 +5015,26 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: opts.yLabel || graphDefinition.y_axis || 'Min-Max Range', angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip cursor={{ fill: isDark ? 'var(--bg-tertiary)' : '#f1f5f9' }} formatter={(val) => {
+                        <Tooltip shared={false} cursor={{ fill: isDark ? 'var(--bg-tertiary)' : '#f1f5f9' }} formatter={(val) => {
                             if (Array.isArray(val)) {
                                 return `${formatNumber(val[0])} - ${formatNumber(val[1])}`
                             }
                             return formatNumber(val);
                         }} contentStyle={{ backgroundColor: tooltipBg, color: tooltipText, borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }} />
-                        <Bar dataKey="value" fill={mainColor} radius={[4, 4, 4, 4]} isAnimationActive={animation} onClick={handleRechartsCategoryClick}>
+                        <Bar
+                            dataKey="value"
+                            fill={mainColor}
+                            radius={[4, 4, 4, 4]}
+                            isAnimationActive={animation}
+                            onClick={handleRechartsCategoryClick}
+                        >
                             {chartData.map((entry, index) => (
                                 <Cell
                                     key={`cell-${index}`}
                                     fill={opts.useMultipleColors ? palette[index % palette.length] : mainColor}
-                                    onClick={(_, __, e) => handleRechartsCategoryClick(entry, index, e)}
+                                    opacity={categoryMarkIsDimmed(entry.name) ? 0.35 : 1}
+                                    stroke={categoryMarkIsSelected(entry.name) ? '#fff' : 'none'}
+                                    strokeWidth={categoryMarkIsSelected(entry.name) ? 2 : 0}
                                 />
                             ))}
                         </Bar>
@@ -3110,7 +5043,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             case 'combination':
                 // Combination plot: A ComposedChart showing Area behind a bold Line
                 return (
-                    <ComposedChart data={chartData} onClick={handleClick} margin={{ top: 10, right: 10, left: 20, bottom: 25 }} className="chart-category-clickable">
+                    <ComposedChart data={chartData} margin={{ ...chartPlotMargin, bottom: chartBottomMargin }} className="chart-category-clickable">
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
                             <XAxis
@@ -3130,22 +5063,162 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={tooltipFormatter} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Tooltip shared={false} cursor={{ fill: '#f1f5f9' }} formatter={tooltipFormatter} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                         <Area type="monotone" dataKey="value" name="Volume/Area" fill={mainColor} fillOpacity={0.2} stroke="none" isAnimationActive={animation} />
                         <Line type="monotone" dataKey="value" name={opts.yLabel || graphDefinition.y_axis || 'Trend'} stroke={palette[1] || mainColor} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={animation} onClick={handleRechartsCategoryClick} />
                     </ComposedChart>
                 );
             case 'kpiCard': {
-                const kpiLabel = opts.xLabel || graphDefinition.x_axis || 'Metric';
+                const kpiWidth = dimensions.width || opts.width || 240;
+                const kpiHeight = dimensions.height || opts.height || 130;
+                const scaleW = kpiWidth / 240;
+                const scaleH = kpiHeight / 130;
+                const scale = Math.min(scaleW, scaleH);
+
+                if (chartData.length > 1) {
+                    const cols = Math.min(3, chartData.length);
+                    const itemScale = scale * 0.95;
+                    return (
+                        <div 
+                            className="kpi-comparison-grid"
+                            style={{
+                                display: 'grid',
+                                gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                                gap: '12px',
+                                width: '100%',
+                                height: '100%',
+                                padding: '8px',
+                                boxSizing: 'border-box',
+                                overflowY: 'auto'
+                            }}
+                        >
+                            {chartData.map((entry, idx) => {
+                                const solved = resolveMeasureMetadata(entry.name, measures, true);
+                                const displayVal = formatCustomMeasureValue(entry.value, solved);
+                                const entryLabel = solved.displayName || entry.name;
+                                const entryDesc = solved.description || '';
+                                
+                                return (
+                                    <div 
+                                        key={idx}
+                                        style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            justifyContent: 'space-between',
+                                            padding: '12px',
+                                            boxSizing: 'border-box',
+                                            background: isDark ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)' : 'linear-gradient(135deg, rgba(248, 250, 252, 0.9) 0%, rgba(241, 245, 249, 1) 100%)',
+                                            border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                                            borderRadius: '8px',
+                                            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.01)',
+                                            minWidth: 0,
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        <div 
+                                            style={{
+                                                fontSize: `${Math.max(9, Math.min(13, Math.round(10 * itemScale)))}px`,
+                                                fontWeight: 600,
+                                                color: isDark ? '#94a3b8' : '#64748b',
+                                                textTransform: 'uppercase',
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis'
+                                            }}
+                                            title={entryLabel}
+                                        >
+                                            {entryLabel}
+                                        </div>
+                                        <div 
+                                            style={{
+                                                color: palette[idx % palette.length] || mainColor,
+                                                fontSize: `${Math.max(16, Math.min(28, Math.round(20 * itemScale)))}px`,
+                                                fontWeight: 700,
+                                                margin: '4px 0',
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis'
+                                            }}
+                                        >
+                                            {displayVal}
+                                        </div>
+                                        <div 
+                                            style={{
+                                                fontSize: `${Math.max(8, Math.min(11, Math.round(9 * itemScale)))}px`,
+                                                color: isDark ? '#64748b' : '#94a3b8',
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis'
+                                            }}
+                                            title={entryDesc}
+                                        >
+                                            {entryDesc}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                }
+
+                const quickMeasureField = Array.isArray(opts.measure_fields)
+                    ? opts.measure_fields.find((m) => m?.template_id)
+                    : null;
+                const isQuickMeasureKpi = Boolean(quickMeasureField);
+                const quickTemplateId = String(quickMeasureField?.template_id || '').toLowerCase();
+                const quickMeasureName = opts.measureName || opts.title || quickMeasureField?.template_id;
+                const isPercentageMeasure = /percent|percentage|growth|mom|qoq|cagr|over_month|over_quarter/.test(quickTemplateId)
+                    || /%\s*$|\*\s*100/.test(String(opts.measureFormula || ''));
+                
+                const kpiLabel = opts.xLabel || (matchedMeasure ? matchedMeasure.display_name : null) || quickMeasureName || graphDefinition.x_axis || 'Metric';
                 const showKpiFilter = graphDefinition.options?.showLegend !== false && rawLegendValues.length > 1;
                 const kpiCompact = !showZoomControls;
-                const kpiValue = totalValue;
-                const avgValue = totalValue / (chartData.length || 1);
+                
+                const kpiValue = isQuickMeasureKpi && chartData.length === 1
+                    ? chartData[0].value
+                    : totalValue;
+                
+                const displayKpiValue = matchedMeasure
+                    ? formatCustomMeasureValue(kpiValue, matchedMeasure)
+                    : (isPercentageMeasure && typeof kpiValue === 'number'
+                        ? formatPercentNumber(kpiValue)
+                        : formatNumber(kpiValue));
+                
+                const kpiDesc = matchedMeasure?.description || (isQuickMeasureKpi ? 'Quick Measure calculation' : 'No description available');
+
                 return (
-                    <div className={`kpi-card-visual${kpiCompact ? ' kpi-card-visual--compact' : ''}`}>
-                        <div className="kpi-card-visual-body">
-                            <div className="kpi-card-visual-header-row">
-                                <span className="kpi-card-visual-kicker">{kpiLabel}</span>
+                    <div 
+                        className={`kpi-card-visual${kpiCompact ? ' kpi-card-visual--compact' : ''}`}
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            width: '100%',
+                            height: '100%',
+                            padding: '16px',
+                            boxSizing: 'border-box',
+                            background: isDark ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)' : 'linear-gradient(135deg, rgba(248, 250, 252, 0.8) 0%, rgba(241, 245, 249, 1) 100%)',
+                            border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                            borderRadius: '12px',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)',
+                            overflow: 'hidden'
+                        }}
+                    >
+                        <div className="kpi-card-visual-body" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', width: '100%' }}>
+                            {/* Header: Display Name */}
+                            <div className="kpi-card-visual-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span 
+                                    className="kpi-card-visual-kicker"
+                                    style={{
+                                        fontSize: `${Math.max(11, Math.min(16, Math.round(12 * scale)))}px`,
+                                        fontWeight: 600,
+                                        color: isDark ? '#94a3b8' : '#64748b',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em'
+                                    }}
+                                >
+                                    {kpiLabel}
+                                </span>
                                 {showKpiFilter && (
                                     <div className="kpi-card-filter-row card-filter-row">
                                         <LegendComponent
@@ -3157,24 +5230,42 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                             onVisualFilterChange={applyVisualDimensionFilter}
                                             onFilterClear={handleLegendFilterClear}
                                             colorPalette={palette}
+                                            categoryColorMap={categoryColorMap}
                                         />
                                     </div>
                                 )}
                             </div>
-                            <div className="kpi-card-visual-metrics">
-                                <div className="kpi-card-visual-value" style={{ color: mainColor }}>
-                                    {formatNumber(kpiValue)}
+                            
+                            {/* Main Value: Formatted Result */}
+                            <div className="kpi-card-visual-metrics" style={{ margin: '8px 0', flex: 1, display: 'flex', alignItems: 'center' }}>
+                                <div 
+                                    className="kpi-card-visual-value" 
+                                    style={{ 
+                                        color: mainColor || (isDark ? '#3b82f6' : '#1d4ed8'),
+                                        fontSize: `${Math.max(20, Math.min(54, Math.round(32 * scale)))}px`,
+                                        fontWeight: 700,
+                                        letterSpacing: '-0.02em',
+                                        lineHeight: 1.1
+                                    }}
+                                >
+                                    {displayKpiValue}
                                 </div>
-                                <div className="kpi-card-visual-stats">
-                                    <div className="kpi-card-visual-stat">
-                                        <span className="kpi-card-visual-stat-label">Average</span>
-                                        <span className="kpi-card-visual-stat-value">{formatNumber(avgValue)}</span>
-                                    </div>
-                                    <div className="kpi-card-visual-stat">
-                                        <span className="kpi-card-visual-stat-label">Count</span>
-                                        <span className="kpi-card-visual-stat-value">{chartData.length}</span>
-                                    </div>
-                                </div>
+                            </div>
+                            
+                            {/* Footer: Description */}
+                            <div 
+                                className="kpi-card-visual-footer" 
+                                title={kpiDesc}
+                                style={{
+                                    fontSize: `${Math.max(9, Math.min(13, Math.round(10 * scale)))}px`,
+                                    color: isDark ? '#64748b' : '#94a3b8',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    marginTop: '4px'
+                                }}
+                            >
+                                {kpiDesc}
                             </div>
                         </div>
                     </div>
@@ -3258,6 +5349,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                                 onVisualFilterChange={applyVisualDimensionFilter}
                                                 onFilterClear={handleLegendFilterClear}
                                                 colorPalette={palette}
+                                                categoryColorMap={categoryColorMap}
                                             />
                                         </div>
                                     )}
@@ -3319,7 +5411,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             />
                         )}
                         <ZAxis type="number" range={[100, 1000]} />
-                        <Tooltip cursor={{ strokeDasharray: '3 3' }} formatter={tooltipFormatter} />
+                        <Tooltip shared={false} cursor={{ strokeDasharray: '3 3' }} formatter={tooltipFormatter} />
                         <Scatter name={yAxisDisplayTitle} data={chartData} fill={mainColor} fillOpacity={0.6}>
                             {chartData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={mainColor} />
@@ -3400,7 +5492,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     const maxMapValue = Math.max(...values, 1);
 
                     return (
-                        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: '#f8fafc', borderRadius: 6 }}>
+                        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: chartFillBackground, borderRadius: chartNoFill ? 0 : 6 }}>
                             <ComposableMap
                                 projection="geoMercator"
                                 projectionConfig={{ scale: 140 }}
@@ -3496,7 +5588,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 <Cell key={`cell-${index}`} fill={mainColor} fillOpacity={0.6 + (index / chartData.length) * 0.4} />
                             ))}
                         </Pie>
-                        <Tooltip formatter={tooltipFormatter} />
+                        <Tooltip shared={false} formatter={tooltipFormatter} />
                     </PieChart>
                 );
             case 'boxPlot':
@@ -3540,19 +5632,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 if (isEditing) {
                     return (
                         <textarea
-                            style={{
-                                width: '100%',
-                                height: '100%',
-                                border: '1px solid #8c2546',
-                                borderRadius: '4px',
-                                padding: '10px',
-                                fontSize: '14px',
-                                color: 'var(--text-primary)',
-                                background: 'var(--bg-elevated)',
-                                resize: 'none',
-                                outline: 'none',
-                                fontStyle: 'normal'
-                            }}
+                            className="bi-text-visual-editor"
                             autoFocus
                             value={textContent}
                             onChange={(e) => setTextContent(e.target.value)}
@@ -3565,29 +5645,16 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 }
                 return (
                     <div
-                        style={{
-                            width: '100%',
-                            height: '100%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: isDark ? 'var(--text-secondary)' : '#475569',
-                            fontSize: '14px',
-                            textAlign: 'center',
-                            padding: '10px',
-                            fontStyle: 'italic',
-                            cursor: 'text',
-                            userSelect: 'none'
-                        }}
+                        className={`bi-text-visual-body${!textContent && !isViewOnly ? ' bi-text-visual-body--placeholder' : ''}`}
                         onDoubleClick={() => !isViewOnly && setIsEditing(true)}
-                        title={isViewOnly ? textContent : "Double-click to edit"}
+                        title={isViewOnly ? textContent : 'Double-click to edit'}
                     >
                         {textContent || (isViewOnly ? '' : 'Double-click to edit text box')}
                     </div>
                 );
             case 'paginated_report':
                 return (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: isDark ? 'var(--bg-secondary)' : '#f8fafc', border: `1px solid ${isDark ? 'var(--border-primary)' : '#e2e8f0'}`, borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: chartFillBackground, border: chartNoFill ? 'none' : `1px solid ${isDark ? 'var(--border-primary)' : '#e2e8f0'}`, borderRadius: chartNoFill ? '0' : '4px', overflow: 'hidden' }}>
                         <div style={{ padding: '8px 12px', background: isDark ? 'var(--bg-tertiary)' : '#e2e8f0', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: `1px solid ${isDark ? 'var(--border-primary)' : '#cbd5e1'}` }}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#f1f5f9' : '#0f172a'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                             <span style={{ fontSize: '12px', fontWeight: 600, color: isDark ? '#f1f5f9' : '#0f172a' }}>Paginated Report</span>
@@ -3668,22 +5735,181 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         };
     }, [zoomLevel, showZoomControls, canZoom, graphDefinition.id, dimensions.width, dimensions.height, recenterZoomViewport]);
 
-    const renderChartMessage = (message, className = 'chart-empty') => (
-        <div className="chart-wrapper chart-wrapper--state">
-            <div className={className}>{message}</div>
-        </div>
-    );
+    const getActionableEmptyMessage = () => {
+        if (isCrossFilterActive) {
+            return 'No data matches the current filter settings. Try clearing some filters.';
+        }
+        const hasMeasures = Boolean(graphDefinition.y_axis) || (Array.isArray(graphDefinition.options?.measure_fields) && graphDefinition.options.measure_fields.length > 0);
+        const hasDimensions = Boolean(graphDefinition.x_axis) || (Array.isArray(graphDefinition.options?.dimensions) && graphDefinition.options.dimensions.length > 0);
+        const type = graphDefinition.graph_type;
+
+        if (!hasMeasures) {
+            return 'Add a Measure to see values';
+        }
+        if (!hasDimensions) {
+            if (type === 'kpiCard' || type === 'metricCard' || type === 'gauge') {
+                return 'No data available for this metric.';
+            }
+            if (type === 'line' || type === 'area' || type === 'sparkline') {
+                return 'Add a Date field to view trends';
+            }
+            return 'Add a Dimension to compare results';
+        }
+        return 'No data available for this visual configuration.';
+    };
+
+    const renderChartMessage = (message, className = 'chart-empty') => {
+        const isCustomEmpty = [
+            'Add a Measure to see values',
+            'Add a Date field to view trends',
+            'Add a Dimension to compare results',
+            'No data available for this metric.'
+        ].includes(message);
+
+        if (isCustomEmpty) {
+            const activeTheme = reportTheme || graphDefinition.options?.reportTheme || 'theme_default';
+            const isDarkTheme = globalIsDark || activeTheme === 'theme_dark' || className.includes('dark');
+            let icon = null;
+            let title = message;
+            let subtitle = 'Drag a field from the Fields Pane and drop it here to visualize.';
+            let borderThemeColor = '#cbd5e1';
+            let iconBg = '#f1f5f9';
+
+            if (message === 'Add a Measure to see values') {
+                borderThemeColor = isDarkTheme ? '#1e3a8a' : '#bfdbfe';
+                iconBg = isDarkTheme ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.08)';
+                icon = (
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="4" y1="9" x2="20" y2="9"></line>
+                        <line x1="4" y1="15" x2="20" y2="15"></line>
+                        <line x1="10" y1="3" x2="8" y2="21"></line>
+                        <line x1="16" y1="3" x2="14" y2="21"></line>
+                    </svg>
+                );
+            } else if (message === 'Add a Date field to view trends') {
+                borderThemeColor = isDarkTheme ? '#831843' : '#fbcfe8';
+                iconBg = isDarkTheme ? 'rgba(236, 72, 153, 0.15)' : 'rgba(236, 72, 153, 0.08)';
+                icon = (
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ec4899" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                    </svg>
+                );
+            } else if (message === 'Add a Dimension to compare results') {
+                borderThemeColor = isDarkTheme ? '#064e3b' : '#a7f3d0';
+                iconBg = isDarkTheme ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.08)';
+                icon = (
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                    </svg>
+                );
+            } else if (message === 'No data available for this metric.') {
+                borderThemeColor = isDarkTheme ? '#475569' : '#cbd5e1';
+                iconBg = isDarkTheme ? 'rgba(148, 163, 184, 0.15)' : 'rgba(148, 163, 184, 0.08)';
+                icon = (
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="4" y1="9" x2="20" y2="9"></line>
+                        <line x1="4" y1="15" x2="20" y2="15"></line>
+                        <line x1="10" y1="3" x2="8" y2="21"></line>
+                        <line x1="16" y1="3" x2="14" y2="21"></line>
+                    </svg>
+                );
+                subtitle = 'The semantic model returned no values or failed to calculate this measure.';
+            }
+
+            return (
+                <div 
+                    className="chart-wrapper chart-wrapper--state"
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '100%',
+                        height: '100%',
+                        padding: '16px',
+                        boxSizing: 'border-box'
+                    }}
+                >
+                    <div 
+                        className="bi-smart-empty-card"
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            textAlign: 'center',
+                            width: '100%',
+                            height: '100%',
+                            border: `2px dashed ${borderThemeColor}`,
+                            borderRadius: '12px',
+                            padding: '24px 16px',
+                            backgroundColor: isDarkTheme ? 'rgba(15, 23, 42, 0.4)' : 'rgba(248, 250, 252, 0.5)',
+                            transition: 'all 0.3s ease',
+                            cursor: 'default',
+                            boxSizing: 'border-box',
+                            userSelect: 'none'
+                        }}
+                    >
+                        <div 
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '50%',
+                                backgroundColor: iconBg,
+                                marginBottom: '16px',
+                                transition: 'transform 0.25s ease'
+                            }}
+                        >
+                            {icon}
+                        </div>
+                        <h4 
+                            style={{
+                                margin: '0 0 8px 0',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                color: isDarkTheme ? '#f1f5f9' : '#1e293b'
+                            }}
+                        >
+                            {title}
+                        </h4>
+                        <p 
+                            style={{
+                                margin: 0,
+                                fontSize: '11px',
+                                color: isDarkTheme ? '#94a3b8' : '#64748b',
+                                lineHeight: '1.4',
+                                maxWidth: '280px'
+                            }}
+                        >
+                            {subtitle}
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="chart-wrapper chart-wrapper--state">
+                <div className={className}>{message}</div>
+            </div>
+        );
+    };
 
     const noDataRenderTypes = new Set(['text', 'shape', 'button', 'image', 'influencers', 'qna', 'paginated_report', 'power_app', 'power_automate', 'smart_narrative']);
     if (!noDataRenderTypes.has(graphDefinition.graph_type)) {
         if (loading && !data && !crossFilterRefreshing) return renderChartMessage('Loading chart...', 'chart-loading');
-        if (error && !data && !crossFilterRefreshing) return renderChartMessage('No data available');
+        if (error && !data && !crossFilterRefreshing) return renderChartMessage(error, 'chart-empty chart-error');
         if (configHint && !data && !crossFilterRefreshing) return renderChartMessage(configHint);
         if (hasNoChartRows) {
             if (loading || crossFilterRefreshing) return renderChartMessage('Loading chart...', 'chart-loading');
-            return renderChartMessage(
-                isCrossFilterActive ? 'No data matches the current filter' : 'No data available'
-            );
+            return renderChartMessage(getActionableEmptyMessage());
         }
     } else {
         if (error && !data) return null;
@@ -3692,20 +5918,69 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     // Use effectiveDimFields: falls back to [x_axis] for auto-generated charts that haven't used the field-well
     const canDrill = effectiveDimFields.length > 1 && graphDefinition.graph_type !== 'table';
     const isHierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
-    const isCompactLayout = Boolean(zoomToolbarContainer || hideChartTitle);
-    const isPieDonutChart = graphDefinition.graph_type === 'pie' || graphDefinition.graph_type === 'donut';
     const isMetricCard = graphDefinition.graph_type === 'metricCard';
     const isKpiCard = graphDefinition.graph_type === 'kpiCard';
     const isSparkline = graphDefinition.graph_type === 'sparkline';
     const isCardVisual = isKpiCard || isMetricCard;
     const hideTopLegendOnCard = (isMetricCard || isKpiCard) && hideInternalStats;
 
-    const zoomToolbarNode = showZoomControls && canZoom ? (
-        <div className={`chart-zoom-toolbar ${zoomToolbarContainer ? 'chart-zoom-toolbar-header' : ''} ${showZoomControls && !zoomToolbarContainer ? 'chart-zoom-toolbar-focus' : ''}`}>
-            <button type="button" className="chart-zoom-btn" onClick={zoomOut} disabled={zoomLevel <= 1}>-</button>
-            <span className="chart-zoom-value">{Math.round(zoomLevel * 100)}%</span>
-            <button type="button" className="chart-zoom-btn" onClick={zoomIn} disabled={zoomLevel >= MAX_ZOOM}>+</button>
-            <button type="button" className="chart-zoom-reset" onClick={resetZoom} disabled={zoomLevel === 1}>Reset</button>
+    const showCompactLegend =
+        graphDefinition.options?.showLegend !== false
+        && !isMicro
+        && showLegendFilterRow
+        && !showDrillFilter
+        && !hideTopLegendOnCard
+        && !isFocusView
+        && !suppressCanvasLegendRail;
+
+    const compactLegendElement = showCompactLegend ? (
+        <LegendComponent
+            dimension={legendFilterDimension}
+            values={rawLegendValues}
+            maxItems={rawLegendValues.length > 8 ? 8 : 16}
+            variant={chartLegendVariant}
+            filterScope="visual"
+            visualFilters={visualFilterRules}
+            onVisualFilterChange={applyVisualDimensionFilter}
+            onFilterClear={handleLegendFilterClear}
+            colorPalette={reportPalette}
+            categoryColorMap={categoryColorMap}
+        />
+    ) : null;
+
+    const compactLegendPortal =
+        legendInHeader && compactLegendElement && legendHeaderHost
+            ? createPortal(compactLegendElement, legendHeaderHost)
+            : null;
+
+    const showHeaderZoomToolbar = Boolean(zoomToolbarContainer);
+    const zoomToolbarNode = (showZoomControls && canZoom) || showHeaderZoomToolbar ? (
+        <div className={`chart-zoom-toolbar ${showHeaderZoomToolbar ? 'chart-zoom-toolbar-header' : ''} ${showZoomControls && !zoomToolbarContainer ? 'chart-zoom-toolbar-focus' : ''}`}>
+            <div className="chart-zoom-controls-group">
+                <button type="button" className="chart-zoom-btn" onClick={zoomOut} disabled={!canZoom || zoomLevel <= 1} aria-label="Zoom out">−</button>
+                <span className="chart-zoom-value">{Math.round(zoomLevel * 100)}%</span>
+                <button type="button" className="chart-zoom-btn" onClick={zoomIn} disabled={!canZoom || zoomLevel >= MAX_ZOOM} aria-label="Zoom in">+</button>
+                <button type="button" className="chart-zoom-reset" onClick={resetZoom} disabled={!canZoom || zoomLevel === 1}>Reset</button>
+            </div>
+            {showHeaderZoomToolbar && (graphDefinition.x_axis || graphDefinition.y_axis) && (
+                <>
+                    <span className="chart-zoom-toolbar-divider" aria-hidden="true" />
+                    <div className="chart-zoom-meta-group">
+                        {graphDefinition.x_axis && (
+                            <div className="chart-zoom-meta">
+                                <span className="chart-zoom-meta-label">FIELD</span>
+                                <span className="chart-zoom-meta-value">{graphDefinition.x_axis}</span>
+                            </div>
+                        )}
+                        {graphDefinition.y_axis && (
+                            <div className="chart-zoom-meta">
+                                <span className="chart-zoom-meta-label">METRIC</span>
+                                <span className="chart-zoom-meta-value">{graphDefinition.y_axis}</span>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     ) : null;
 
@@ -3721,180 +5996,245 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         : '';
 
     const activeTheme = reportTheme || graphDefinition.options?.reportTheme || 'theme_default';
-    const isDark = activeTheme === 'theme_dark';
+    const isDark = globalIsDark || activeTheme === 'theme_dark';
     const axisTitleColor = isDark ? '#f1f5f9' : '#4b5563';
+    const chartNoFill = isChartNoFill(chartOptions, reportNoFill);
+    const chartFillBackground = resolveChartFillBackground(
+        chartOptions,
+        isDark ? 'var(--bg-secondary)' : '#ffffff',
+        reportNoFill
+    );
 
     return (
-        <div
-            ref={containerRef}
-            className={`chart-wrapper ${isDark ? 'dark-theme ' : ''}${isCompactLayout ? 'chart-wrapper--compact' : ''}${isHierarchyActive ? ' chart-wrapper--drill-active' : ''}${hasActiveChartFilter ? ' chart-wrapper--filtering' : ''}${crossFilterRefreshing ? ' chart-wrapper--crossfilter-refresh' : ''}${isMetricCard ? ' chart-wrapper--metric-card' : ''}${isKpiCard ? ' chart-wrapper--kpi-card' : ''}${isSparkline ? ' chart-wrapper--sparkline' : ''}`}
-            style={{
-            position: 'relative',
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: graphDefinition.options?.bgColor || 'transparent',
-            padding: isMicro ? '2px' : (isCompactLayout || isCardVisual ? '0' : '4px'),
-            borderRadius: '4px',
-            overflow: 'hidden'
-        }}>
-            {canDrill && (
-                <DrillDownPanel
-                    dimensionFields={effectiveDimFields}
-                    activeLevelIndex={drillLevelIndex}
-                    drillPath={drillPath}
-                    drillModeActive={drillModeActive}
-                    expandModeActive={expandModeActive}
-                    showLegendFilter={showDrillFilter}
-                    legendFilterDimension={legendFilterDimension}
-                    legendFilterValues={rawLegendValues}
-                    onDrillUp={() => {
-                        if (drillPath.length > 0) {
-                            const newPath = drillPath.slice(0, -1);
-                            updateDrillState({
-                                drillPath: newPath,
-                                drillLevelIndex: Math.max(0, newPath.length),
-                                expandModeActive: newPath.length > 0,
-                            });
-                            return;
-                        }
-
-                        if (expandModeActive && drillLevelIndex > 0) {
-                            updateDrillState({
-                                drillLevelIndex: drillLevelIndex - 1,
-                                expandModeActive: true,
-                            });
-                            return;
-                        }
-
-                        if (expandModeActive && drillLevelIndex === 0) {
-                            updateDrillState({ expandModeActive: false });
-                            return;
-                        }
-
-                        if (drillLevelIndex > 0) {
-                            updateDrillState({
-                                drillLevelIndex: drillLevelIndex - 1,
-                                expandModeActive: drillLevelIndex - 1 > 0,
-                            });
-                        }
-                    }}
-                    onDrillDown={() => {
-                        if (drillLevelIndex < effectiveDimFields.length - 1) {
-                            updateDrillState({
-                                drillLevelIndex: drillLevelIndex + 1,
-                                expandModeActive: true,
-                            });
-                        }
-                    }}
-                    onDrillModeToggle={() => {
-                        updateDrillState({
-                            drillModeActive: !drillModeActive,
-                        });
-                    }}
-                    onResetDrill={() => {
-                        updateDrillState({
-                            drillLevelIndex: 0,
-                            drillPath: [],
-                            expandModeActive: false,
-                            drillModeActive: false,
-                        });
-                    }}
-                />
-            )}
-            {graphDefinition.options?.title && !isMicro && !hideChartTitle && !hideInternalStats && (
-                <div style={{
-                    fontSize: isSmall ? '10px' : '12px',
-                    fontWeight: 700,
-                    color: axisTitleColor,
-                    marginBottom: isCompactLayout ? '2px' : '4px',
-                    textAlign: 'center'
+        <>
+            {compactLegendPortal}
+            <div
+                ref={containerRef}
+                className={`chart-wrapper ${isDark ? 'dark-theme ' : ''}${isCompactLayout ? 'chart-wrapper--compact' : ''}${isFocusView ? ' chart-wrapper--focus' : ''}${isBarChartVisual ? ' chart-wrapper--bar' : ''}${isPieDonutChart ? ' chart-wrapper--pie-donut' : ''}${isPieDonutChart && scShowLabels ? ' chart-wrapper--pie-labels-visible' : ''}${isHierarchyActive ? ' chart-wrapper--drill-active' : ''}${hasActiveChartFilter ? ' chart-wrapper--filtering' : ''}${crossFilterRefreshing ? ' chart-wrapper--crossfilter-refresh' : ''}${isMetricCard ? ' chart-wrapper--metric-card' : ''}${isKpiCard ? ' chart-wrapper--kpi-card' : ''}${isSparkline ? ' chart-wrapper--sparkline' : ''}${legendInHeader ? ' chart-wrapper--legend-in-header' : ''}${chartNoFill ? ' chart-wrapper--no-fill' : ''}`}
+                style={{
+                    position: 'relative',
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    backgroundColor: chartFillBackground,
+                    padding: isMicro ? '2px' : (isCompactLayout || isCardVisual ? '0' : '4px'),
+                    borderRadius: chartNoFill ? '0' : '4px',
+                    overflow: (isPieDonutChart && scShowLabels && !isDashboardCanvas) ? 'visible' : 'hidden',
                 }}>
-                    {graphDefinition.options.title}
-                </div>
-            )}
-            {graphDefinition.options?.showLegend !== false && !isMicro && showLegendFilterRow && !showDrillFilter && !hideTopLegendOnCard && !isPieDonutChart && (
-                <div
-                    style={{
-                        margin: isCompactLayout ? '2px 0 0' : '4px 0 2px',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        width: '100%',
-                        flexShrink: 0,
-                    }}
-                >
-                    <LegendComponent
-                        dimension={legendFilterDimension}
-                        values={rawLegendValues}
-                        maxItems={rawLegendValues.length > 8 ? 6 : 12}
-                        variant="chips"
-                        filterScope="visual"
-                        visualFilters={visualFilterRules}
-                        onVisualFilterChange={applyVisualDimensionFilter}
-                        onFilterClear={handleLegendFilterClear}
-                        colorPalette={reportPalette}
+                {chartNotice && (
+                    <div className="chart-inline-notice" role="status" aria-live="polite">
+                        {chartNotice}
+                    </div>
+                )}
+                {canDrill && (
+                    <DrillDownPanel
+                        dimensionFields={effectiveDimFields}
+                        activeLevelIndex={drillLevelIndex}
+                        drillPath={drillPath}
+                        drillModeActive={drillModeActive}
+                        expandModeActive={expandModeActive}
+                        showLegendFilter={showDrillFilter}
+                        legendFilterDimension={legendFilterDimension}
+                        legendFilterValues={rawLegendValues}
+                        onDrillUp={() => {
+                            if (drillHistory.length > 0) {
+                                const prevState = drillHistory[drillHistory.length - 1] || {};
+                                updateDrillState({
+                                    drillHistory: drillHistory.slice(0, -1),
+                                    drillPath: Array.isArray(prevState.drillPath) ? prevState.drillPath : [],
+                                    drillLevelIndex: Number.isFinite(prevState.drillLevelIndex) ? prevState.drillLevelIndex : 0,
+                                    expandModeActive: Boolean(prevState.expandModeActive),
+                                    drillModeActive: Boolean(prevState.drillModeActive),
+                                });
+                                return;
+                            }
+
+                            const hasStateToRewind = drillPath.length > 0 || drillLevelIndex > 0 || expandModeActive;
+                            if (!hasStateToRewind) return;
+
+                            const nextPath = drillPath.length > 0 ? drillPath.slice(0, -1) : drillPath;
+                            const nextLevelIndex = Math.max(0, drillLevelIndex - 1);
+                            const nextExpandMode = nextPath.length > 0 || nextLevelIndex > 0;
+
+                            updateDrillState({
+                                drillPath: nextPath,
+                                drillLevelIndex: nextLevelIndex,
+                                expandModeActive: nextExpandMode,
+                            });
+                        }}
+                        onDrillDown={() => {
+                            if (drillLevelIndex < effectiveDimFields.length - 1) {
+                                const historyEntry = {
+                                    drillPath,
+                                    drillLevelIndex,
+                                    expandModeActive,
+                                    drillModeActive,
+                                };
+                                updateDrillState({
+                                    drillHistory: [...drillHistory, historyEntry].slice(-30),
+                                    drillLevelIndex: drillLevelIndex + 1,
+                                    expandModeActive: true,
+                                });
+                            }
+                        }}
+                        onDrillModeToggle={() => {
+                            updateDrillState({
+                                drillModeActive: !drillModeActive,
+                            });
+                        }}
+                        onResetDrill={() => {
+                            updateDrillState({
+                                drillLevelIndex: 0,
+                                drillPath: [],
+                                drillHistory: [],
+                                expandModeActive: false,
+                                drillModeActive: false,
+                            });
+                        }}
                     />
-                </div>
-            )}
-            {(!hideInternalStats && stats) && (
-                <div className="chart-kpi-row">
-                    <div className="chart-kpi-item">
-                        <span className="kpi-label">TOTAL</span>
-                        <span className="kpi-value">{Math.round(stats.sum).toLocaleString()}</span>
+                )}
+                {graphDefinition.options?.title && !isMicro && !hideChartTitle && !hideInternalStats && (
+                    <div style={{
+                        fontSize: isSmall ? '10px' : '12px',
+                        fontWeight: 700,
+                        color: axisTitleColor,
+                        marginBottom: isCompactLayout ? '2px' : '4px',
+                        textAlign: 'center'
+                    }}>
+                        {graphDefinition.options.title}
                     </div>
-                    <div className="chart-kpi-item">
-                        <span className="kpi-label">AVG</span>
-                        <span className="kpi-value">{stats.avg.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
-                    </div>
-                    <div className="chart-kpi-item">
-                        <span className="kpi-label">MAX</span>
-                        <span className="kpi-value">{stats.max.toLocaleString()}</span>
-                    </div>
-                    <div className="chart-kpi-item">
-                        <span className="kpi-label">MIN</span>
-                        <span className="kpi-value">{stats.min.toLocaleString()}</span>
-                    </div>
-                </div>
-            )}
-            <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                {zoomToolbarNode && !zoomToolbarContainer && zoomToolbarNode}
-                {zoomToolbarNode && zoomToolbarContainer && createPortal(zoomToolbarNode, zoomToolbarContainer)}
-                <div
-                    ref={zoomViewportRef}
-                    className={`chart-zoom-viewport${isCardVisual ? ' chart-zoom-viewport--card' : ''}${crossFilterRefreshing ? ' chart-zoom-viewport--refreshing' : ''}${hasVisualCategoryFilter || hasActiveChartFilter ? ' chart-zoom-viewport--filtered' : ''}`}
-                    style={{ flex: 1, minHeight: 0, width: '100%', overflow: canZoom && zoomLevel > 1 ? 'auto' : 'hidden' }}
-                    onMouseDown={(e) => {
-                        if (e.target?.closest?.('.recharts-wrapper, .recharts-surface, .sc-chart-area, svg')) {
-                            e.stopPropagation();
-                        }
-                    }}
-                >
-                    {crossFilterRefreshing && <div className="chart-crossfilter-shimmer" aria-hidden="true" />}
-                    {isCardVisual ? (
-                        <div className="chart-card-visual-slot">
-                            {renderChart()}
-                        </div>
-                    ) : (
-                        <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: '100%' }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                {renderChart()}
-                            </ResponsiveContainer>
-                        </div>
-                    )}
-                </div>
-                {xAxisFooterTitle ? (
+                )}
+                {!legendInHeader && compactLegendElement && !isPieDonutChart && (
                     <div
-                        className="chart-axis-title chart-axis-title--x"
-                        title={xAxisFooterTitle}
-                        style={{ paddingTop: barChartFooterLayout?.footerGap ?? 4 }}
+                        className="chart-legend-filter-row"
+                        style={{
+                            margin: isCompactLayout ? '2px 0 0' : '4px 0 2px',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            width: '100%',
+                            flexShrink: 0,
+                        }}
                     >
-                        {xAxisFooterTitle}
+                        {compactLegendElement}
                     </div>
-                ) : null}
+                )}
+                {(!hideInternalStats && stats) && (
+                    <div className="chart-kpi-row">
+                        <div className="chart-kpi-item">
+                            <span className="kpi-label">TOTAL</span>
+                            <span className="kpi-value">{Math.round(stats.sum).toLocaleString()}</span>
+                        </div>
+                        <div className="chart-kpi-item">
+                            <span className="kpi-label">AVG</span>
+                            <span className="kpi-value">{stats.avg.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+                        </div>
+                        <div className="chart-kpi-item">
+                            <span className="kpi-label">MAX</span>
+                            <span className="kpi-value">{stats.max.toLocaleString()}</span>
+                        </div>
+                        <div className="chart-kpi-item">
+                            <span className="kpi-label">MIN</span>
+                            <span className="kpi-value">{stats.min.toLocaleString()}</span>
+                        </div>
+                    </div>
+                )}
+                <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                    {zoomToolbarNode && !zoomToolbarContainer && zoomToolbarNode}
+                    {zoomToolbarNode && zoomToolbarContainer && createPortal(zoomToolbarNode, zoomToolbarContainer)}
+                    {isPieDonutChart && !isMicro && pieDonutSliceModel && isFocusView && (
+                        <PieDonutControls
+                            scShowLabels={scShowLabels}
+                            onShowLabelsChange={setScShowLabels}
+                            scGroupOthers={scGroupOthers}
+                            onGroupOthersChange={setScGroupOthers}
+                            scShowAll={scShowAll}
+                            onShowAllChange={handlePieShowAllChange}
+                            scTopN={scTopN}
+                            onTopNChange={setScTopN}
+                            scLabelSide={scLabelSide}
+                            onLabelSideChange={setScLabelSide}
+                            sliceModel={pieDonutSliceModel}
+                            scTotalPoints={scTotalPoints}
+                            formatNumber={(n) => formatChartNumber(n, 'compact')}
+                            calloutLabelStats={pieCalloutLabelStats}
+                            isFocusView={isFocusView}
+                            centerLegend={
+                                isFocusView
+                                    && graphDefinition.options?.showLegend !== false
+                                    && showLegendFilterRow
+                                    ? (
+                                        <LegendComponent
+                                            dimension={legendFilterDimension}
+                                            values={rawLegendValues}
+                                            maxItems={6}
+                                            variant={chartLegendVariant}
+                                            filterScope="visual"
+                                            visualFilters={visualFilterRules}
+                                            onVisualFilterChange={applyVisualDimensionFilter}
+                                            onFilterClear={handleLegendFilterClear}
+                                            colorPalette={reportPalette}
+                                            categoryColorMap={categoryColorMap}
+                                        />
+                                    )
+                                    : null
+                            }
+                        />
+                    )}
+                    <div
+                        ref={zoomViewportRef}
+                        className={`chart-zoom-viewport${isCardVisual ? ' chart-zoom-viewport--card' : ''}${crossFilterRefreshing ? ' chart-zoom-viewport--refreshing' : ''}${hasVisualCategoryFilter || hasActiveChartFilter ? ' chart-zoom-viewport--filtered' : ''}${isPieDonutChart && scShowLabels ? ' chart-zoom-viewport--pie-labels' : ''}`}
+                        style={{
+                            flex: 1,
+                            minHeight: 0,
+                            width: '100%',
+                            overflow: canZoom && zoomLevel > 1
+                                ? 'auto'
+                                : (isPieDonutChart && scShowLabels && !isDashboardCanvas ? 'visible' : 'hidden'),
+                        }}
+                        onMouseDown={(e) => {
+                            if (e.target?.closest?.('.sc-controls-bar, .sc-toggle, .sc-slider-label, input[type="checkbox"], input[type="range"]')) {
+                                e.stopPropagation();
+                                return;
+                            }
+                            if (!isDashboardCanvas && e.target?.closest?.('.recharts-wrapper, .recharts-surface, .sc-chart-area, svg')) {
+                                e.stopPropagation();
+                            }
+                        }}
+                    >
+                        {crossFilterRefreshing && <div className="chart-crossfilter-shimmer" aria-hidden="true" />}
+                        {isCardVisual ? (
+                            <div className="chart-card-visual-slot">
+                                {renderChart()}
+                            </div>
+                        ) : isPieDonutChart ? (
+                            <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: 0 }}>
+                                {renderChart()}
+                            </div>
+                        ) : (
+                            <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: '100%' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    {renderChart()}
+                                </ResponsiveContainer>
+                            </div>
+                        )}
+                    </div>
+                    {xAxisFooterTitle ? (
+                        <div
+                            className="chart-axis-title chart-axis-title--x"
+                            title={xAxisFooterTitle}
+                            style={{
+                                paddingTop: isDashboardCanvas ? 0 : (barChartFooterLayout?.footerGap ?? 2),
+                                fontSize: isFocusView ? 13 : undefined,
+                            }}
+                        >
+                            {xAxisFooterTitle}
+                        </div>
+                    ) : null}
+                </div>
             </div>
-        </div>
+        </>
     );
 };
 
-export default React.memo(DynamicChart);
+export default DynamicChart;

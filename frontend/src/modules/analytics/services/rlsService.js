@@ -1,9 +1,9 @@
 /**
  * rlsService.js
- * Thin fetch wrapper for all /api/rls/* endpoints.
+ * Thin fetch wrapper for all /analytics/api/rls/* endpoints.
  */
 
-const BASE = '/api/rls';
+const BASE = '/analytics/api/rls';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -14,11 +14,17 @@ async function _request(method, path, body) {
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(`${BASE}${path}`, opts);
+  const contentType = res.headers.get('content-type') || '';
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const err = contentType.includes('application/json')
+      ? await res.json().catch(() => ({ detail: res.statusText }))
+      : { detail: res.statusText };
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
   if (res.status === 204) return null;
+  if (!contentType.includes('application/json')) {
+    throw new Error('Unexpected response from RLS API (not JSON). Check that the analytics backend is running.');
+  }
   return res.json();
 }
 

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
-import { 
-  Plus, Database, Layout, Search, BarChart3, FileText, Zap, 
+import {
+  Plus, Database, Layout, Search, BarChart3, FileText, Zap,
   HelpCircle, Settings, Home, Share2, Download, Table,
   Moon, Sun, LogOut, User, PieChart, Activity, Layers, Filter
 } from 'lucide-react';
@@ -127,7 +127,7 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
     if (userId) formData.append('user_id', userId);
 
     try {
-      const res = await fetch('/api/files/upload', {
+      const res = await fetch('/analytics/api/files/upload', {
         method: 'POST',
         body: formData
       });
@@ -136,7 +136,7 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
         if (data.file_id) {
           setFileId(data.file_id);
           setIsFileUploaded(true);
-          navigate(`/?fileId=${data.file_id}&fileName=${encodeURIComponent(file.name)}`, { replace: true });
+          navigate(`/analytics/workspace/${data.file_id}?fileName=${encodeURIComponent(file.name)}`, { replace: true });
         } else {
           throw new Error("Invalid response from server");
         }
@@ -156,66 +156,66 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
   };
 
   const handleSignIn = async (e) => {
-      e.preventDefault();
-      if (!authEmail || !authPassword) {
-        setAuthError('Please enter your email and password.');
-        return;
-      }
-      setIsAuthLoading(true);
-      setAuthError('');
+    e.preventDefault();
+    if (!authEmail || !authPassword) {
+      setAuthError('Please enter your email and password.');
+      return;
+    }
+    setIsAuthLoading(true);
+    setAuthError('');
 
-      try {
-        const name = authEmail.split('@')[0] || 'Demo User';
-        const id = '1';
-        if (onLogin) onLogin(name, id);
+    try {
+      const name = authEmail.split('@')[0] || 'Demo User';
+      const id = '1';
+      if (onLogin) onLogin(name, id);
 
-        if (rememberMe) {
-          localStorage.setItem('rememberedEmail', authEmail);
-        } else {
-          localStorage.removeItem('rememberedEmail');
-        }
-      } catch (err) {
-        const name = authEmail.split('@')[0] || 'Demo User';
-        const id = '1';
-        if (onLogin) onLogin(name, id);
-        if (rememberMe) {
-          localStorage.setItem('rememberedEmail', authEmail);
-        } else {
-          localStorage.removeItem('rememberedEmail');
-        }
-      } finally {
-        setIsAuthLoading(false);
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', authEmail);
+      } else {
+        localStorage.removeItem('rememberedEmail');
       }
-    };
+    } catch (err) {
+      const name = authEmail.split('@')[0] || 'Demo User';
+      const id = '1';
+      if (onLogin) onLogin(name, id);
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', authEmail);
+      } else {
+        localStorage.removeItem('rememberedEmail');
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
   const handleSignUp = async (e) => {
-      e.preventDefault();
-      if (!signupName || !authEmail || !authPassword || !signupConfirmPassword) {
-        setAuthError('Please fill in all fields.');
-        return;
-      }
-      if (authPassword !== signupConfirmPassword) {
-        setAuthError('Passwords do not match.');
-        return;
-      }
-      setIsAuthLoading(true);
-      setAuthError('');
+    e.preventDefault();
+    if (!signupName || !authEmail || !authPassword || !signupConfirmPassword) {
+      setAuthError('Please fill in all fields.');
+      return;
+    }
+    if (authPassword !== signupConfirmPassword) {
+      setAuthError('Passwords do not match.');
+      return;
+    }
+    setIsAuthLoading(true);
+    setAuthError('');
 
-      try {
-        const name = signupName || authEmail.split('@')[0] || 'Demo User';
-        const id = '1';
-        if (onLogin) onLogin(name, id);
-        setSuccess('Account created successfully!');
-        setTimeout(() => setSuccess(''), 3000);
-      } catch (err) {
-        setAuthError(err.message || 'Registration failed');
-      } finally {
-        setIsAuthLoading(false);
-      }
-    };
+    try {
+      const name = signupName || authEmail.split('@')[0] || 'Demo User';
+      const id = '1';
+      if (onLogin) onLogin(name, id);
+      setSuccess('Account created successfully!');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setAuthError(err.message || 'Registration failed');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
   const handleSubmit = (e) => {
     e.preventDefault();
     if (isUploading) return;
-    
+
     if (fileName && fileId) {
       setIsFileUploaded(true);
     } else if (selectedFile && !fileId) {
@@ -249,7 +249,7 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
 
       <div className="main-content-minimal">
         {isFileUploaded ? (
-          <BIWorkspace 
+          <BIWorkspace
             key={fileId}
             fileId={fileId}
             initialFileName={fileName}
@@ -266,7 +266,7 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
                   <img src="/image.png" alt="OneStopAnalytics Logo" style={{ height: '45px' }} />
                 </div>
                 {authError && <div className="inline-auth-error">{authError}</div>}
-                
+
                 {authMode === 'signUp' && (
                   <div className="inline-auth-field">
                     <label className="inline-auth-label">Full Name</label>
@@ -383,12 +383,12 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
 
             <div className="center-section">
               <h1 className="main-heading">What do you want to Visualize?</h1>
-              
+
               <form className="query-form" onSubmit={handleSubmit}>
                 <div className="input-wrapper">
-                  <button 
-                    type="button" 
-                    className={`btn-plus ${isUploading ? 'disabled' : ''}`} 
+                  <button
+                    type="button"
+                    className={`btn-plus ${isUploading ? 'disabled' : ''}`}
                     onClick={isUploading ? null : triggerFileInput}
                     disabled={isUploading}
                   >
@@ -409,8 +409,8 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
                       onChange={(e) => setQuery(e.target.value)}
                     />
                   </div>
-                  <button 
-                    type="submit" 
+                  <button
+                    type="submit"
                     className={`btn-submit ${isUploading ? 'loading' : ''}`}
                     disabled={isUploading}
                   >
@@ -456,7 +456,7 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
                 />
               </div>
             )}
-            
+
             {sqlMode === 'querying' && (
               <div className="sql-query-view">
                 <h3>Query Database: <span className="gradient-text">{fileName}</span></h3>
@@ -469,7 +469,7 @@ function LandingPage({ userId, userName, isDarkMode, toggleTheme, onLogin, onLog
                     const formData = new FormData();
                     formData.append('query', q);
                     if (connectionId) formData.append('connection_id', connectionId);
-                    const res = await fetch('/api/sql/visualize', { method: 'POST', body: formData });
+                    const res = await fetch('/analytics/api/sql/visualize', { method: 'POST', body: formData });
                     if (res.ok) {
                       const data = await res.json();
                       setFileId(data.file_id);

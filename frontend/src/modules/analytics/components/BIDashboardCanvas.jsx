@@ -1,7 +1,67 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import DynamicChart from './DynamicChart';
-import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE } from '../constants/visualDefaults';
+import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE, PIE_DONUT_DEFAULT_SIZE, TEXT_BOX_DEFAULT_SIZE } from '../constants/visualDefaults';
+import { useGlobalFilters } from '../context/FilterContext';
+import { filterMapHasValues } from '../utils/filterUtils';
+import { formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 import './BIDashboardCanvas.css';
+
+const QUICK_MEASURE_FIELD_LABELS = {
+    value_field: 'Value',
+    total_field: 'Total',
+    current_field: 'Current',
+    prior_field: 'Prior',
+    actual_field: 'Actual',
+    target_field: 'Target',
+    numerator: 'Numerator',
+    denominator: 'Denominator',
+    part_field: 'Part',
+    whole_field: 'Whole',
+    field: 'Field',
+    field_a: 'Field A',
+    field_b: 'Field B',
+    date_field: 'Date',
+    category_field: 'Category',
+    condition_field: 'Condition',
+    weight_field: 'Weight',
+    top_n: 'Top N',
+    periods: 'Periods',
+};
+
+const formatQuickMeasureFieldLabel = (key) => {
+    const raw = String(key || '').trim();
+    if (!raw) return 'Field';
+    if (QUICK_MEASURE_FIELD_LABELS[raw]) return QUICK_MEASURE_FIELD_LABELS[raw];
+    return raw
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (ch) => ch.toUpperCase());
+};
+
+const getQuickMeasureInfo = (graph) => {
+    const measureField = Array.isArray(graph?.options?.measure_fields)
+        ? graph.options.measure_fields.find((m) => m?.template_id)
+        : null;
+    if (!measureField) return null;
+    const mappings = measureField.field_mappings || measureField.config || {};
+    const fields = mappings && typeof mappings === 'object' && !Array.isArray(mappings)
+        ? Object.entries(mappings)
+            .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
+            .map(([key, value]) => ({
+                key,
+                label: formatQuickMeasureFieldLabel(key),
+                value: String(value),
+            }))
+        : [];
+    return {
+        name: graph?.options?.measureName || graph?.options?.title || measureField.template_id,
+        fields,
+    };
+};
+
+const truncateFocusValue = (value, max = 24) => {
+    const text = String(value ?? '');
+    return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+};
 
 const BIDashboardCanvas = ({
     graphs,
@@ -14,21 +74,39 @@ const BIDashboardCanvas = ({
     onAddVisual,
     onResizeChart,
     onUpdateVisual,
-    onDeleteVisual,
     onButtonAction,
     onDeselectVisual,
-    onAddToReport,
     showGridlines = true,
     snapToGrid = false,
     reportTheme = 'theme_default',
     reportHeaderText = '',
     reportBackgroundColor = '#ffffff',
+    reportNoFill = false,
     onUpdateReportHeader,
     isViewOnly = false,
+    onApplyCrossFilter,
+    onClearCrossFilter,
+    schema = [],
+    measures = [],
+    onDropFieldOnCanvas,
+    onDropFieldOnVisual,
+    focusedGraphId: focusedGraphIdProp,
+    onFocusGraph,
+    onCloseFocusGraph,
 }) => {
-    const [focusedGraphId, setFocusedGraphId] = React.useState(null);
+    const [internalFocusedGraphId, setInternalFocusedGraphId] = React.useState(null);
+    const focusedGraphId = focusedGraphIdProp !== undefined ? focusedGraphIdProp : internalFocusedGraphId;
+    const setFocusedGraphId = React.useCallback((id) => {
+        if (onFocusGraph || onCloseFocusGraph) {
+            if (id == null) onCloseFocusGraph?.();
+            else onFocusGraph?.(id);
+        } else {
+            setInternalFocusedGraphId(id);
+        }
+    }, [onFocusGraph, onCloseFocusGraph]);
     const [focusZoomToolbarHost, setFocusZoomToolbarHost] = React.useState(null);
     const [isDraggingOverCanvas, setIsDraggingOverCanvas] = React.useState(false);
+    const dragCounterRef = React.useRef(0);
     const workspaceRef = React.useRef(null);
     const initializedLayoutIdsRef = React.useRef(new Set());
     const [draggingGraphId, setDraggingGraphId] = React.useState(null);
@@ -43,7 +121,14 @@ const BIDashboardCanvas = ({
     const [isEditingReportHeader, setIsEditingReportHeader] = React.useState(false);
     const [draftReportHeader, setDraftReportHeader] = React.useState('');
     const reportHeaderInputRef = React.useRef(null);
-    const [deleteConfirmGraphId, setDeleteConfirmGraphId] = React.useState(null);
+    // Propagate report-wide cross-filter changes into memoized DynamicChart instances.
+    const { reportCrossFilterEnabled, filters: reportCrossFilters, crossFilterRevision } = useGlobalFilters();
+    const reportCrossFilterRevision = useMemo(() => {
+        const filterKey = reportCrossFilterEnabled && filterMapHasValues(reportCrossFilters)
+            ? JSON.stringify(reportCrossFilters)
+            : '';
+        return `${crossFilterRevision}:${filterKey}`;
+    }, [crossFilterRevision, reportCrossFilterEnabled, reportCrossFilters]);
 
     // Refs for drag — NO useCallback, NO stale closures
     const dragCtx = React.useRef(null);
@@ -59,12 +144,8 @@ const BIDashboardCanvas = ({
         [isViewOnly]
     );
 
-    const cancelActiveCardDrag = React.useCallback(() => {
-        const ctx = dragCtx.current;
-        if (!ctx?.card) return;
-        if (ctx.onMove) window.removeEventListener('mousemove', ctx.onMove, true);
-        if (ctx.onUp) window.removeEventListener('mouseup', ctx.onUp, true);
-        const { card } = ctx;
+    const clearCardDragStyles = (card) => {
+        if (!card) return;
         card.style.transform = '';
         card.style.willChange = '';
         card.style.transition = '';
@@ -72,6 +153,14 @@ const BIDashboardCanvas = ({
         card.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+    };
+
+    const cancelActiveCardDrag = React.useCallback(() => {
+        const ctx = dragCtx.current;
+        if (!ctx?.card) return;
+        if (ctx.onMove) window.removeEventListener('mousemove', ctx.onMove, true);
+        if (ctx.onUp) window.removeEventListener('mouseup', ctx.onUp, true);
+        clearCardDragStyles(ctx.card);
         dragCtx.current = null;
         setDraggingGraphId(null);
     }, []);
@@ -91,11 +180,6 @@ const BIDashboardCanvas = ({
         }
     }, [graphs, resizingGraphId, isVisualPositionLocked]);
 
-    const handleChartClick = React.useCallback((graph) => {
-        setFocusedGraphId(graph?.id || null);
-        if (onDataClick) onDataClick(null);
-    }, [onDataClick]);
-
     const handleUpdate = React.useCallback((id, updates) => {
         if (onUpdateVisual) onUpdateVisual(id, updates);
     }, [onUpdateVisual]);
@@ -109,55 +193,112 @@ const BIDashboardCanvas = ({
         });
     }, []);
 
-    const hasCustomColors = React.useCallback((graph) => {
-        const opts = graph?.options || {};
-        return !!(opts.mainColor || opts.positiveColor || opts.negativeColor || opts.bgColor);
-    }, []);
-
-    const handleResetColors = React.useCallback((graph) => {
-        if (!graph?.id || !onUpdateVisual) return;
-        const opts = graph.options || {};
-        const newOptions = { ...opts };
-        delete newOptions.mainColor;
-        delete newOptions.positiveColor;
-        delete newOptions.negativeColor;
-        delete newOptions.bgColor;
-        onUpdateVisual(graph.id, { options: newOptions });
-    }, [onUpdateVisual]);
-
     const focusedGraph = React.useMemo(() => {
         if (!focusedGraphId) return null;
         return (graphs || []).find(g => g?.id === focusedGraphId) || null;
     }, [focusedGraphId, graphs]);
 
+    const quickMeasureInfo = React.useMemo(
+        () => getQuickMeasureInfo(focusedGraph),
+        [focusedGraph]
+    );
+
     const focusStats = React.useMemo(() => {
+        if (quickMeasureInfo) return null;
         const values = focusedGraph?.cached_data?.values;
         if (!values || !Array.isArray(values)) return null;
         const nums = values.map(v => parseFloat(String(v).replace(/,/g, ''))).filter(v => !isNaN(v));
         if (nums.length === 0) return null;
         const total = nums.reduce((a, b) => a + b, 0);
         return { total, avg: total / nums.length, max: Math.max(...nums), min: Math.min(...nums) };
-    }, [focusedGraph?.cached_data]);
+    }, [focusedGraph?.cached_data, quickMeasureInfo]);
 
     // --- Viz-type drag-and-drop (HTML5 DnD — kept as bonus, but click-to-add is primary) ---
+    const handleCanvasDragEnter = (e) => {
+        e.preventDefault();
+        dragCounterRef.current++;
+        if (dragCounterRef.current === 1) {
+            setIsDraggingOverCanvas(true);
+        }
+    };
     const handleCanvasDragOver = (e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
-        setIsDraggingOverCanvas(true);
     };
-    const handleCanvasDragLeave = () => setIsDraggingOverCanvas(false);
+    const handleCanvasDragLeave = (e) => {
+        e.preventDefault();
+        dragCounterRef.current--;
+        if (dragCounterRef.current <= 0) {
+            dragCounterRef.current = 0;
+            setIsDraggingOverCanvas(false);
+        }
+    };
     const handleCanvasDrop = (e) => {
         e.preventDefault();
+        dragCounterRef.current = 0;
         setIsDraggingOverCanvas(false);
         let vizType = e.dataTransfer.getData('bi/viz-type');
         if (!vizType) {
             const plain = e.dataTransfer.getData('text/plain') || '';
-            if (plain.startsWith('bi-viz:')) vizType = plain.slice(7);
+            if (plain.startsWith('bi-viz:')) {
+                vizType = plain.slice(7);
+            } else if (plain) {
+                // Drop a plain field or measure name on the canvas
+                const gridEl = e.currentTarget.querySelector('.bi-visuals-grid') || e.currentTarget;
+                let dropPosition = null;
+                if (gridEl) {
+                    const r = gridEl.getBoundingClientRect();
+                    dropPosition = {
+                        x: e.clientX - r.left - 120,
+                        y: e.clientY - r.top - 60
+                    };
+                }
+                if (onDropFieldOnCanvas) {
+                    onDropFieldOnCanvas(plain, dropPosition);
+                }
+                return;
+            }
         }
         if (vizType && onAddVisual) onAddVisual(vizType);
     };
 
-    // --- Card repositioning: plain function, handlers defined inline to avoid stale closures ---
+    const CARD_DRAG_THRESHOLD = 5;
+
+    const CHART_FILTER_CLICK_SELECTOR = [
+        '.chart-category-clickable',
+        '.sc-chart-area',
+        '.chart-wrapper',
+        '.recharts-wrapper',
+        '.recharts-surface',
+        '.recharts-pie-sector',
+        '.pie-donut-slice-sector',
+        '.pie-donut-slice-cell',
+        '.recharts-bar-rectangle',
+        '.chart-bar-marks',
+        '.chart-bar-cell',
+        '.recharts-rectangle',
+        '.recharts-line-curve',
+        '.recharts-area-area',
+        '.recharts-scatter-symbol',
+        '.recharts-active-dot',
+        '.recharts-active-bar',
+    ].join(', ');
+
+    const isChartFilterClickTarget = (target) => {
+        if (!target?.closest) return false;
+        return Boolean(target.closest(CHART_FILTER_CLICK_SELECTOR));
+    };
+
+    const isInteractiveDragTarget = (target) => {
+        if (!target?.closest) return false;
+        if (isChartFilterClickTarget(target)) return true;
+        return Boolean(target.closest(
+            '.bi-resize-handle, button, a, input, textarea, select, option, [contenteditable="true"], ' +
+            '.legend-filter-inline-wrap, .legend-filter-inline-menu, .sc-controls-bar, .sc-toggle, .sc-slider-label'
+        ));
+    };
+
+    // --- Card repositioning: drag from anywhere after a small movement threshold ---
     function startCardDrag(e, graph) {
         if (isVisualPositionLocked(graph)) {
             e.preventDefault();
@@ -165,14 +306,7 @@ const BIDashboardCanvas = ({
             return;
         }
         if (e.button !== 0) return;
-        const t = e.target;
-        if (t.closest && t.closest('.bi-resize-handle')) return;
-        if (t.closest && t.closest('button, a, input, textarea, select, option, [contenteditable="true"], .legend-filter-inline-wrap, .legend-filter-inline-menu')) return;
-        if (t.closest && t.closest('.sc-chart-area, .chart-wrapper, .chart-zoom-viewport, .chart-category-clickable, .recharts-wrapper, .recharts-surface, .recharts-pie-sector, .pie-donut-slice-sector, .recharts-bar-rectangle, .chart-bar-marks')) return;
-        if (t.tagName === 'BUTTON' || t.tagName === 'A' || t.tagName === 'INPUT' || t.tagName === 'SELECT') return;
-        if (t.tagName === 'svg' || t.tagName === 'path' || t.tagName === 'g') return;
-
-        e.preventDefault();
+        if (isInteractiveDragTarget(e.target)) return;
 
         const card = e.currentTarget?.closest
             ? (e.currentTarget.closest('.bi-visual-card') || e.currentTarget)
@@ -201,28 +335,40 @@ const BIDashboardCanvas = ({
         const startX = e.clientX;
         const startY = e.clientY;
         const origOpts = { ...opts, x: baseX, y: baseY };
+        let dragStarted = false;
 
-        card.classList.add('dragging');
-        card.style.willChange = 'transform';
-        card.style.transition = 'none';
-        card.style.zIndex = '1000';
-        document.body.style.cursor = 'grabbing';
-        document.body.style.userSelect = 'none';
-
-        setDraggingGraphId(graph.id);
-        setFrontGraphId(graph.id);
-        bringGraphToFront(graph.id);
-        if (onSelectVisual) onSelectVisual(graph.id);
+        const beginDrag = () => {
+            if (dragStarted) return;
+            dragStarted = true;
+            card.classList.add('dragging');
+            card.style.willChange = 'transform';
+            card.style.transition = 'none';
+            card.style.zIndex = '1000';
+            document.body.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none';
+            setDraggingGraphId(graph.id);
+            setFrontGraphId(graph.id);
+            bringGraphToFront(graph.id);
+            if (onSelectVisual) onSelectVisual(graph.id);
+        };
 
         function onMove(ev) {
             const dx = ev.clientX - startX;
             const dy = ev.clientY - startY;
-            card.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+            if (!dragStarted) {
+                if (Math.hypot(dx, dy) < CARD_DRAG_THRESHOLD) return;
+                beginDrag();
+            }
+            ev.preventDefault();
+            card.style.transform = `translate(${dx}px, ${dy}px)`;
         }
 
         function onUp(ev) {
             window.removeEventListener('mousemove', onMove, true);
             window.removeEventListener('mouseup', onUp, true);
+            dragCtx.current = null;
+
+            if (!dragStarted) return;
 
             const dx = ev.clientX - startX;
             const dy = ev.clientY - startY;
@@ -230,13 +376,7 @@ const BIDashboardCanvas = ({
             const finalX = snap(Math.max(0, baseX + dx));
             const finalY = snap(Math.max(0, baseY + dy));
 
-            card.style.transform = '';
-            card.style.willChange = '';
-            card.style.transition = '';
-            card.style.zIndex = '';
-            card.classList.remove('dragging');
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
+            clearCardDragStyles(card);
 
             if (onUpdateVisualRef.current) {
                 const latestGraph = graphsRef.current?.find(g => g.id === graph.id);
@@ -246,6 +386,13 @@ const BIDashboardCanvas = ({
                 });
             }
             setDraggingGraphId(null);
+
+            const suppressClick = (clickEv) => {
+                clickEv.preventDefault();
+                clickEv.stopPropagation();
+            };
+            card.addEventListener('click', suppressClick, true);
+            window.setTimeout(() => card.removeEventListener('click', suppressClick, true), 0);
         }
 
         dragCtx.current = { card, graph, onMove, onUp };
@@ -407,6 +554,20 @@ const BIDashboardCanvas = ({
         return rankMap;
     }, [graphs]);
 
+    const graphsByLayer = React.useMemo(() => {
+        return [...(graphs || [])].sort((a, b) => {
+            const aOrder = Number(a?.options?.layerOrder) || 0;
+            const bOrder = Number(b?.options?.layerOrder) || 0;
+            return aOrder - bOrder;
+        });
+    }, [graphs]);
+
+    React.useEffect(() => {
+        if (!activeVisualId) return;
+        setFrontGraphId(activeVisualId);
+        bringGraphToFront(activeVisualId);
+    }, [activeVisualId, bringGraphToFront]);
+
     const canvasMinWidth = React.useMemo(() => {
         const baseWidth = 1200;
         const rightMostEdge = (graphs || []).reduce((maxEdge, graph) => {
@@ -439,7 +600,10 @@ const BIDashboardCanvas = ({
             style={{
                 backgroundColor: reportBackgroundColor || '#ffffff'
             }}
-            onDragOver={handleCanvasDragOver} onDragLeave={handleCanvasDragLeave} onDrop={handleCanvasDrop}
+            onDragEnter={handleCanvasDragEnter}
+            onDragOver={handleCanvasDragOver}
+            onDragLeave={handleCanvasDragLeave}
+            onDrop={handleCanvasDrop}
             onMouseDown={(e) => {
                 if (e.target === e.currentTarget && onDeselectVisual) onDeselectVisual();
             }}
@@ -491,7 +655,11 @@ const BIDashboardCanvas = ({
                 <div className="bi-focus-overlay">
                     <div className="bi-focus-content">
                         <div className="bi-focus-header">
-                            <div className="bi-focus-title-group"><h2 className="bi-focus-title">{focusedGraph.options?.title || `${focusedGraph.graph_type.toUpperCase()} Analysis`}</h2></div>
+                            <div className="bi-focus-header-left">
+                                <h2 className="bi-focus-title">
+                                    {formatVisualDisplayTitle(focusedGraph.options?.title, focusedGraph.graph_type)}
+                                </h2>
+                            </div>
                             {focusStats && (
                                 <div className="bi-focus-kpi-bar">
                                     <div className="bi-focus-kpi-item"><span className="bi-focus-kpi-label">TOTAL</span><span className="bi-focus-kpi-value">{Math.round(focusStats.total).toLocaleString()}</span></div>
@@ -502,26 +670,29 @@ const BIDashboardCanvas = ({
                             )}
                             <div className="bi-focus-header-right">
                                 <div ref={setFocusZoomToolbarHost} className="bi-focus-zoom-slot" />
-                                <div className="bi-focus-stats">
-                                    <div className="bi-focus-stat-item"><label>Field</label><span>{focusedGraph.x_axis}</span></div>
-                                    {focusedGraph.y_axis && <div className="bi-focus-stat-item"><label>Metric</label><span>{focusedGraph.y_axis}</span></div>}
-                                </div>
-                                <button className="bi-focus-close" onClick={() => setFocusedGraphId(null)}>✕</button>
+                                <span className="bi-focus-toolbar-divider" aria-hidden="true" />
+                                <button type="button" className="bi-focus-close" onClick={() => setFocusedGraphId(null)} aria-label="Close focus view">✕</button>
                             </div>
                         </div>
-                        <div className="bi-focus-body">
+                        <div className="bi-focus-body" data-visual-id={focusedGraph.id}>
                             <DynamicChart
-                                key={`${fileId}-${focusedGraph.id}-${reportTheme}-focus`}
+                                key={`${fileId}-${focusedGraph.id}-${reportTheme}-focus-${reportCrossFilterRevision}`}
                                 fileId={fileId}
                                 graphDefinition={focusedGraph}
+                                reportCrossFilterRevision={reportCrossFilterRevision}
+                                measures={measures}
+                                schema={schema}
                                 isExporting={isExporting}
                                 hideInternalStats={true}
                                 hideChartTitle={true}
                                 showZoomControls={true}
                                 zoomToolbarContainer={focusZoomToolbarHost}
                                 reportTheme={reportTheme}
+                                reportNoFill={reportNoFill}
                                 isViewOnly={isViewOnly}
                                 onSelectVisual={onSelectVisual}
+                                onApplyCrossFilter={onApplyCrossFilter}
+                                onClearCrossFilter={onClearCrossFilter}
                                 onUpdate={(u) => handleUpdate(focusedGraph.id, u)}
                             />
                         </div>
@@ -535,28 +706,41 @@ const BIDashboardCanvas = ({
                     minWidth: `${canvasMinWidth}px`,
                     minHeight: `${canvasMinHeight}px`
                 }}
+                onDragEnter={handleCanvasDragEnter}
                 onDragOver={handleCanvasDragOver}
+                onDragLeave={handleCanvasDragLeave}
                 onDrop={handleCanvasDrop}
                 onMouseDown={(e) => {
                     if (e.target === e.currentTarget && onDeselectVisual) onDeselectVisual();
                 }}
             >
-                {Array.isArray(graphs) && graphs.length > 0 ? graphs.map((graph, index) => {
+                {Array.isArray(graphsByLayer) && graphsByLayer.length > 0 ? graphsByLayer.map((graph, index) => {
                     const opts = graph.options || {};
                     const dragging = draggingGraphId === graph.id;
                     const layerRank = layerRankById[graph.id] || 1;
                     const isMetricCard = graph.graph_type === 'metricCard';
                     const isKpiCard = graph.graph_type === 'kpiCard';
+                    const isTextBox = graph.graph_type === 'text';
+                    const isPieDonut = graph.graph_type === 'pie' || graph.graph_type === 'donut';
                     const defaultCardSize = isMetricCard
                         ? METRIC_CARD_DEFAULT_SIZE
-                        : (isKpiCard ? KPI_CARD_DEFAULT_SIZE : { width: 520, height: 360 });
+                        : (isKpiCard
+                            ? KPI_CARD_DEFAULT_SIZE
+                            : (isTextBox
+                                ? TEXT_BOX_DEFAULT_SIZE
+                                : (isPieDonut ? PIE_DONUT_DEFAULT_SIZE : { width: 520, height: 360 })));
 
                     // ── Card Styling options ────────────────────────────────
-                    const cardBgBase = opts.cardBgColor || opts.bgColor || '#ffffff';
+                    const isNoFill = reportNoFill || opts.noFill === true;
+                    const cardBgBase = isNoFill
+                        ? 'transparent'
+                        : (opts.cardBgColor || opts.bgColor || '#ffffff');
                     const cardOpacity = opts.cardBgOpacity !== undefined ? opts.cardBgOpacity / 100 : 1;
-                    const cardBgStyle = opts.cardBgGradient
-                        ? `linear-gradient(135deg, ${cardBgBase}, ${opts.cardBgGradientEnd || '#f1f5f9'})`
-                        : cardBgBase;
+                    const cardBgStyle = isNoFill
+                        ? 'transparent'
+                        : (opts.cardBgGradient
+                            ? `linear-gradient(135deg, ${cardBgBase}, ${opts.cardBgGradientEnd || '#f1f5f9'})`
+                            : cardBgBase);
 
                     const shadowMap = {
                         low:    '0 2px 8px rgba(0,0,0,0.08)',
@@ -565,17 +749,21 @@ const BIDashboardCanvas = ({
                     };
                     // When border is removed, also suppress the selected-state pink box-shadow
                     // unless the user has explicitly turned on their own shadow
-                    const cardShadow = opts.cardShadowEnabled
-                        ? shadowMap[opts.cardShadowIntensity || 'medium']
-                        : opts.cardBorderRemoved
-                            ? 'none'   // kills .bi-visual-card.selected glow too
-                            : undefined;
+                    const cardShadow = isNoFill && !opts.cardShadowEnabled
+                        ? 'none'
+                        : (opts.cardShadowEnabled
+                            ? shadowMap[opts.cardShadowIntensity || 'medium']
+                            : opts.cardBorderRemoved
+                                ? 'none'   // kills .bi-visual-card.selected glow too
+                                : undefined);
 
-                    const cardBorder = opts.cardBorderEnabled
-                        ? `${opts.cardBorderWidth ?? 1}px solid ${opts.cardBorderColor || '#7a1e3a'}`
-                        : opts.cardBorderRemoved
-                            ? 'none'
-                            : undefined;
+                    const cardBorder = isNoFill && !opts.cardBorderEnabled
+                        ? 'none'
+                        : (opts.cardBorderEnabled
+                            ? `${opts.cardBorderWidth ?? 1}px solid ${opts.cardBorderColor || '#cbd5e1'}`
+                            : opts.cardBorderRemoved
+                                ? 'none'
+                                : undefined);
                     const cardRadius = opts.cardBorderEnabled
                         ? `${opts.cardBorderRadius ?? 8}px`
                         : undefined;
@@ -601,18 +789,20 @@ const BIDashboardCanvas = ({
                         ...(cardShadow !== undefined ? { boxShadow: cardShadow } : {}),
                         zIndex: dragging
                             ? 60
-                            : (frontGraphId === graph.id
-                                ? 50
-                                : (activeVisualId === graph.id
-                                    ? Math.max(40, layerRank)
+                            : (activeVisualId === graph.id && !isViewOnly
+                                ? Math.max(52, layerRank + 10)
+                                : (frontGraphId === graph.id
+                                    ? 50
                                     : layerRank)),
                     };
                     const defaultAriaName =
-                        graph.options?.title ||
-                        (graph.graph_type === 'text' ? 'Text box' : `${String(graph.graph_type || 'chart').replace(/_/g, ' ')} visual`);
+                        formatVisualDisplayTitle(graph.options?.title, graph.graph_type)
+                        || (graph.graph_type === 'text' ? 'Text box' : 'Visual');
                     const ariaLabel = (opts.altText && String(opts.altText).trim()) || defaultAriaName;
 
                     const cardLocked = isVisualPositionLocked(graph);
+                    const showCardHeader = activeVisualId === graph.id && !graph.options?.noHeader;
+                    const legendHeaderSlotId = null;
 
                     return (
                         <div
@@ -620,10 +810,31 @@ const BIDashboardCanvas = ({
                             data-visual-id={graph.id}
                             role="article"
                             aria-label={ariaLabel}
-                            className={`bi-card bi-visual-card ${activeVisualId === graph.id && !isViewOnly ? 'selected' : ''} ${resizingGraphId === graph.id ? 'resizing' : ''} ${graph.graph_type === 'text' ? 'bi-is-text' : ''} ${isKpiCard ? 'bi-visual-card--kpi' : ''} ${isMetricCard ? 'bi-visual-card--metric' : ''} ${isViewOnly ? 'view-only' : ''}${cardLocked ? ' bi-visual-card--locked' : ''}`}
+                            className={`bi-card bi-visual-card ${activeVisualId === graph.id && !isViewOnly ? 'selected' : ''} ${resizingGraphId === graph.id ? 'resizing' : ''} ${graph.graph_type === 'text' ? 'bi-is-text' : ''} ${isKpiCard ? 'bi-visual-card--kpi' : ''} ${isMetricCard ? 'bi-visual-card--metric' : ''} ${isViewOnly ? 'view-only' : ''}${cardLocked ? ' bi-visual-card--locked' : ''}${isNoFill ? ' bi-visual-card--no-fill' : ''}`}
+                            onDragOver={(e) => {
+                                if (!isViewOnly) {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = 'copy';
+                                }
+                            }}
+                            onDrop={(e) => {
+                                if (isViewOnly) return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const droppedText = e.dataTransfer.getData('text/plain') || '';
+                                if (droppedText && !droppedText.startsWith('bi-viz:') && onDropFieldOnVisual) {
+                                    onDropFieldOnVisual(droppedText, graph.id);
+                                }
+                            }}
                             onMouseDownCapture={(e) => {
                                 if (e.button !== 0) return;
+                                if (e.target?.closest?.('.sc-controls-bar, .sc-toggle, .sc-slider-label, input[type="checkbox"], input[type="range"]')) {
+                                    return;
+                                }
+                                // Let bar/slice/path clicks apply cross-filter on the first click; selection runs inside DynamicChart.
+                                if (isChartFilterClickTarget(e.target)) return;
                                 if (onSelectVisual) onSelectVisual(graph.id);
+                                bringGraphToFront(graph.id);
                             }}
                             onMouseDown={(e) => {
                                 if (!cardLocked) startCardDrag(e, graph);
@@ -631,94 +842,69 @@ const BIDashboardCanvas = ({
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (frontGraphId !== graph.id) setFrontGraphId(graph.id);
+                                bringGraphToFront(graph.id);
                                 if (onSelectVisual) onSelectVisual(graph.id);
                             }}
                             style={cardStyles}
                         >
-                            {(!graph.options?.noHeader || activeVisualId === graph.id) && (
+                            {showCardHeader && (
                                 <div className="bi-visual-header">
                                     <div className="bi-header-left">
-                                        {!isViewOnly && !cardLocked && (
-                                            <div
-                                                className="bi-drag-handle"
-                                                onMouseDown={(e) => startCardDrag(e, graph)}
-                                                title="Drag visualization"
-                                            >
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="9" cy="19" r="2"/><circle cx="15" cy="5" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="15" cy="19" r="2"/></svg>
-                                            </div>
-                                        )}
-                                        {!isViewOnly && cardLocked && (
-                                            <span className="bi-visual-lock-badge" title="Locked — select visual and use View → Unlock">
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-                                            </span>
-                                        )}
-                                        <span className="bi-visual-title">{graph.options?.title || (graph.graph_type === 'text' ? '' : `${graph.graph_type.toUpperCase()}: ${graph.x_axis}`)}</span>
-                                    </div>
-                                    <div className="bi-header-actions">
-                                        {hasCustomColors(graph) && !isViewOnly && (
-                                            <button
-                                                className="bi-reset-chart-colors-btn"
-                                                onMouseDown={(e)=>{e.stopPropagation();}}
-                                                onClick={(e)=>{e.stopPropagation();handleResetColors(graph);}}
-                                                title="Reset colors"
-                                            >
-                                                ↺
-                                            </button>
-                                        )}
-                                        {!isViewOnly && (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    className={`bi-delete-btn${deleteConfirmGraphId === graph.id ? ' bi-delete-confirming' : ''}`}
-                                                    onMouseDown={(e)=>{e.stopPropagation();}}
-                                                    onClick={(e)=>{
-                                                        e.stopPropagation();
-                                                        if (deleteConfirmGraphId === graph.id) {
-                                                            onDeleteVisual(graph.id);
-                                                            setDeleteConfirmGraphId(null);
-                                                        } else {
-                                                            setDeleteConfirmGraphId(graph.id);
-                                                            setTimeout(() => {
-                                                                setDeleteConfirmGraphId((prev) => (prev === graph.id ? null : prev));
-                                                            }, 3500);
-                                                        }
-                                                    }}
-                                                    title={deleteConfirmGraphId === graph.id ? 'Click again to confirm delete' : 'Delete visualization'}
-                                                    aria-label={deleteConfirmGraphId === graph.id ? 'Confirm delete visualization' : 'Delete visualization'}
+                                        <div className="bi-visual-title-row">
+                                            {!isViewOnly && !cardLocked && (
+                                                <div
+                                                    className="bi-drag-handle"
+                                                    title="Drag visualization"
                                                 >
-                                                    {deleteConfirmGraphId === graph.id ? (
-                                                        <span className="bi-delete-confirm-text">Delete?</span>
-                                                    ) : (
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                                                    )}
-                                                </button>
-                                                {onAddToReport && (
-                                                    <button className="bi-add-report-btn" onMouseDown={(e)=>{e.stopPropagation();}} onClick={(e)=>{e.stopPropagation();onAddToReport(graph);}} title="Add to Report">
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                                    </button>
-                                                )}
-                                            </>
-                                        )}
-                                        <button className="bi-expand-btn" onMouseDown={(e)=>{e.stopPropagation();}} onClick={(e)=>{e.stopPropagation();handleChartClick(graph);}} title="Expand">
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-                                        </button>
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="9" cy="19" r="2"/><circle cx="15" cy="5" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="15" cy="19" r="2"/></svg>
+                                                </div>
+                                            )}
+                                            {!isViewOnly && cardLocked && (
+                                                <span className="bi-visual-lock-badge" title="Locked — select visual and use View → Unlock">
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+                                                </span>
+                                            )}
+                                            <span className="bi-visual-title">
+                                                {graph.graph_type === 'text'
+                                                    ? (graph.options?.title || '')
+                                                    : formatVisualDisplayTitle(graph.options?.title, graph.graph_type)}
+                                            </span>
+                                        </div>
                                     </div>
+                                    {legendHeaderSlotId && (
+                                        <div className="bi-visual-header-center">
+                                            <div
+                                                id={legendHeaderSlotId}
+                                                className="bi-visual-header-legend-slot"
+                                                aria-hidden={false}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             )}
-                            <div className="bi-visual-content">
+                            <div
+                                className={`bi-visual-content${isNoFill ? ' bi-visual-content--no-fill' : ''}`}
+                            >
                                 <DynamicChart
-                                    key={`${fileId}-${graph.id}-${reportTheme}`}
+                                    key={`${fileId}-${graph.id}-${reportTheme}-${reportCrossFilterRevision}`}
                                     fileId={fileId}
                                     graphDefinition={graph}
+                                    legendHeaderSlotId={legendHeaderSlotId}
+                                    reportCrossFilterRevision={reportCrossFilterRevision}
+                                    measures={measures}
+                                    schema={schema}
                                     selection={selection}
                                     isExporting={isExporting}
                                     hideInternalStats={true}
                                     hideChartTitle={true}
                                     showZoomControls={false}
                                     reportTheme={reportTheme}
+                                    reportNoFill={reportNoFill}
                                     isDragging={dragging || resizingGraphId === graph.id}
                                     isViewOnly={isViewOnly}
                                     onSelectVisual={onSelectVisual}
+                                    onApplyCrossFilter={onApplyCrossFilter}
+                                    onClearCrossFilter={onClearCrossFilter}
                                     onUpdate={(u) => handleUpdate(graph.id, u)}
                                     onClick={(payload) => {
                                         if (graph.graph_type === 'button') {

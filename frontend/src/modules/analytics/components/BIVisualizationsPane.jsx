@@ -1,18 +1,47 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import './BIVisualizationsPane.css';
 import {
     AlignLeft, BarChart3, Layers, LineChart, TrendingUp, PieChart, CircleDashed,
     LayoutGrid, ScatterChart, ArrowDownRight, Filter, Radar, Aperture, Compass,
     Hash, Grid, Circle, Sliders, Share2, Map as MapIcon, Sun, Boxes, Layout, Table, BarChart, CreditCard,
-    Gauge, GitCommit, GitCompare, Copy, ChevronDown, Palette, Settings2, Code
+    Gauge, GitCommit, GitCompare, Copy, ChevronDown, Palette, Settings2, Code,
+    AlertTriangle, SlidersHorizontal, Maximize2, Plus, Trash2, RotateCcw, Tag
 } from 'lucide-react';
+import { formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 import useVisualRegistryStore from '../store/visualRegistryStore';
 import BIVisualGeneralPane from './BIVisualGeneralPane';
+import BITableFormatSection from './BITableFormatSection';
 import { VIBRANT_PALETTE } from '../constants/chartPalette';
+import { DEFAULT_TABLE_STYLE, mergeTableStyle } from '../utils/tableStyleUtils';
 
-const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, schema, dataset, isFieldsRefreshing = false }) => {
+const COLOR_OVERRIDE_KEYS = ['mainColor', 'positiveColor', 'negativeColor', 'bgColor', 'noFill'];
+
+const hasCustomColors = (graph) => {
+    const opts = graph?.options || {};
+    return !!(opts.mainColor || opts.positiveColor || opts.negativeColor || opts.bgColor || opts.noFill);
+};
+
+const BIVisualizationsPane = ({
+    selectedVisual,
+    onUpdateVisual,
+    onAddVisual,
+    onDeleteVisual,
+    onAddToReport,
+    onExpandVisual,
+    onResetVisualColors,
+    schema,
+    dataset,
+    isFieldsRefreshing = false,
+    reportNoFill = false,
+    onApplyReportNoFill,
+    onApplyReportBackgroundFill,
+    onApplyReportBackgroundReset,
+    isViewOnly = false,
+    measures = []
+}) => {
     const [viewMode, setViewMode] = useState('build'); // 'build', 'format', 'general'
     const [isSelectorCollapsed, setIsSelectorCollapsed] = useState(false);
+    const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
 
     const { installedVisuals } = useVisualRegistryStore();
 
@@ -60,6 +89,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
     }, [installedVisuals]);
 
     const currentOptions = selectedVisual?.options || {};
+    const isDefaultBackground = !reportNoFill && !currentOptions.bgColor && !currentOptions.noFill;
     const AGGREGATION_OPTIONS = ['NONE', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX'];
 
     /** Phone / ID-style columns should not default to SUM. */
@@ -131,6 +161,9 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
     }, [dataset, schema]);
 
     const isNumericColumn = (columnName) => {
+        if (Array.isArray(measures) && measures.some(m => m.name === columnName)) {
+            return true;
+        }
         const tRaw = getColumnType(columnName);
         if (!tRaw) return numericGuessMap.get(columnName) === true;
 
@@ -199,8 +232,12 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
         [schemaFields]
     );
     const measureCandidates = useMemo(
-        () => schemaFields.filter(isNumericColumn),
-        [schemaFields]
+        () => {
+            const numericFields = schemaFields.filter(isNumericColumn);
+            const customNames = Array.isArray(measures) ? measures.map(m => m.name) : [];
+            return Array.from(new Set([...numericFields, ...customNames]));
+        },
+        [schemaFields, measures]
     );
 
     const mapEngineAggToUi = (agg) => {
@@ -264,7 +301,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
     };
 
     const applyFieldWellChanges = (nextDimensions, nextMeasures) => {
-        if (!selectedVisual) return;
+        if (!selectedVisual || isViewOnly || !onUpdateVisual) return;
         const displayDimensions = (nextDimensions || []).map((d) => (d === null || d === undefined ? '' : String(d)));
         const displayMeasures = (nextMeasures || [])
             .filter((m) => m && typeof m === 'object')
@@ -334,11 +371,12 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
     };
 
     const handleMeasureColumnChange = (index, value) => {
-        const { dimensions, measures } = getFieldWellState();
-        const next = [...measures];
+        const { dimensions, measures: currentMeasures } = getFieldWellState();
+        const next = [...currentMeasures];
+        const isCustom = Array.isArray(measures) && measures.some(m => m.name === value);
         const prevAgg = next[index]?.aggregation;
-        const suggested = suggestAggregationForColumn(value);
-        const keepAgg = prevAgg && AGGREGATION_OPTIONS.includes(String(prevAgg).toUpperCase());
+        const suggested = isCustom ? 'NONE' : suggestAggregationForColumn(value);
+        const keepAgg = !isCustom && prevAgg && AGGREGATION_OPTIONS.includes(String(prevAgg).toUpperCase());
         next[index] = {
             ...(next[index] || { aggregation: 'SUM' }),
             column: value || '',
@@ -381,81 +419,284 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
     const firstSelectedMeasure = (selectedMeasures || []).find((m) => m?.column && isNumericColumn(m.column)) || null;
 
     const handleOptionUpdate = (key, value) => {
-        if (!selectedVisual) return;
+        if (!selectedVisual || isViewOnly || !onUpdateVisual) return;
         const newOptions = { ...currentOptions, [key]: value };
         onUpdateVisual(selectedVisual.id, { options: newOptions });
     };
 
+    const handleTableStyleUpdate = (partial, replace = false) => {
+        if (!selectedVisual || isViewOnly || !onUpdateVisual) return;
+        const nextStyle = replace
+            ? { ...DEFAULT_TABLE_STYLE, ...partial }
+            : mergeTableStyle({ ...currentOptions.tableStyle, ...partial });
+        onUpdateVisual(selectedVisual.id, {
+            options: { ...currentOptions, tableStyle: nextStyle },
+        });
+    };
+
+    const isTableVisual = selectedVisual?.graph_type === 'table';
+
     const handleTypeChange = (type) => {
+        if (isViewOnly || !onAddVisual) return;
         onAddVisual(type);
     };
 
     const handleTypeDragStart = (e, type) => {
-        if (!type) return;
+        if (!type || isViewOnly) return;
         e.dataTransfer.effectAllowed = 'copyMove';
         e.dataTransfer.setData('bi/viz-type', type);
         e.dataTransfer.setData('application/x-bi-viz-type', type);
         e.dataTransfer.setData('text/plain', `bi-viz:${type}`);
     };
 
+    useEffect(() => {
+        setDeleteConfirmPending(false);
+    }, [selectedVisual?.id]);
+
+    useEffect(() => {
+        if (!deleteConfirmPending) return undefined;
+        const timer = window.setTimeout(() => setDeleteConfirmPending(false), 3500);
+        return () => window.clearTimeout(timer);
+    }, [deleteConfirmPending]);
+
+    const handleDeleteClick = () => {
+        if (!selectedVisual || !onDeleteVisual) return;
+        if (!deleteConfirmPending) {
+            setDeleteConfirmPending(true);
+            return;
+        }
+        onDeleteVisual(selectedVisual.id);
+        setDeleteConfirmPending(false);
+    };
+
+    const handleResetColorsClick = () => {
+        if (!selectedVisual) return;
+        if (onResetVisualColors) {
+            onResetVisualColors(selectedVisual);
+            return;
+        }
+        if (!onUpdateVisual) return;
+        const clears = COLOR_OVERRIDE_KEYS.reduce((acc, key) => {
+            if (selectedVisual.options?.[key] != null && selectedVisual.options[key] !== '') {
+                acc[key] = null;
+            }
+            return acc;
+        }, {});
+        if (!Object.keys(clears).length) return;
+        onUpdateVisual(selectedVisual.id, { options: clears });
+    };
+
+    const selectedVisualTitle = selectedVisual
+        ? (selectedVisual.graph_type === 'text'
+            ? (selectedVisual.options?.title || 'Text box')
+            : formatVisualDisplayTitle(selectedVisual.options?.title, selectedVisual.graph_type))
+        : '';
+
+    const isPieDonutVisual = selectedVisual && ['pie', 'donut'].includes(selectedVisual.graph_type);
+    const pieOptions = selectedVisual?.options || {};
+    const pieShowLabels = pieOptions.pieShowLabels !== false;
+    const pieShowAll = pieOptions.pieShowAll !== false;
+    const pieGroupOthers = pieOptions.pieGroupOthers !== false;
+    const pieTopN = typeof pieOptions.pieTopN === 'number' ? pieOptions.pieTopN : 10;
+    const pieCategoryCount = Array.isArray(selectedVisual?.cached_data?.labels)
+        ? selectedVisual.cached_data.labels.length
+        : 100;
+
+    const patchPieOptions = (patch) => {
+        if (!selectedVisual || isViewOnly || !onUpdateVisual) return;
+        onUpdateVisual(selectedVisual.id, {
+            options: { ...pieOptions, ...patch },
+        });
+    };
+
+    const handlePieShowAllToggle = (checked) => {
+        patchPieOptions({
+            pieShowAll: checked,
+            ...(checked ? { pieGroupOthers: false, pieLabelSide: 'all' } : { pieLabelSide: 'right' }),
+        });
+    };
+
     return (
-        <div className="bi-pane-view">
-            <div className="bi-pane-header bi-pane-header--viz">
-                <span className="bi-pane-title">Visualizations</span>
-                <button
-                    type="button"
-                    className={`bi-pane-toggle-btn ${isSelectorCollapsed ? 'collapsed' : ''}`}
-                    onClick={() => setIsSelectorCollapsed(!isSelectorCollapsed)}
-                    title={isSelectorCollapsed ? 'Expand chart types' : 'Collapse chart types'}
-                    aria-expanded={!isSelectorCollapsed}
-                    aria-label={isSelectorCollapsed ? 'Expand chart types' : 'Collapse chart types'}
-                >
-                    <ChevronDown size={14} />
-                </button>
+        <div className={`bi-pane-view bi-pane-view--viz${isViewOnly ? ' bi-pane-view--view-only' : ''}`}>
+            <div className="bi-viz-pane-top">
+                <div className="bi-pane-header bi-pane-header--viz">
+                    <span className="bi-pane-title">Visualizations</span>
+                    <button
+                        type="button"
+                        className={`bi-pane-toggle-btn ${isSelectorCollapsed ? 'collapsed' : ''}`}
+                        onClick={() => setIsSelectorCollapsed(!isSelectorCollapsed)}
+                        title={isSelectorCollapsed ? 'Expand chart types' : 'Collapse chart types'}
+                        aria-expanded={!isSelectorCollapsed}
+                        aria-label={isSelectorCollapsed ? 'Expand chart types' : 'Collapse chart types'}
+                    >
+                        <ChevronDown size={14} />
+                    </button>
+                </div>
+
+                <div className={`bi-viz-selector-container ${isSelectorCollapsed ? 'collapsed' : ''}`}>
+                    <div className="bi-viz-selector-grid" role="listbox" aria-label="Chart types">
+                        {visualTypes.map(v => (
+                            <button
+                                type="button"
+                                key={v.type}
+                                role="option"
+                                aria-selected={selectedVisual?.graph_type === v.type}
+                                className={`bi-viz-type ${selectedVisual?.graph_type === v.type ? 'active' : ''}`}
+                                title={v.label}
+                                draggable={!isViewOnly}
+                                onDragStart={(e) => handleTypeDragStart(e, v.type)}
+                                onClick={() => handleTypeChange(v.type)}
+                                disabled={isViewOnly}
+                            >
+                                {v.icon}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="bi-viz-sub-tabs" role="tablist" aria-label="Visual configuration">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === 'build'}
+                        className={`bi-viz-sub-tab ${viewMode === 'build' ? 'active' : ''}`}
+                        onClick={() => setViewMode('build')}
+                        title="Visualization"
+                    >
+                        <Layout size={15} strokeWidth={1.75} />
+                        <span className="bi-viz-sub-tab-label">Visual</span>
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === 'format'}
+                        className={`bi-viz-sub-tab ${viewMode === 'format' ? 'active' : ''}`}
+                        onClick={() => setViewMode('format')}
+                        title="Format"
+                    >
+                        <Palette size={15} strokeWidth={1.75} />
+                        <span className="bi-viz-sub-tab-label">Format</span>
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === 'general'}
+                        className={`bi-viz-sub-tab ${viewMode === 'general' ? 'active' : ''}`}
+                        onClick={() => setViewMode('general')}
+                        title="Analytics"
+                    >
+                        <SlidersHorizontal size={15} strokeWidth={1.75} />
+                        <span className="bi-viz-sub-tab-label">Analytics</span>
+                    </button>
+                </div>
             </div>
 
-            <div className={`bi-viz-selector-container ${isSelectorCollapsed ? 'collapsed' : ''}`}>
-                <div className="bi-viz-selector-grid">
-                    {visualTypes.map(v => (
-                        <div
-                            key={v.type}
-                            className={`bi-viz-type ${selectedVisual?.graph_type === v.type ? 'active' : ''}`}
-                            title={v.label}
-                            draggable={true}
-                            onDragStart={(e) => handleTypeDragStart(e, v.type)}
-                            onClick={() => handleTypeChange(v.type)}
-                        >
-                            {v.icon}
+            <div className="bi-viz-pane-body">
+                {selectedVisual && (
+                    <div className="bi-visual-actions bi-visual-actions--compact">
+                        <div className="bi-visual-actions-meta">
+                            <span className="bi-visual-actions-label">Selected</span>
+                            <span className="bi-visual-actions-name" title={selectedVisualTitle}>{selectedVisualTitle}</span>
                         </div>
-                    ))}
-                </div>
-            </div>
+                        <div className="bi-visual-actions-row">
+                            {onExpandVisual && (
+                                <button
+                                    type="button"
+                                    className="bi-visual-action-btn bi-visual-action-btn--expand"
+                                    onClick={() => onExpandVisual(selectedVisual)}
+                                    aria-label="Expand visual"
+                                >
+                                    <Maximize2 size={15} strokeWidth={2} />
+                                    <span className="bi-visual-action-tip">Expand</span>
+                                </button>
+                            )}
+                            {!isViewOnly && onAddToReport && (
+                                <button
+                                    type="button"
+                                    className="bi-visual-action-btn bi-visual-action-btn--add"
+                                    onClick={() => onAddToReport(selectedVisual)}
+                                    aria-label="Add to report"
+                                >
+                                    <Plus size={15} strokeWidth={2} />
+                                    <span className="bi-visual-action-tip">Add to report</span>
+                                </button>
+                            )}
+                            {!isViewOnly && onDeleteVisual && (
+                                <button
+                                    type="button"
+                                    className={`bi-visual-action-btn bi-visual-action-btn--delete${deleteConfirmPending ? ' confirming' : ''}`}
+                                    onClick={handleDeleteClick}
+                                    aria-label={deleteConfirmPending ? 'Confirm delete' : 'Delete visual'}
+                                >
+                                    <Trash2 size={15} strokeWidth={2} />
+                                    <span className="bi-visual-action-tip">{deleteConfirmPending ? 'Confirm?' : 'Delete'}</span>
+                                </button>
+                            )}
+                            {!isViewOnly && hasCustomColors(selectedVisual) && (
+                                <button
+                                    type="button"
+                                    className="bi-visual-action-btn bi-visual-action-btn--reset"
+                                    onClick={handleResetColorsClick}
+                                    aria-label="Reset colors"
+                                >
+                                    <RotateCcw size={15} strokeWidth={2} />
+                                    <span className="bi-visual-action-tip">Reset colors</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
 
-            <div className="bi-viz-sub-tabs">
-                <div
-                    className={`bi-viz-sub-tab ${viewMode === 'build' ? 'active' : ''}`}
-                    onClick={() => setViewMode('build')}
-                    title="Build Visual"
-                >
-                    <Layout size={14} />
-                </div>
-                <div
-                    className={`bi-viz-sub-tab ${viewMode === 'format' ? 'active' : ''}`}
-                    onClick={() => setViewMode('format')}
-                    title="Format Visual"
-                >
-                    <Palette size={14} />
-                </div>
-                <div
-                    className={`bi-viz-sub-tab ${viewMode === 'general' ? 'active' : ''}`}
-                    onClick={() => setViewMode('general')}
-                    title="General Settings"
-                >
-                    <Settings2 size={14} />
-                </div>
-            </div>
+                {isPieDonutVisual && !isViewOnly && (
+                    <div className="bi-pie-chart-options bi-pie-chart-options--compact">
+                        <span className="bi-pie-chart-options-label">Pie</span>
+                        <div className="bi-pie-chart-options-toggles">
+                            <label className="bi-pie-chart-toggle-icon" aria-label="Labels">
+                                <input
+                                    type="checkbox"
+                                    checked={pieShowLabels}
+                                    onChange={(e) => patchPieOptions({ pieShowLabels: e.target.checked })}
+                                />
+                                <Tag size={14} strokeWidth={2} />
+                                <span className="bi-pie-chart-toggle-tip">Labels</span>
+                            </label>
+                            <label className={`bi-pie-chart-toggle-icon${pieShowAll ? ' is-disabled' : ''}`} aria-label="Group Others">
+                                <input
+                                    type="checkbox"
+                                    checked={pieGroupOthers}
+                                    disabled={pieShowAll}
+                                    onChange={(e) => patchPieOptions({ pieGroupOthers: e.target.checked })}
+                                />
+                                <Layers size={14} strokeWidth={2} />
+                                <span className="bi-pie-chart-toggle-tip">Group Others</span>
+                            </label>
+                            <label className="bi-pie-chart-toggle-icon" aria-label="Show All">
+                                <input
+                                    type="checkbox"
+                                    checked={pieShowAll}
+                                    onChange={(e) => handlePieShowAllToggle(e.target.checked)}
+                                />
+                                <LayoutGrid size={14} strokeWidth={2} />
+                                <span className="bi-pie-chart-toggle-tip">Show All</span>
+                            </label>
+                        </div>
+                        {!pieShowAll && (
+                            <label className="bi-pie-chart-topn bi-pie-chart-topn--compact" title={`Top ${pieTopN}`}>
+                                <span className="bi-pie-chart-topn-val">{pieTopN}</span>
+                                <input
+                                    type="range"
+                                    min={3}
+                                    max={Math.min(100, Math.max(3, pieCategoryCount))}
+                                    step={1}
+                                    value={Math.min(pieTopN, pieCategoryCount)}
+                                    onChange={(e) => patchPieOptions({ pieTopN: Number(e.target.value) })}
+                                    aria-label="Top N slices"
+                                />
+                            </label>
+                        )}
+                    </div>
+                )}
 
-            <div className="bi-pane-scroll">
                 {viewMode === 'build' && selectedVisual?.graph_type === 'power_app' && (
                     <div className="bi-build-area">
                         <div className="bi-build-bucket">
@@ -562,24 +803,12 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                 {viewMode === 'build' && selectedVisual?.graph_type !== 'influencers' && selectedVisual?.graph_type !== 'power_app' && (
                     <div className="bi-build-area">
                         {isFieldsRefreshing && (
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                padding: '8px 10px',
-                                marginBottom: 10,
-                                border: '1px solid #e2e8f0',
-                                borderRadius: 8,
-                                background: '#f8fafc',
-                                color: '#334155',
-                                fontSize: 12,
-                                fontWeight: 600,
-                            }}>
-                                <div className="bi-loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-                                Refreshing Dimensions/Measures…
+                            <div className="bi-viz-info-banner">
+                                <div className="bi-loading-spinner bi-viz-info-spinner" />
+                                <span>Refreshing Dimensions/Measures…</span>
                             </div>
                         )}
-                        <div className="bi-build-bucket">
+                        <section className="bi-viz-section bi-build-bucket">
                             <div className="bi-fieldwell-header">
                                 <span className="bi-bucket-label">Dimensions</span>
                                 <button type="button" className="bi-fieldwell-add-btn" onClick={addDimension} disabled={!selectedVisual || isFieldsRefreshing}>
@@ -596,23 +825,19 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                     >
                                         <option value="">Select dimension</option>
                                         {dimensionCandidates.map((field) => (
-                                            <option key={field} value={field}>
-                                                {field}
-                                            </option>
+                                            <option key={field} value={field}>{field}</option>
                                         ))}
                                     </select>
-                                    <button type="button" className="bi-fieldwell-remove-btn" onClick={() => removeDimension(idx)}>
-                                        x
-                                    </button>
+                                    <button type="button" className="bi-fieldwell-remove-btn" onClick={() => removeDimension(idx)}>×</button>
                                 </div>
                             ))}
                             {selectedDimensions.length === 0 && (
-                                <div className="bi-bucket-drop">
+                                <div className="bi-fieldwell-dropzone">
                                     <span className="bi-bucket-placeholder">Add categorical/date/numeric fields for grouping</span>
                                 </div>
                             )}
-                        </div>
-                        <div className="bi-build-bucket">
+                        </section>
+                        <section className="bi-viz-section bi-build-bucket">
                             <div className="bi-fieldwell-header">
                                 <span className="bi-bucket-label">Measures</span>
                                 <button type="button" className="bi-fieldwell-add-btn" onClick={addMeasure} disabled={!selectedVisual || isFieldsRefreshing}>
@@ -627,52 +852,67 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                         onChange={(e) => handleMeasureColumnChange(idx, e.target.value)}
                                         disabled={!selectedVisual || isFieldsRefreshing}
                                     >
-                                        <option value="">Select numeric column</option>
+                                        <option value="">Select measure</option>
                                         {measureCandidates.map((field) => (
-                                            <option key={field} value={field}>
-                                                {field}
-                                            </option>
+                                            <option key={field} value={field}>{field}</option>
                                         ))}
                                     </select>
-                                    <select
-                                        className="bi-bucket-select bi-agg-select"
-                                        value={measure.aggregation || 'SUM'}
-                                        onChange={(e) => handleMeasureAggregationChange(idx, e.target.value)}
-                                        disabled={!selectedVisual || isFieldsRefreshing}
-                                    >
-                                        {AGGREGATION_OPTIONS.map((agg) => (
-                                            <option key={agg} value={agg} title={agg === 'NONE' ? 'Count rows per category (do not sum values)' : undefined}>
-                                                {agg === 'NONE' ? 'NONE' : agg}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <button type="button" className="bi-fieldwell-remove-btn" onClick={() => removeMeasure(idx)}>
-                                        x
-                                    </button>
+                                    {Array.isArray(measures) && measures.some(m => m.name === measure.column) ? (
+                                        <select
+                                            className="bi-bucket-select bi-agg-select"
+                                            value="NONE"
+                                            disabled={true}
+                                        >
+                                            <option value="NONE">Calculated</option>
+                                        </select>
+                                    ) : (
+                                        <select
+                                            className="bi-bucket-select bi-agg-select"
+                                            value={measure.aggregation || 'SUM'}
+                                            onChange={(e) => handleMeasureAggregationChange(idx, e.target.value)}
+                                            disabled={!selectedVisual || isFieldsRefreshing}
+                                        >
+                                            {AGGREGATION_OPTIONS.map((agg) => (
+                                                <option key={agg} value={agg}>{agg === 'NONE' ? 'NONE' : agg}</option>
+                                            ))}
+                                        </select>
+                                    )}
+                                    <button type="button" className="bi-fieldwell-remove-btn" onClick={() => removeMeasure(idx)}>×</button>
                                 </div>
                             ))}
                             {selectedMeasures.length === 0 && (
-                                <div className="bi-bucket-drop">
-                                    <span className="bi-bucket-placeholder">Numeric: SUM/AVG/MIN/MAX/COUNT · NONE = row count (use for Phone/ID)</span>
+                                <div className="bi-fieldwell-dropzone">
+                                    <span className="bi-bucket-placeholder">Add numeric fields with SUM/AVG/MIN/MAX/COUNT</span>
                                 </div>
                             )}
-                        </div>
-                        <div className="bi-axis-mapping-panel">
+                        </section>
+                        <section className="bi-axis-mapping-card" aria-label="Axis mapping">
                             <div className="bi-axis-mapping-title">Axis Mapping</div>
-                            <div className="bi-axis-mapping-line">X-axis: {firstSelectedDimension || 'Not assigned'}</div>
-                            <div className="bi-axis-mapping-line">
-                                Y-axis: {firstSelectedMeasure
-                                    ? (firstSelectedMeasure.aggregation === 'NONE'
-                                        ? `Record count by ${firstSelectedDimension || 'category'}`
-                                        : `${firstSelectedMeasure.aggregation}(${firstSelectedMeasure.column})`)
-                                    : 'Not assigned'}
+                            <div className="bi-axis-mapping-rows">
+                                <div className="bi-axis-mapping-row">
+                                    <span className="bi-axis-mapping-key">X-axis</span>
+                                    <span className="bi-axis-mapping-val">{firstSelectedDimension || 'Not assigned'}</span>
+                                </div>
+                                <div className="bi-axis-mapping-row">
+                                    <span className="bi-axis-mapping-key">Y-axis</span>
+                                    <span className="bi-axis-mapping-val">
+                                        {firstSelectedMeasure
+                                            ? (firstSelectedMeasure.aggregation === 'NONE'
+                                                ? `Record count by ${firstSelectedDimension || 'category'}`
+                                                : `${firstSelectedMeasure.aggregation}(${firstSelectedMeasure.column})`)
+                                            : 'Not assigned'}
+                                    </span>
+                                </div>
                             </div>
-                        </div>
+                        </section>
                         {validationErrors.length > 0 && (
-                            <div className="bi-fieldwell-validation">
-                                {validationErrors.map((err) => (
-                                    <div key={err} className="bi-fieldwell-validation-item">{err}</div>
-                                ))}
+                            <div className="bi-viz-alert" role="alert">
+                                <AlertTriangle size={15} className="bi-viz-alert-icon" aria-hidden />
+                                <div className="bi-viz-alert-content">
+                                    {validationErrors.map((err) => (
+                                        <p key={err} className="bi-viz-alert-text">{err}</p>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -697,7 +937,16 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                     </div>
                                 </div>
 
-                                {selectedVisual.graph_type === 'waterfall' ? (
+                                {isTableVisual && (
+                                    <BITableFormatSection
+                                        selectedVisual={selectedVisual}
+                                        currentOptions={currentOptions}
+                                        onUpdateTableStyle={handleTableStyleUpdate}
+                                        isViewOnly={isViewOnly}
+                                    />
+                                )}
+
+                                {!isTableVisual && selectedVisual.graph_type === 'waterfall' ? (
                                     <>
                                         <div className="bi-format-section">
                                             <div className="bi-format-section-header">Increase Color</div>
@@ -726,7 +975,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                             </div>
                                         </div>
                                     </>
-                                ) : (
+                                ) : !isTableVisual ? (
                                     <div className="bi-format-section">
                                         <div className="bi-format-section-header">Chart Color</div>
                                         <div className="bi-color-grid">
@@ -740,70 +989,29 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                             ))}
                                         </div>
                                     </div>
-                                )}
+                                ) : null}
 
                                 <div className="bi-format-section">
-                                    <div className="bi-format-toggle-item">
-                                        <span>Show X-Axis</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={currentOptions.showXAxis !== false}
-                                            onChange={(e) => handleOptionUpdate('showXAxis', e.target.checked)}
-                                        />
-                                    </div>
-                                    <div className="bi-format-toggle-item">
-                                        <span>Show Y-Axis</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={currentOptions.showYAxis !== false}
-                                            onChange={(e) => handleOptionUpdate('showYAxis', e.target.checked)}
-                                        />
-                                    </div>
-                                    <div className="bi-format-toggle-item">
-                                        <span>Data Labels</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={currentOptions.showDataLabels !== false}
-                                            onChange={(e) => handleOptionUpdate('showDataLabels', e.target.checked)}
-                                        />
-                                    </div>
-                                    <div className="bi-format-toggle-item">
-                                        <span>Axis Titles</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={currentOptions.showAxisTitles !== false}
-                                            onChange={(e) => handleOptionUpdate('showAxisTitles', e.target.checked)}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="bi-format-section">
-                                    <div className="bi-format-section-header">Axis Titles</div>
-                                    <label className="bi-format-field">
-                                        <span>X-axis title</span>
-                                        <input
-                                            type="text"
-                                            className="bi-format-input bi-format-input--compact"
-                                            placeholder={firstSelectedDimension || selectedVisual?.x_axis || 'Category'}
-                                            value={currentOptions.xLabel ?? ''}
-                                            onChange={(e) => handleOptionUpdate('xLabel', e.target.value)}
-                                        />
-                                    </label>
-                                    <label className="bi-format-field">
-                                        <span>Y-axis title</span>
-                                        <input
-                                            type="text"
-                                            className="bi-format-input bi-format-input--compact"
-                                            placeholder={firstSelectedMeasure ? `${firstSelectedMeasure.aggregation}(${firstSelectedMeasure.column})` : (selectedVisual?.y_axis || 'Value')}
-                                            value={currentOptions.yLabel ?? ''}
-                                            onChange={(e) => handleOptionUpdate('yLabel', e.target.value)}
-                                        />
-                                    </label>
-                                </div>
-
-                                <div className="bi-format-section">
-                                    <div className="bi-format-section-header">Background Color</div>
+                                    <div className="bi-format-section-header">Background Color (All Visuals)</div>
                                     <div className="bi-bg-palette-grid">
+                                        <button
+                                            type="button"
+                                            className={`bi-bg-swatch bi-bg-swatch--no-fill ${reportNoFill ? 'selected' : ''}`}
+                                            title="No Fill — apply to all visuals"
+                                            aria-label="No Fill — apply to all visuals"
+                                            onClick={() => onApplyReportNoFill?.()}
+                                        >
+                                            <span className="bi-bg-swatch-no-fill-label">No Fill</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`bi-bg-swatch bi-bg-swatch--none ${isDefaultBackground ? 'selected' : ''}`}
+                                            title="None — restore default background on all visuals"
+                                            aria-label="None — restore default background on all visuals"
+                                            onClick={() => onApplyReportBackgroundReset?.()}
+                                        >
+                                            <span className="bi-bg-swatch-none-label">None</span>
+                                        </button>
                                         {[
                                             /* Neutrals */
                                             '#ffffff', '#f8fafc', '#f1f5f9', '#e2e8f0', '#cbd5e1',
@@ -816,24 +1024,86 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                         ].map(color => (
                                             <div
                                                 key={color}
-                                                className={`bi-bg-swatch ${currentOptions.bgColor === color ? 'selected' : ''}`}
+                                                className={`bi-bg-swatch ${!reportNoFill && !isDefaultBackground && currentOptions.bgColor === color ? 'selected' : ''}`}
                                                 style={{ background: color }}
                                                 title={color}
-                                                onClick={() => handleOptionUpdate('bgColor', color)}
+                                                onClick={() => onApplyReportBackgroundFill?.(color)}
                                             />
                                         ))}
                                     </div>
-                                    {/* Custom color picker */}
                                     <div className="bi-bg-custom-row">
                                         <span className="bi-bg-custom-label">Custom</span>
                                         <input
                                             type="color"
                                             className="bi-cs-color-input"
-                                            value={currentOptions.bgColor || '#ffffff'}
-                                            onChange={(e) => handleOptionUpdate('bgColor', e.target.value)}
+                                            value={reportNoFill || isDefaultBackground ? '#ffffff' : (currentOptions.bgColor || '#ffffff')}
+                                            onChange={(e) => onApplyReportBackgroundFill?.(e.target.value)}
                                         />
                                     </div>
                                 </div>
+
+                                {!isTableVisual && (
+                                    <>
+                                        <div className="bi-format-section">
+                                            <div className="bi-format-toggle-item">
+                                                <span>Show X-Axis</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={currentOptions.showXAxis !== false}
+                                                    onChange={(e) => handleOptionUpdate('showXAxis', e.target.checked)}
+                                                />
+                                            </div>
+                                            <div className="bi-format-toggle-item">
+                                                <span>Show Y-Axis</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={currentOptions.showYAxis !== false}
+                                                    onChange={(e) => handleOptionUpdate('showYAxis', e.target.checked)}
+                                                />
+                                            </div>
+                                            <div className="bi-format-toggle-item">
+                                                <span>Data Labels</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={currentOptions.showDataLabels !== false}
+                                                    onChange={(e) => handleOptionUpdate('showDataLabels', e.target.checked)}
+                                                />
+                                            </div>
+                                            <div className="bi-format-toggle-item">
+                                                <span>Axis Titles</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={currentOptions.showAxisTitles !== false}
+                                                    onChange={(e) => handleOptionUpdate('showAxisTitles', e.target.checked)}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="bi-format-section">
+                                            <div className="bi-format-section-header">Axis Titles</div>
+                                            <label className="bi-format-field">
+                                                <span>X-axis title</span>
+                                                <input
+                                                    type="text"
+                                                    className="bi-format-input bi-format-input--compact"
+                                                    placeholder={firstSelectedDimension || selectedVisual?.x_axis || 'Category'}
+                                                    value={currentOptions.xLabel ?? ''}
+                                                    onChange={(e) => handleOptionUpdate('xLabel', e.target.value)}
+                                                />
+                                            </label>
+                                            <label className="bi-format-field">
+                                                <span>Y-axis title</span>
+                                                <input
+                                                    type="text"
+                                                    className="bi-format-input bi-format-input--compact"
+                                                    placeholder={firstSelectedMeasure ? `${firstSelectedMeasure.aggregation}(${firstSelectedMeasure.column})` : (selectedVisual?.y_axis || 'Value')}
+                                                    value={currentOptions.yLabel ?? ''}
+                                                    onChange={(e) => handleOptionUpdate('yLabel', e.target.value)}
+                                                />
+                                            </label>
+                                        </div>
+                                    </>
+                                )}
 
                                 {/* ── CARD STYLING ─────────────────────────────────────────── */}
                                 <div className="bi-format-section bi-card-styling-section">
@@ -889,7 +1159,7 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                                                     <input
                                                         type="color"
                                                         className="bi-cs-color-input"
-                                                        value={currentOptions.cardBorderColor || '#7a1e3a'}
+                                                        value={currentOptions.cardBorderColor || '#cbd5e1'}
                                                         onChange={(e) => handleOptionUpdate('cardBorderColor', e.target.value)}
                                                     />
                                                 </div>
@@ -954,7 +1224,10 @@ const BIVisualizationsPane = ({ selectedVisual, onUpdateVisual, onAddVisual, sch
                 )}
 
                 {viewMode === 'general' && (
-                    <BIVisualGeneralPane selectedVisual={selectedVisual} onUpdateVisual={onUpdateVisual} />
+                    <BIVisualGeneralPane
+                        selectedVisual={selectedVisual}
+                        onUpdateVisual={isViewOnly ? undefined : onUpdateVisual}
+                    />
                 )}
             </div>
         </div>

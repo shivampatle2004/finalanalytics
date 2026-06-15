@@ -28,17 +28,49 @@ export const VIBRANT_PALETTE = [
     '#C026D3',
 ];
 
-/** Stable category color from a theme/report palette (same value → same color). */
+/** Whether the visual uses a transparent chart/card fill (no background layer). */
+export const isChartNoFill = (options = {}, reportNoFill = false) => (
+    reportNoFill === true || options?.noFill === true
+);
+
+/** Resolve chart/container fill from saved visual options. */
+export const resolveChartFillBackground = (options = {}, fallback = '#ffffff', reportNoFill = false) => {
+    if (isChartNoFill(options, reportNoFill)) return 'transparent';
+    if (typeof options?.bgColor === 'string' && options.bgColor.trim()) return options.bgColor;
+    return fallback;
+};
+
+/** Category color by position in the theme palette (unique per index when count ≤ palette length). */
 export const getCategoryColor = (value, fallbackIndex = 0, palette = VIBRANT_PALETTE) => {
     const colors = Array.isArray(palette) && palette.length > 0 ? palette : VIBRANT_PALETTE;
-    if (value === undefined || value === null) {
-        return colors[Math.abs(fallbackIndex) % colors.length];
+    const idx = Math.abs(Number(fallbackIndex) || 0);
+    return colors[idx % colors.length];
+};
+
+/**
+ * Assigns each category a distinct palette color in first-seen order.
+ * Re-used across chart series and legend chips for the same visual.
+ */
+export const buildCategoryColorMap = (orderedNames, palette = VIBRANT_PALETTE) => {
+    const colors = Array.isArray(palette) && palette.length > 0 ? palette : VIBRANT_PALETTE;
+    const map = new Map();
+    const seen = new Set();
+    let colorIndex = 0;
+    for (const raw of orderedNames || []) {
+        const name = String(raw ?? '').trim();
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        map.set(name, colors[colorIndex % colors.length]);
+        colorIndex += 1;
     }
-    let hash = 0;
-    const str = String(value);
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
+    return map;
+};
+
+/** Resolve color by category name map, then fall back to index. */
+export const resolveCategoryColor = (colorMap, value, fallbackIndex = 0, palette = VIBRANT_PALETTE) => {
+    const key = String(value ?? '').trim();
+    if (colorMap instanceof Map && key && colorMap.has(key)) {
+        return colorMap.get(key);
     }
-    return colors[Math.abs(hash) % colors.length];
+    return getCategoryColor(value, fallbackIndex, palette);
 };

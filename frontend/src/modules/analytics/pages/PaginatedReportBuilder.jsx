@@ -24,7 +24,7 @@ const PaginatedReportBuilder = ({ userId }) => {
     ],
     parameters: []
   });
-  
+
   const [selectedElementId, setSelectedElementId] = useState(null);
   const [activePageIndex, setActivePageIndex] = useState(0);
   const [isDesignMode, setIsDesignMode] = useState(!isAutoPreview);
@@ -37,7 +37,7 @@ const PaginatedReportBuilder = ({ userId }) => {
   useEffect(() => {
     if (reportId) {
       console.log('🔍 [Report Load] Fetching report:', reportId);
-      fetch(`/api/reports/${reportId}`)
+      fetch(`/analytics/api/reports/${reportId}`)
         .then(res => {
           console.log('🔍 [Report Load] Response status:', res.status);
           return res.json();
@@ -50,7 +50,7 @@ const PaginatedReportBuilder = ({ userId }) => {
             hasElements: data.layout_json?.pages?.some(p => p.elements?.length > 0),
             chartsWithData: data.layout_json?.pages?.flatMap(p => p.elements || []).filter(e => e.type === 'chart' && e.config?.chart_data).length
           });
-          
+
           if (data) {
             const layoutPages = data.layout_json.pages || [];
             setReport({
@@ -58,7 +58,7 @@ const PaginatedReportBuilder = ({ userId }) => {
               pages: layoutPages,
               parameters: data.parameters || []
             });
-            
+
             // Load inline data from config
             const initialElementData = {};
             let chartDataLoadCount = 0;
@@ -78,7 +78,7 @@ const PaginatedReportBuilder = ({ userId }) => {
             });
             console.log(`📊 [Report Load] Loaded ${chartDataLoadCount} charts with inline data`);
             setElementData(initialElementData);
-            
+
             // Trigger initial data load for elements with vault_id
             const vaultElements = Object.keys(data.datasource_mapping || {});
             console.log(`🔗 [Report Load] Found ${vaultElements.length} elements with vault mappings`);
@@ -101,7 +101,7 @@ const PaginatedReportBuilder = ({ userId }) => {
 
   // Fetch DataVault items on mount
   useEffect(() => {
-    fetch('/api/vault/items')
+    fetch('/analytics/api/vault/items')
       .then(res => res.json())
       .then(data => {
         if (data.items) setVaultItems(data.items);
@@ -114,16 +114,16 @@ const PaginatedReportBuilder = ({ userId }) => {
     // Skip if inline data exists
     const el = report.pages.flatMap(p => p.elements).find(e => e.id === elementId);
     if (el && el.config.chart_data) return;
-    
+
     if (!config.vault_id) return;
-    
+
     try {
       const payload = { element_id: elementId };
       if (reportIdToFetch === 'temp-id') {
         payload.config = config;
       }
 
-      const res = await fetch(`/api/reports/${reportIdToFetch}/render-data`, {
+      const res = await fetch(`/analytics/api/reports/${reportIdToFetch}/render-data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -154,7 +154,7 @@ const PaginatedReportBuilder = ({ userId }) => {
   };
 
   const getPlaceholderContent = (type) => {
-    switch(type) {
+    switch (type) {
       case 'text': return <div className="placeholder-text">Click to edit text</div>;
       case 'chart': return <div className="placeholder-chart">📊 Chart Visual</div>;
       case 'table': return <div className="placeholder-table">📅 Table Visual</div>;
@@ -165,7 +165,7 @@ const PaginatedReportBuilder = ({ userId }) => {
 
   const renderElementContent = (el) => {
     const data = elementData[el.id];
-    
+
     if (el.type === 'text') {
       return <div className="report-text-content">{el.config.text || 'Double click to edit text'}</div>;
     }
@@ -174,7 +174,7 @@ const PaginatedReportBuilder = ({ userId }) => {
       const chartType = el.config.chart_type || 'bar';
       const chartData = el.config.chart_data || data?.rows || [];
       const columns = el.config.chart_data ? [] : data?.columns || []; // For inline data, columns not needed
-      
+
       if (!chartData || chartData.length === 0) {
         if (el.config.vault_id && !el.config.chart_data) {
           return <div className="loading-spinner">Loading data...</div>;
@@ -182,53 +182,54 @@ const PaginatedReportBuilder = ({ userId }) => {
           return getPlaceholderContent(el.type);
         }
       }
-      
+
       const stringCol = el.config.xField || columns.find(c => c.type && (c.type.includes('String') || c.type.includes('Utf8')))?.name || columns[0]?.name || 'name';
       const numCol = el.config.yField || columns.find(c => c.type && (c.type.includes('Int') || c.type.includes('Float') || c.type.includes('numeric')))?.name || columns[1]?.name || columns[0]?.name || 'value';
-      
+
       const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+
+      const chartW = (el.style?.w || 300) - 20;
+      const chartH = (el.style?.h || 200) - 20;
 
       return (
         <div className="report-chart-box" style={{ width: '100%', height: '100%', minHeight: '200px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            {chartType === 'line' ? (
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey={stringCol} />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey={numCol} stroke="#8884d8" activeDot={{ r: 8 }} />
-              </LineChart>
-            ) : chartType === 'pie' ? (
-              <PieChart>
-                <Tooltip />
-                <Legend />
-                <Pie data={chartData} dataKey={numCol} nameKey={stringCol} cx="50%" cy="50%" outerRadius={80} fill="#8884d8" label>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
-            ) : chartType === 'area' ? (
-              <AreaChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey={stringCol} />
-                <YAxis />
-                <Tooltip />
-                <Area type="monotone" dataKey={numCol} stroke="#8884d8" fill="#8884d8" />
-              </AreaChart>
-            ) : (
-              <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey={stringCol} />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey={numCol} fill="#8884d8" />
-              </BarChart>
-            )}
-          </ResponsiveContainer>
+          {chartType === 'line' ? (
+            <LineChart width={chartW} height={chartH} data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey={stringCol} />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey={numCol} stroke="#8884d8" activeDot={{ r: 8 }} />
+            </LineChart>
+          ) : chartType === 'pie' ? (
+            <PieChart width={chartW} height={chartH}>
+              <Tooltip />
+              <Legend />
+              <Pie data={chartData} dataKey={numCol} nameKey={stringCol} cx="50%" cy="50%" outerRadius={Math.min(chartW, chartH) * 0.35} fill="#8884d8" label>
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+            </PieChart>
+          ) : chartType === 'area' ? (
+            <AreaChart width={chartW} height={chartH} data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey={stringCol} />
+              <YAxis />
+              <Tooltip />
+              <Area type="monotone" dataKey={numCol} stroke="#8884d8" fill="#8884d8" />
+            </AreaChart>
+          ) : (
+            <BarChart width={chartW} height={chartH} data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey={stringCol} />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey={numCol} fill="#8884d8" />
+            </BarChart>
+          )}
         </div>
       );
     }
@@ -239,7 +240,7 @@ const PaginatedReportBuilder = ({ userId }) => {
 
     if (el.type === 'table') {
       return (
-        <PaginatedTable 
+        <PaginatedTable
           columns={data.columns}
           rows={data.rows}
           rowsPerPage={20}
@@ -293,7 +294,7 @@ const PaginatedReportBuilder = ({ userId }) => {
   const handleSave = async () => {
     setIsSaving(true);
     console.log('💾 [Report Save] Starting save...', { reportId, isUpdate: !!reportId });
-    
+
     // Save current data with elements
     let chartsEmbedded = 0;
     let chartsSkipped = 0;
@@ -321,7 +322,7 @@ const PaginatedReportBuilder = ({ userId }) => {
         })
       }))
     };
-    
+
     const datasource_mapping = {};
     let vaultMappings = 0;
     layout.pages.forEach(p => {
@@ -332,14 +333,14 @@ const PaginatedReportBuilder = ({ userId }) => {
         }
       });
     });
-    
+
     const payloadSize = JSON.stringify({
       name: report.name,
       layout: layout,
       datasource_mapping: datasource_mapping,
       user_id: userId
     }).length / 1024;
-    
+
     console.log('💾 [Report Save] Prepared payload:', {
       chartsEmbedded,
       chartsAlreadyHavingData: chartsSkipped,
@@ -351,7 +352,7 @@ const PaginatedReportBuilder = ({ userId }) => {
       const endpoint = '/api/reports' + (reportId ? `/${reportId}` : '');
       const method = reportId ? 'PUT' : 'POST';
       console.log(`💾 [Report Save] Sending ${method} to ${endpoint}`);
-      
+
       const res = await fetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -362,10 +363,10 @@ const PaginatedReportBuilder = ({ userId }) => {
           user_id: userId
         })
       });
-      
+
       console.log(`💾 [Report Save] Response status: ${res.status}`);
       const data = await res.json();
-      
+
       if (!res.ok) {
         console.error('❌ [Report Save] API returned error:', data);
         alert(`❌ Save failed: ${data.detail || 'Unknown error'}`);
@@ -389,7 +390,7 @@ const PaginatedReportBuilder = ({ userId }) => {
     }
     setIsExporting(true);
     try {
-      const res = await fetch(`/api/reports/${reportId}/export/pdf`, { method: 'POST' });
+      const res = await fetch(`/analytics/api/reports/${reportId}/export/pdf`, { method: 'POST' });
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -421,26 +422,26 @@ const PaginatedReportBuilder = ({ userId }) => {
     <div className={`report-builder ${isDesignMode ? 'design-mode' : 'preview-mode'}`}>
       <div className="builder-toolbar">
         <div className="toolbar-left">
-          <input 
-            type="text" 
-            className="report-name-input" 
-            value={report.name} 
-            onChange={(e) => setReport({...report, name: e.target.value})} 
+          <input
+            type="text"
+            className="report-name-input"
+            value={report.name}
+            onChange={(e) => setReport({ ...report, name: e.target.value })}
           />
         </div>
         <div className="toolbar-right">
           <button onClick={() => setIsDesignMode(!isDesignMode)}>
             {isDesignMode ? '👁️ Preview' : '✏️ Design'}
           </button>
-          <button 
-            className="primary" 
+          <button
+            className="primary"
             onClick={handleSave}
             disabled={isSaving}
           >
             {isSaving ? '⏳ Saving...' : '💾 Save Report'}
           </button>
-          <button 
-            className="secondary" 
+          <button
+            className="secondary"
             onClick={handleExport}
             disabled={isExporting}
           >
@@ -459,12 +460,12 @@ const PaginatedReportBuilder = ({ userId }) => {
             <button onClick={() => addElement('chart')}><span>Chart</span></button>
             <button onClick={() => addElement('image')}><span>Image</span></button>
           </div>
-          
+
           <div className="page-navigation">
             <h3>Pages</h3>
             {report.pages.map((page, idx) => (
-              <div 
-                key={page.id} 
+              <div
+                key={page.id}
                 className={`page-item ${activePageIndex === idx ? 'active' : ''}`}
                 onClick={() => setActivePageIndex(idx)}
               >
@@ -479,9 +480,9 @@ const PaginatedReportBuilder = ({ userId }) => {
         <div className="builder-canvas">
           <div className="canvas-scroller">
             {report.pages.map((page, idx) => (
-              <ReportPage 
-                key={page.id} 
-                pageNumber={idx + 1} 
+              <ReportPage
+                key={page.id}
+                pageNumber={idx + 1}
                 settings={page.settings}
               >
                 {page.elements.map(el => (
@@ -503,7 +504,7 @@ const PaginatedReportBuilder = ({ userId }) => {
         {/* Right Sidebar - Properties */}
         <div className="builder-sidebar right">
           <h3>Properties</h3>
-          <PropertiesPanel 
+          <PropertiesPanel
             element={report.pages.flatMap(p => p.elements).find(el => el.id === selectedElementId)}
             vaultItems={vaultItems}
             onUpdate={updateElement}

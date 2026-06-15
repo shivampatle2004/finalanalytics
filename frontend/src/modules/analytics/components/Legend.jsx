@@ -1,15 +1,15 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useGlobalFilters } from '../context/FilterContext';
-import { VIBRANT_PALETTE, getCategoryColor } from '../constants/chartPalette';
+import { VIBRANT_PALETTE, getCategoryColor, resolveCategoryColor } from '../constants/chartPalette';
 import './Legend.css';
 
 /**
  * Returns a stable color for a given string value using VIBRANT_PALETTE.
  * Same value → same color across all charts in the session.
  */
-export const getLegendColor = (value, fallbackIndex = 0, palette = VIBRANT_PALETTE) =>
-    getCategoryColor(value, fallbackIndex, palette);
+export const getLegendColor = (value, fallbackIndex = 0, palette = VIBRANT_PALETTE, colorMap = null) =>
+    resolveCategoryColor(colorMap, value, fallbackIndex, palette);
 
 /**
  * Legend component props:
@@ -17,7 +17,7 @@ export const getLegendColor = (value, fallbackIndex = 0, palette = VIBRANT_PALET
  * - values    {string[]} Unique values to display (e.g. ["Electronics","Furniture"])
  * - layout    {'horizontal'|'vertical'}
  * - maxItems  {number}   Cap how many items are shown before collapsing (default 12)
- * - variant   {'chips'|'dropdown'}  Compact dropdown saves chart space when drilling
+ * - variant   {'chips'|'compact'|'dropdown'|'inline'}  compact = color dot rail (minimal)
  */
 export const truncateLabel = (val, max = 52) => {
     const str = String(val ?? '');
@@ -132,8 +132,10 @@ const LegendFilterMenu = ({
     headerTitle,
     outsideCloseSkipRef,
     colorPalette,
+    categoryColorMap = null,
 }) => {
     const menuPalette = colorPalette || VIBRANT_PALETTE;
+    const menuColor = (val, idx) => getLegendColor(val, idx, menuPalette, categoryColorMap);
     const [search, setSearch] = useState('');
     const internalSkipRef = useRef(false);
     const skipRef = outsideCloseSkipRef || internalSkipRef;
@@ -227,7 +229,7 @@ const LegendFilterMenu = ({
                             >
                                 <span
                                     className="legend-filter-inline-dot"
-                                    style={{ background: getLegendColor(val, idx, menuPalette) }}
+                                    style={{ background: menuColor(val, idx) }}
                                     aria-hidden
                                 />
                                 <span className="legend-filter-inline-option-text">{truncateLabel(val, 36)}</span>
@@ -345,8 +347,11 @@ const Legend = ({
     onFilterClear,
     /** Report theme palette for chip colors */
     colorPalette,
+    /** Per-visual map: category name → unique theme color */
+    categoryColorMap = null,
 }) => {
     const chipPalette = colorPalette || VIBRANT_PALETTE;
+    const chipColor = (val, idx) => getLegendColor(val, idx, chipPalette, categoryColorMap);
     const { filters, toggleFilter, clearDimensionFilters, setFilters } = useGlobalFilters();
 
     const [overflowPickerOpen, setOverflowPickerOpen] = useState(false);
@@ -371,7 +376,7 @@ const Legend = ({
 
     const activeFilters = isVisualScope
         ? getVisualDimensionFilterValues(visualFilters, dimension)
-        : (filters[dimension] || []);
+        : (Array.isArray(filters?.[dimension]) ? filters[dimension] : []);
 
     const hasActiveFilter = activeFilters.length > 0;
 
@@ -381,7 +386,7 @@ const Legend = ({
 
     const applyDropdownFilter = (next) => {
         if (isVisualScope) {
-            onVisualFilterChange?.(dimension, next);
+            onVisualFilterChange?.(dimension, next, next === '__all__' ? 'toggle' : 'set');
             return;
         }
         if (!next || next === '__all__') {
@@ -462,11 +467,110 @@ const Legend = ({
 
     const isSelected = (val) => !hasActiveFilter || activeFilters.includes(val);
 
-    /** Slicer-style: one category at a time; click again or Clear restores all. */
+    if (variant === 'compact') {
+        const COMPACT_DOT_CAP = 6;
+        const compactVisible = uniqueValues.slice(0, COMPACT_DOT_CAP);
+        const compactHidden = Math.max(0, uniqueValues.length - compactVisible.length);
+
+        const applyChipFilter = (val) => {
+            const isFiltered = activeFilters.includes(val);
+            if (isVisualScope) {
+                onVisualFilterChange?.(dimension, val, 'toggle');
+                return;
+            }
+            if (isFiltered) {
+                clearScopeFilters();
+            } else {
+                setFilters((prev) => ({ ...prev, [dimension]: [val] }));
+            }
+        };
+
+        const openOverflowPicker = (e) => {
+            e?.stopPropagation?.();
+            e?.preventDefault?.();
+            overflowSkipCloseRef.current = true;
+            setOverflowPickerOpen(true);
+        };
+
+        return (
+            <div ref={legendWrapRef} className="legend-compact-rail" role="group" aria-label={`Legend for ${dimension}`}>
+                <div className="legend-compact-dots">
+                    {compactVisible.map((val, idx) => {
+                        const color = chipColor(val, idx);
+                        const isFiltered = activeFilters.includes(val);
+                        const dimmed = hasActiveFilter && !isFiltered;
+                        return (
+                            <span
+                                key={val}
+                                className={`legend-compact-item${isFiltered ? ' is-filtered' : ''}${dimmed ? ' is-dimmed' : ''}`}
+                            >
+                                <button
+                                    type="button"
+                                    className="legend-compact-dot"
+                                    style={{ backgroundColor: color, color }}
+                                    onClick={() => applyChipFilter(val)}
+                                    title={isFiltered ? `Clear filter: ${val}` : val}
+                                    aria-label={isFiltered ? `Clear filter: ${val}` : `Filter by ${val}`}
+                                    aria-pressed={isFiltered}
+                                />
+                            </span>
+                        );
+                    })}
+                    {compactHidden > 0 && (
+                        <button
+                            ref={overflowBtnRef}
+                            type="button"
+                            className="legend-compact-more"
+                            onClick={openOverflowPicker}
+                            aria-expanded={overflowPickerOpen}
+                            aria-haspopup="listbox"
+                            title={`Show all ${uniqueValues.length} categories — filter`}
+                        >
+                            +{compactHidden} more
+                        </button>
+                    )}
+                </div>
+                <span className="legend-compact-meta">
+                    {hasActiveFilter
+                        ? `${activeFilters.length} filtered`
+                        : `${uniqueValues.length} ${uniqueValues.length === 1 ? 'category' : 'categories'}`}
+                </span>
+                {hasActiveFilter && (
+                    <button
+                        type="button"
+                        className="legend-compact-clear"
+                        onClick={clearScopeFilters}
+                        title="Clear filter"
+                    >
+                        Clear
+                    </button>
+                )}
+                <LegendFilterMenu
+                    open={overflowPickerOpen}
+                    onClose={() => setOverflowPickerOpen(false)}
+                    wrapRef={legendWrapRef}
+                    anchorRef={overflowBtnRef}
+                    dimension={dimension}
+                    uniqueValues={uniqueValues}
+                    activeFilters={activeFilters}
+                    hasActiveFilter={hasActiveFilter}
+                    mode="toggle"
+                    onToggle={applyChipFilter}
+                    onClear={clearScopeFilters}
+                    headerTitle="Filter categories"
+                    outsideCloseSkipRef={overflowSkipCloseRef}
+                    colorPalette={chipPalette}
+                    categoryColorMap={categoryColorMap}
+                />
+            </div>
+        );
+    }
+
+    /** Toggle category filters; click again removes that value; Clear restores all. */
     const applyChipFilter = (val) => {
         const isFiltered = activeFilters.includes(val);
         if (isVisualScope) {
-            onVisualFilterChange?.(dimension, isFiltered ? '__all__' : val);
+            onVisualFilterChange?.(dimension, val, 'toggle');
             return;
         }
         if (isFiltered) {
@@ -513,7 +617,7 @@ const Legend = ({
     return (
         <div ref={legendWrapRef} style={containerStyle} role="group" aria-label={`Legend for ${dimension}`}>
             {visibleValues.map((val, idx) => {
-                const color = getLegendColor(val, idx, chipPalette);
+                const color = chipColor(val, idx);
                 const selected = isSelected(val);
                 const isFiltered = activeFilters.includes(val);
 
@@ -603,6 +707,7 @@ const Legend = ({
                 headerTitle="Filter values"
                 outsideCloseSkipRef={overflowSkipCloseRef}
                 colorPalette={chipPalette}
+                categoryColorMap={categoryColorMap}
             />
 
             {/* Clear filter button — shown only when a filter is active */}
@@ -628,4 +733,4 @@ const Legend = ({
     );
 };
 
-export default Legend;
+export default React.memo(Legend);

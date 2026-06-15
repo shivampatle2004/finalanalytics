@@ -124,6 +124,12 @@ const CONNECTORS = [
   // { id: 'r_script',  engine: null,         label: 'R script',        short: 'R',        cat: 'other', icon: Terminal, accent: '#276dc3' },
 ];
 
+function normalizeEngine(value) {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') return value.engine || value.id || '';
+  return '';
+}
+
 function categoryCounts(list) {
   const byCat = {};
   for (const c of CATEGORIES) {
@@ -196,14 +202,19 @@ const BIConnectorsModal = ({ isOpen, onClose, onConnect, userId }) => {
   }, [isOpen, handleClose]);
 
   // Fetch schema when a connector with an engine is selected
-  const openConfigPanel = useCallback(async (engine) => {
+  const openConfigPanel = useCallback(async (rawEngine) => {
+    const engine = normalizeEngine(rawEngine);
+    if (!engine) {
+      setSchemaError('Connector engine is missing.');
+      return;
+    }
     setConfigEngine(engine);
     setConfigSchema(null);
     setSchemaError(null);
     setExtractResult(null);
     setSchemaLoading(true);
     try {
-      const res = await fetch(`/api/connectors/${engine}/schema`);
+      const res = await fetch(`/analytics/api/connectors/${engine}/schema`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setConfigSchema(data.schema || data);
@@ -255,14 +266,14 @@ const BIConnectorsModal = ({ isOpen, onClose, onConnect, userId }) => {
         config: { ...values, engine_name: engine },
         output_file_name: values.output_file_name,
       };
-      const res = await fetch('/api/connectors/quick-extract', {
+      const res = await fetch('/analytics/api/connectors/quick-extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
       setExtractResult(data);
-      if (data.success) {
+      if (data.success && data.table_name) {
         // Notify parent (e.g. ETL workspace) that data was loaded
         onConnect?.({ engine, tableName: data.table_name, rowCount: data.row_count });
       }
@@ -311,9 +322,6 @@ const BIConnectorsModal = ({ isOpen, onClose, onConnect, userId }) => {
             ) : (
               <>
                 <h2 id="bi-connectors-title" className="bi-connectors-title">Get data</h2>
-                <p className="bi-connectors-subtitle">
-                  Connect to files, databases, and 35+ cloud sources
-                </p>
               </>
             )}
           </div>
@@ -358,8 +366,8 @@ const BIConnectorsModal = ({ isOpen, onClose, onConnect, userId }) => {
             )}
 
             {extractResult && (
-              <div className={`bi-extract-result ${extractResult.success ? 'success' : 'failure'}`}>
-                {extractResult.success
+              <div className={`bi-extract-result ${extractResult.success || extractResult.empty ? 'success' : 'failure'}`}>
+                {extractResult.success || extractResult.empty
                   ? <CheckCircle2 size={16} />
                   : <AlertCircle size={16} />}
                 <span>{extractResult.message}</span>

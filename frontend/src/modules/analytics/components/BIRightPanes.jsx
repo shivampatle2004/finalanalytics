@@ -5,7 +5,37 @@ import BIVisualizationsPane from './BIVisualizationsPane';
 import BIFieldsPane from './BIFieldsPane';
 import './BIRightPanes.css';
 
-const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisual, onAddVisual, isCollapsed, onToggleCollapse, measures, activeColumn, onSelectColumn, forcedActiveTab, onActiveTabChange, isFieldsRefreshing = false }) => {
+const BIRightPanes = ({
+    schema,
+    dataset,
+    fileName,
+    selectedVisual,
+    onUpdateVisual,
+    onAddVisual,
+    onUnlinkCrossFilter,
+    isCollapsed,
+    onToggleCollapse,
+    measures,
+    activeColumn,
+    onSelectColumn,
+    forcedActiveTab,
+    onActiveTabChange,
+    isFieldsRefreshing = false,
+    reportNoFill = false,
+    onApplyReportNoFill,
+    onApplyReportBackgroundFill,
+    onApplyReportBackgroundReset,
+    isViewOnly = false,
+    onEditMeasure,
+    onDuplicateMeasure,
+    onDeleteMeasure,
+    onArchiveMeasure,
+    onDeprecateMeasure,
+    onDeleteVisual,
+    onAddToReport,
+    onExpandVisual,
+    onResetVisualColors,
+}) => {
     const [activeTab, setActiveTab] = useState('visualizations'); // 'filters', 'visualizations', 'fields'
     const currentTab = forcedActiveTab || activeTab;
 
@@ -64,13 +94,15 @@ const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisua
                 </div>
             </div>
 
-            <div className="bi-pane-content">
+            <div className={`bi-pane-content${currentTab === 'visualizations' ? ' bi-pane-content--viz' : ''}`}>
                 {currentTab === 'filters' && (
                     <BIFiltersPane
                         selectedVisual={selectedVisual}
                         schema={schema}
                         dataset={dataset}
                         onUpdateVisual={onUpdateVisual}
+                        onUnlinkCrossFilter={onUnlinkCrossFilter}
+                        isViewOnly={isViewOnly}
                     />
                 )}
                 {currentTab === 'visualizations' && (
@@ -78,9 +110,19 @@ const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisua
                         selectedVisual={selectedVisual}
                         onUpdateVisual={onUpdateVisual}
                         onAddVisual={onAddVisual}
+                        onDeleteVisual={onDeleteVisual}
+                        onAddToReport={onAddToReport}
+                        onExpandVisual={onExpandVisual}
+                        onResetVisualColors={onResetVisualColors}
+                        isViewOnly={isViewOnly}
                         schema={schema}
                         dataset={dataset}
                         isFieldsRefreshing={isFieldsRefreshing}
+                        reportNoFill={reportNoFill}
+                        onApplyReportNoFill={onApplyReportNoFill}
+                        onApplyReportBackgroundFill={onApplyReportBackgroundFill}
+                        onApplyReportBackgroundReset={onApplyReportBackgroundReset}
+                        measures={measures}
                     />
                 )}
                 {currentTab === 'fields' && (
@@ -92,6 +134,11 @@ const BIRightPanes = ({ schema, dataset, fileName, selectedVisual, onUpdateVisua
                         activeColumn={activeColumn}
                         onSelectColumn={onSelectColumn}
                         isFieldsRefreshing={isFieldsRefreshing}
+                        onEditMeasure={onEditMeasure}
+                        onDuplicateMeasure={onDuplicateMeasure}
+                        onDeleteMeasure={onDeleteMeasure}
+                        onArchiveMeasure={onArchiveMeasure}
+                        onDeprecateMeasure={onDeprecateMeasure}
                     />
                 )}
             </div>

@@ -10,6 +10,7 @@
 /* ── ALL backgrounds: pure bright white ── */
   --df-bg: #FFFFFF;
   --df-bg-secondary: #FFFFFF;
+  --df-bg-primary: #FFFFFF;
   --df-surface: #FFFFFF;
   --df-panel: #FFFFFF;
 
@@ -68,6 +69,7 @@
 [data-theme="dark"] {
   --df-bg: #0C0C10;
   --df-bg-secondary: #0C0C10;
+  --df-bg-primary: #14141A;
   --df-surface: #14141A;
   --df-panel: #1A1A24;
   --df-border: rgba(255, 255, 255, 0.09);

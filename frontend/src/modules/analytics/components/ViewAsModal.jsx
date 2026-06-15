@@ -6,11 +6,11 @@
  * On Apply → calls RLSContext.setActiveRoles() which hits the filter engine
  * and makes filtered data available to every chart in BIWorkspace.
  *
- * Also exports the <RLSActiveBanner> component shown at the top of the
- * workspace while simulation is active (orange strip with Exit button).
+ * Also exports the <RLSActiveBanner> compact corner chip while View As is active.
  */
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Eye, X, Check, AlertTriangle, Shield } from 'lucide-react';
 import { getRoles } from '../services/rlsService';
 import { useRLS } from '../context/RLSContext';
@@ -195,32 +195,46 @@ function ApplyBtn({ loading, disabled, noneSelected, selectedCount, onClick }) {
 export function RLSActiveBanner({ activeRoles, rlsData, onExit, allowExit = true }) {
   if (!activeRoles || activeRoles.length === 0) return null;
 
-  const roleNames = activeRoles.map((r) => {
-    const perm = r.permission === 'view_edit' ? 'Can View & Edit' : r.permission === 'edit' ? 'Can Edit' : 'Can View';
-    return `${r.name} (${perm})`;
-  }).join(', ');
-  const filteredPct = rlsData
-    ? `${rlsData.filtered_rows.toLocaleString()} / ${rlsData.total_rows.toLocaleString()} rows`
-    : null;
+  const permShort = (p) => (
+    p === 'view_edit' ? 'View & edit' : p === 'edit' ? 'Edit' : 'Can view'
+  );
 
-  return (
-    <div className="rls-active-banner" id="rls-active-banner">
-      <Shield size={15} />
-      <span>Viewing as:</span>
-      <span className="rls-active-banner-roles">{roleNames}</span>
-      {filteredPct && (
-        <span className="rls-stats-chip">{filteredPct}</span>
-      )}
+  const label = activeRoles
+    .map((r) => `${r.name} · ${permShort(r.permission)}`)
+    .join(', ');
+
+  const tooltip = [
+    `Viewing as: ${label}`,
+    rlsData ? `${rlsData.filtered_rows.toLocaleString()} / ${rlsData.total_rows.toLocaleString()} rows` : null,
+    !allowExit ? 'Opened from a shared link' : null,
+  ].filter(Boolean).join(' · ');
+
+  const chip = (
+    <div
+      className={`rls-view-as-chip${!allowExit ? ' rls-view-as-chip--shared' : ''}`}
+      id="rls-active-banner"
+      title={tooltip}
+      role="status"
+    >
+      <Shield size={11} strokeWidth={2.2} aria-hidden />
+      <span className="rls-view-as-chip-text">{label}</span>
       {!allowExit && (
-        <span className="rls-active-banner-shared-hint" title="This session was opened from a published link with row-level security">
-          Shared link
-        </span>
+        <span className="rls-view-as-chip-tag">Shared</span>
       )}
       {allowExit && (
-        <button type="button" className="rls-active-banner-exit" onClick={onExit} id="rls-exit-btn">
-          Exit View As
+        <button
+          type="button"
+          className="rls-view-as-chip-exit"
+          onClick={onExit}
+          id="rls-exit-btn"
+          title="Exit View As"
+          aria-label="Exit View As"
+        >
+          ×
         </button>
       )}
     </div>
   );
+
+  return createPortal(chip, document.body);
 }

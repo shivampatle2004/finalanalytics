@@ -150,7 +150,7 @@ export default function PowerAppsVisual({ fileId, graphDefinition, selection = n
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/dataset?limit=1&offset=0`);
+                const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/dataset?limit=1&offset=0`);
                 if (!res.ok) throw new Error(await res.text());
                 const json = await res.json();
                 if (cancelled) return;

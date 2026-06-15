@@ -25,8 +25,8 @@ const RLSContext = createContext({
   rlsError: null,
   effectivePermission: 'view_edit',
   isShareLocked: false,
-  setActiveRoles: async () => {},
-  clearViewAs: () => {},
+  setActiveRoles: async () => { },
+  clearViewAs: () => { },
 });
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -41,11 +41,11 @@ export function RLSProvider({ children, fileId, shareLocked = false }) {
   // Derive effective permission based on active roles
   const effectivePermission = React.useMemo(() => {
     if (!isViewAsActive || activeRoles.length === 0) return 'view_edit';
-    
+
     // Most permissive wins: view_edit > edit > view
     const hierarchy = ['view_edit', 'edit', 'view'];
     let bestIdx = 2; // default to view
-    
+
     for (const role of activeRoles) {
       const idx = hierarchy.indexOf(role.permission || 'view');
       if (idx >= 0 && idx < bestIdx) {

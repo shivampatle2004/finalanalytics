@@ -112,7 +112,7 @@ function ReportsDashboard({ userId }) {
       dataService.loadDataset(data);
       const computedData = dataService.getComputedDataset();
       console.log('✅ Dataset loaded. Columns:', computedData.columns.length, 'Rows:', computedData.rows.length);
-      
+
       setDataset(computedData);
       setTransformations(dataService.getTransformations());
       const colCount = Object.keys(data[0]).length;
@@ -140,14 +140,14 @@ function ReportsDashboard({ userId }) {
     const data = [];
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
-      
+
       const values = parseCSVLine(lines[i]);
       const row = {};
 
       headers.forEach((header, idx) => {
         let value = values[idx] || '';
         value = value.trim();
-        
+
         // Handle null/empty values
         if (value === '' || value === 'null' || value === 'NULL' || value === 'N/A') {
           row[header] = null;
@@ -158,7 +158,7 @@ function ReportsDashboard({ userId }) {
         } else {
           // Try to parse as number
           const num = parseFloat(value);
-          row[header] = !isNaN(num) &&value.trim() !== '' ? num : value;
+          row[header] = !isNaN(num) && value.trim() !== '' ? num : value;
         }
       });
 
@@ -354,7 +354,7 @@ function ReportsDashboard({ userId }) {
                 />
                 <span className="upload-btn">📤 Choose File</span>
               </label>
-              <p style={{fontSize: '0.85rem', color: '#9ca3af', marginTop: '1rem'}}>Or drag & drop your file here</p>
+              <p style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '1rem' }}>Or drag & drop your file here</p>
             </div>
           </div>
         )}

@@ -212,8 +212,34 @@
 }
 
 /* ── Global theme transition ── */
-*,
-*::before,
-*::after {
+.app-container,
+.bi-workspace-root,
+.bi-canvas,
+.bi-pane-view,
+.bi-ribbon,
+.bi-visual-card,
+.bi-visual-header,
+.bi-visual-content,
+.bi-fields-pane,
+.bi-filters-pane,
+.bi-visualizations-pane,
+.bi-catalog-view,
+.bi-model-view,
+.bi-query-editor,
+.bi-about-modal,
+.bi-nt-panel,
+.prm-modal,
+.df-table,
+.df-code,
+.df-upload-zone,
+.df-empty-state,
+.df-theme-toggle,
+.df-theme-toggle-knob,
+button,
+select,
+input,
+textarea,
+a {
   transition: background-color 0.3s ease, color 0.2s ease, border-color 0.3s ease;
 }
+

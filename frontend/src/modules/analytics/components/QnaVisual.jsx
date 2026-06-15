@@ -59,7 +59,7 @@ export default function QnaVisual({ fileId, isDark = false }) {
 
             setLoading(true);
             try {
-                const qRes = await fetch(`/api/files/${encodeURIComponent(fileId)}/query`, {
+                const qRes = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/query`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ prompt }),
@@ -73,7 +73,7 @@ export default function QnaVisual({ fileId, isDark = false }) {
                 const aggRaw = cfg.aggregation || 'sum';
                 const aggUpper = String(aggRaw).toUpperCase();
 
-                const gRes = await fetch(`/api/files/${encodeURIComponent(fileId)}/graph-data`, {
+                const gRes = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/graph-data`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

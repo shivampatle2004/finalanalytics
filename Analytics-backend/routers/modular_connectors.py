@@ -170,12 +170,13 @@ async def test_connector_connection(payload: Dict[str, Any] = Body(...)):
             return {"success": True, "message": "Connection test passed successfully."}
         else:
             return {"success": False, "message": "Connection test failed. Please check your credentials."}
-    except HTTPException as he:
-        logger.error(f"HTTPException testing connection for {engine}: {he.detail}")
-        return {"success": False, "message": he.detail}
+    except HTTPException as e:
+        detail = e.detail if isinstance(e.detail, str) else "Connection test failed"
+        return {"success": False, "message": detail}
     except Exception as e:
         logger.error(f"Error testing connection for {engine}: {e}")
-        return {"success": False, "message": f"An error occurred: {str(e)}"}
+        message = str(e).split("Traceback (most recent call last):", 1)[0].splitlines()[0].strip()
+        return {"success": False, "message": message or "Connection test failed"}
 
 
 # ─── Quick extract endpoint ─────────────────────────────────────────────────
@@ -209,6 +210,14 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
         import polars as pl
         from database import DATABASE_URL
 
+        def empty_source_response():
+            return {
+                "success": True,
+                "empty": True,
+                "message": "Connection succeeded, but no records were found. Check the database and collection/table name exactly, including letter case.",
+                "row_count": 0,
+            }
+
         # Extract the first chunk of data
         first_chunk = None
         if inspect.isasyncgenfunction(connector.extract):
@@ -216,13 +225,13 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
             try:
                 first_chunk = await generator.__anext__()
             except StopAsyncIteration:
-                return {"success": False, "message": "Connected successfully, but the source returned zero records."}
+                return empty_source_response()
         elif inspect.isgeneratorfunction(connector.extract):
             generator = connector.extract()
             try:
                 first_chunk = next(generator)
             except StopIteration:
-                return {"success": False, "message": "Connected successfully, but the source returned zero records."}
+                return empty_source_response()
         else:
             result = connector.extract()
             if inspect.iscoroutine(result):
@@ -233,7 +242,7 @@ async def quick_extract_connector(payload: Dict[str, Any] = Body(...)):
                 first_chunk = result.head(100).to_dicts()
 
         if (isinstance(first_chunk, pl.DataFrame) and first_chunk.is_empty()) or (not isinstance(first_chunk, pl.DataFrame) and not first_chunk):
-            return {"success": False, "message": "No data returned from source."}
+            return empty_source_response()
 
         # Build a clean table name
         raw_name = output_file_name or f"{engine}_{int(time.time())}"

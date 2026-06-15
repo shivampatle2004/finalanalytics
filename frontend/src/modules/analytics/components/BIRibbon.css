@@ -3,11 +3,13 @@
     border-bottom: 1px solid #d1d1d1;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     user-select: none;
     position: relative;
     z-index: 200;
-    overflow: visible;
+    overflow: hidden;
+    isolation: isolate;
 }
 
 /* Title Bar / Search Bar */
@@ -160,6 +162,9 @@
 .bi-ribbon-collapse-btn {
     margin-left: auto;
     margin-right: 8px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 3px;
@@ -271,27 +276,30 @@
     border: 1px solid #ccc;
     background-color: #fff;
     border-radius: 2px;
-    font-size: 11px;
+    font-size: 10px;
     color: #333;
     outline: none;
-    padding: 2px 4px;
+    padding: 1px 4px;
+    height: 20px;
+    box-sizing: border-box;
 }
 
 .bi-ribbon-field-item {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0px;
     padding: 0 4px;
 }
 
 .bi-ribbon-field-label {
-    font-size: 11px;
+    font-size: 9.5px;
     color: #4b5563;
     white-space: nowrap;
     display: flex;
     align-items: center;
-    gap: 4px;
-    margin-bottom: 2px;
+    gap: 3px;
+    margin-bottom: 1px;
+    line-height: 1.1;
 }
 
 .bi-ribbon-field-icon {
@@ -325,28 +333,34 @@
     border-color: #ccc;
 }
 
-/* Toolbar & Groupings */
+/* Toolbar — fixed height, uniform icons, no vertical scroll */
 .bi-ribbon-toolbar {
+    --bi-ribbon-icon-lg: 20px;
+    --bi-ribbon-icon-sm: 11px;
+    --bi-ribbon-icon-slot: 24px;
     position: relative;
-    padding: 1px 6px;
-    padding-bottom: 0px;
+    padding: 4px 8px 2px;
     background-color: #fff;
-    height: 92px;
+    height: 96px;
+    min-height: 96px;
+    max-height: 96px;
     border-top: 1px solid #d1d1d1;
-    overflow: visible;
-    transition: height 0.18s ease, padding 0.18s ease, opacity 0.18s ease;
+    overflow: hidden;
+    transition: height 0.18s ease, min-height 0.18s ease, max-height 0.18s ease, padding 0.18s ease, opacity 0.18s ease;
     opacity: 1;
+    box-sizing: border-box;
 }
 
 .bi-ribbon-toolbar-scroll {
     display: flex;
     flex-wrap: nowrap;
-    align-items: flex-start;
-    height: 92px;
+    align-items: center;
+    height: 100%;
     width: 100%;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
 }
 
 .bi-ribbon-toolbar-scroll .bi-ribbon-tool,
@@ -358,11 +372,15 @@
 
 .bi-ribbon-toolbar.bi-ribbon-collapsed {
     height: 0;
+    min-height: 0;
+    max-height: 0;
     padding-top: 0;
     padding-bottom: 0;
     opacity: 0;
     border-top: none;
     overflow: hidden;
+    pointer-events: none;
+    visibility: hidden;
 }
 
 .bi-ribbon-toolbar.bi-ribbon-collapsed .bi-ribbon-toolbar-scroll {
@@ -374,33 +392,52 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 0 2px;
+    justify-content: flex-end;
+    padding: 0 4px;
     min-width: 40px;
-    height: 100%;
-    justify-content: space-between;
+    height: 88px;
+    max-height: 88px;
     flex-shrink: 0;
+    box-sizing: border-box;
 }
 
 .bi-tool-row {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
-    align-items: center;
-    gap: 10px;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 6px;
+    min-height: 0;
+    padding-bottom: 1px;
 }
 
 .bi-group-label {
+    flex: 0 0 auto;
     font-size: 9px;
     font-weight: 400;
     color: #888;
-    margin-top: auto;
-    padding-bottom: 2px;
+    margin-top: 2px;
+    padding-bottom: 0;
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
-.bi-group-divider {
+/* Faint vertical separators between ribbon groups (Clipboard | Data | …) */
+.bi-ribbon-toolbar-scroll > .bi-group-divider {
     width: 1px;
-    height: 80%;
-    background-color: var(--border-primary);
-    margin: auto 4px;
+    height: 76px;
+    align-self: center;
+    flex-shrink: 0;
+    margin: 0 3px;
+    padding: 0;
+    background: #d6d6d6;
+    box-shadow: 1px 0 0 rgba(255, 255, 255, 0.85);
+    pointer-events: none;
+}
+
+.bi-ribbon-toolbar-scroll .bi-group-divider {
+    display: block;
 }
 
 /* Tool Buttons */
@@ -413,6 +450,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    text-align: center;
     transition: all 0.1s;
     color: #475569;
 }
@@ -424,19 +462,55 @@
 }
 
 .bi-tool-large {
-    padding: 5px 10px;
-    gap: 4px;
-    height: 80%;
+    padding: 2px 6px 3px;
+    gap: 2px;
+    height: auto;
+    max-height: 68px;
+    min-width: 48px;
+    max-width: 84px;
 }
 
-.bi-tool-large > span:not(.bi-ribbon-tool-text) {
-    font-size: 10.5px;
+/* Fixed icon slot — all large tools share the same visual baseline */
+.bi-ribbon-tool-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--bi-ribbon-icon-slot);
+    height: var(--bi-ribbon-icon-slot);
+    flex-shrink: 0;
+}
+
+.bi-ribbon-tool-icon svg {
+    width: var(--bi-ribbon-icon-lg) !important;
+    height: var(--bi-ribbon-icon-lg) !important;
+    stroke-width: 1.65;
+    color: #7a1e3a;
+    opacity: 0.92;
+}
+
+.bi-ribbon-tool-icon--sm {
+    width: 14px;
+    height: 14px;
+}
+
+.bi-ribbon-tool-icon--sm svg {
+    width: var(--bi-ribbon-icon-sm) !important;
+    height: var(--bi-ribbon-icon-sm) !important;
+    stroke-width: 1.75;
+}
+
+.bi-tool-large > span:not(.bi-ribbon-tool-text):not(.bi-ribbon-tool-icon) {
+    font-size: 10px;
     font-weight: 400;
     white-space: normal;
     text-wrap: wrap;
     text-align: center;
-    max-width: 150px;
-    line-height: 1.1;
+    max-width: 76px;
+    line-height: 1.15;
+    min-height: 2.3em;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
 }
 
 .bi-tool-has-dropdown .bi-ribbon-tool-text {
@@ -450,13 +524,14 @@
 }
 
 .bi-tool-has-dropdown .bi-ribbon-tool-label {
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 400;
     white-space: normal;
     text-wrap: wrap;
     text-align: center;
-    line-height: 1.1;
+    line-height: 1.15;
     width: 100%;
+    max-width: 76px;
 }
 
 .bi-tool-has-dropdown .bi-ribbon-tool-chevron {
@@ -468,40 +543,68 @@
 }
 
 .bi-tool-has-dropdown .bi-ribbon-tool-chevron svg {
-    width: 11px;
-    height: 11px;
+    width: 9px !important;
+    height: 9px !important;
     margin: 0;
     color: #64748b;
     stroke-width: 2;
 }
 
-.bi-tool-large > svg:first-of-type {
-    color: #7a1e3a;
-    width: 18px;
-    height: 18px;
-    stroke-width: 1.7;
-    opacity: 0.9;
-}
-
 .bi-tool-column {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 1px;
+    max-height: 68px;
+    align-self: flex-end;
+}
+
+.bi-tool-column .bi-dropdown-wrapper {
+    display: flex;
+    width: 100%;
+}
+
+.bi-tool-column .bi-dropdown-wrapper > .bi-ribbon-tool-small {
+    width: 100%;
+}
+
+.bi-tool-grid {
+    display: grid;
+    grid-template-columns: auto auto;
+    column-gap: 14px;
+    row-gap: 1px;
+    align-self: flex-end;
+    align-items: center;
 }
 
 .bi-ribbon-tool-small {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 7px;
-    font-size: 11px;
+    justify-content: flex-start;
+    gap: 5px;
+    padding: 2px 6px;
+    min-height: 22px;
+    font-size: 10.5px;
     font-weight: 400;
     border: 1px solid transparent;
     background: transparent;
     color: #333;
     cursor: pointer;
     border-radius: 3px;
-    width: 80%;
+    width: auto;
+    min-width: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.bi-ribbon-tool-small .bi-ribbon-tool-icon--sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    min-width: 14px;
+    flex-shrink: 0;
 }
 
 .bi-ribbon-tool-small:hover {
@@ -522,11 +625,8 @@
     pointer-events: none;
 }
 
-.bi-ribbon-tool-small svg {
+.bi-ribbon-tool-small .bi-ribbon-tool-icon--sm svg {
     color: #7a1e3a;
-    width: 12px;
-    height: 12px;
-    stroke-width: 1.8;
 }
 
 /* Dropdown styling */
@@ -605,6 +705,34 @@
     height: 1px;
     background-color: #eee;
     margin: 4px 0;
+}
+
+/* Theme gallery + More themes — stacked vertically, contained in ribbon group */
+.bi-theme-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    max-height: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.bi-tool-group--themes .bi-tool-row {
+    align-items: center;
+    overflow: hidden;
+}
+
+.bi-theme-stack .bi-theme-gallery {
+    margin-right: 0;
+    margin-top: 0;
+}
+
+.bi-theme-stack .bi-dropdown-wrapper {
+    align-self: stretch;
+    display: flex;
+    justify-content: center;
 }
 
 /* Theme Gallery */
@@ -952,6 +1080,32 @@
   border-color: var(--border-primary);
 }
 
-.dark-theme .bi-group-divider {
-  background-color: rgba(255, 255, 255, 0.04);
+.dark-theme .bi-ribbon-toolbar-scroll > .bi-group-divider {
+  background: #4a4a4a;
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.dark-theme .bi-ribbon-select {
+  background-color: var(--input-bg);
+  border-color: var(--input-border);
+  color: var(--input-text);
+}
+
+.dark-theme .bi-ribbon-select option {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.dark-theme .osa-ribbon-reset {
+  border-color: rgba(239, 68, 68, 0.25) !important;
+  background-color: rgba(239, 68, 68, 0.12) !important;
+  color: #f87171 !important;
+}
+
+.dark-theme .osa-ribbon-reset:hover {
+  background-color: rgba(239, 68, 68, 0.22) !important;
+}
+
+.dark-theme .osa-ribbon-reset span {
+  color: #f87171 !important;
 }

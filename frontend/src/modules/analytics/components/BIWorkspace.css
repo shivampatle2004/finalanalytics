@@ -3,16 +3,106 @@
 .bi-workspace-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100vw;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Segoe UI', Inter, sans-serif;
   overflow: hidden;
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 9999;
+  position: relative;
+  --bi-scrollbar-size: var(--scrollbar-size, 5px);
+  --bi-scrollbar-thumb: var(--scrollbar-thumb, #c8c8c8);
+  --bi-scrollbar-thumb-hover: var(--scrollbar-thumb-hover, #a8a8a8);
+  --bi-scrollbar-track: var(--scrollbar-track, #f2f2f2);
+  --bi-scrollbar-button: var(--scrollbar-button, #e8e8e8);
+}
+
+/* Thin scrollbars on canvas, right panes, viz grid, modals inside workspace */
+.bi-workspace-root,
+.bi-workspace-root * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bi-scrollbar-thumb) var(--bi-scrollbar-track);
+}
+
+.bi-workspace-root *::-webkit-scrollbar {
+  width: var(--bi-scrollbar-size);
+  height: var(--bi-scrollbar-size);
+}
+
+.bi-workspace-root *::-webkit-scrollbar-track {
+  background: var(--bi-scrollbar-track);
+}
+
+.bi-workspace-root *::-webkit-scrollbar-thumb {
+  background: var(--bi-scrollbar-thumb);
+  border-radius: 3px;
+  border: 1px solid var(--bi-scrollbar-track);
+  background-clip: padding-box;
+}
+
+.bi-workspace-root *::-webkit-scrollbar-button:single-button {
+  background-color: var(--bi-scrollbar-button);
+  border: none;
+}
+
+.bi-workspace-root *::-webkit-scrollbar-button:single-button:vertical:decrement,
+.bi-workspace-root *::-webkit-scrollbar-button:single-button:vertical:increment {
+  height: 9px;
+}
+
+.bi-workspace-root *::-webkit-scrollbar-button:single-button:horizontal:decrement,
+.bi-workspace-root *::-webkit-scrollbar-button:single-button:horizontal:increment {
+  width: 9px;
+}
+
+.bi-workspace-root *::-webkit-scrollbar-thumb:hover {
+  background: var(--bi-scrollbar-thumb-hover);
+}
+
+.bi-workspace-root .bi-center-content,
+.bi-workspace-root .bi-canvas,
+.bi-workspace-root .bi-fullview-container,
+.bi-workspace-root .bi-viz-selector-container,
+.bi-workspace-root .bi-viz-pane-body,
+.bi-workspace-root .bi-pane-scroll {
+  scrollbar-gutter: stable;
+}
+
+/* Ribbon: horizontal scroll only when many groups — never vertical */
+.bi-workspace-root .bi-ribbon-toolbar,
+.bi-workspace-root .bi-ribbon-toolbar-scroll {
+  overflow-y: hidden !important;
+}
+
+.bi-workspace-root .bi-ribbon-toolbar-scroll::-webkit-scrollbar:vertical {
+  display: none;
+  width: 0;
+}
+
+/* Page tabs: scroll internally but never show a 2nd horizontal bar under the canvas */
+.bi-workspace-root .bi-page-tabs-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.bi-workspace-root .bi-page-tabs-list::-webkit-scrollbar,
+.bi-workspace-root .bi-page-tabs-list::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Ribbon is a flex sibling above — must not shrink; body fills remainder */
+.bi-workspace-root > .bi-ribbon {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+}
+
+.bi-workspace-root > .bi-main-layout {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .bi-main-layout {
@@ -20,6 +110,7 @@
   display: flex;
   overflow: hidden;
   position: relative;
+  min-height: 0;
 }
 
 /* File → blank report: hide previous canvases while choosing a data source */
@@ -62,13 +153,14 @@
 }
 
 .dark-theme .bi-new-report-draft-pane {
-  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-  border-left-color: #334155;
+  background: var(--bg-primary);
+  border-left-color: var(--border-primary);
 }
 
 .dark-theme .bi-new-report-draft-inner {
-  background: #1e293b;
-  border-color: #334155;
+  background: var(--bg-elevated);
+  border-color: var(--border-primary);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
 .dark-theme .bi-new-report-draft-title {
@@ -79,17 +171,20 @@
   color: #94a3b8;
 }
 
-/* Left View Switcher (App Bar) */
+/* Left View Switcher (App Bar) — vertical rule separates panel from canvas */
 .bi-view-switcher {
   width: 48px;
+  flex-shrink: 0;
   background-color: var(--bg-elevated);
-  border-right: 1px solid var(--border-primary);
+  border-right: 1px solid #cbd5e1;
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.65);
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 12px 0;
   gap: 8px;
   z-index: 100;
+  position: relative;
 }
 
 .bi-view-icon {
@@ -129,13 +224,39 @@
   color: var(--text-muted);
 }
 
+/* Report view: panel group must span full width (was 20+60+20; left panel removed) */
+.bi-workspace-panel-group {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+.bi-workspace-panel-group [data-panel] {
+  min-width: 0;
+}
+
+.bi-workspace-panel-group [data-panel]:last-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.bi-workspace-panel-group [data-panel]:last-child > * {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
 /* Panels & Resizers */
 .bi-resizer {
   width: 4px;
   background-color: transparent;
   transition: background-color 0.2s;
   cursor: col-resize;
-  z-index: 50;
+  z-index: 3;
+  flex-shrink: 0;
 }
 
 .bi-resizer:hover,
@@ -167,11 +288,17 @@
 .bi-center-content {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   position: relative;
-  overflow-x: scroll;
+  overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
   background-color: inherit;
+}
+
+/* Horizontal scrollbar sits on the bottom edge of the canvas (above page tabs) */
+.bi-center-content::-webkit-scrollbar:horizontal {
+  height: var(--bi-scrollbar-size, 5px);
 }
 
 .bi-report-surface {
@@ -182,7 +309,8 @@
 }
 
 .bi-report-surface.bi-page-view-fit_page {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
 }
 
 .bi-report-surface.bi-page-view-fit_width {
@@ -374,23 +502,27 @@
   border-top: 1px solid var(--border-primary);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 0 12px;
   font-size: 12px;
   position: relative;
   z-index: 40;
+  gap: 0;
 }
 
 .bi-page-tabs-list {
   display: flex;
+  align-items: center;
   height: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .bi-page-tab {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   padding: 0 16px;
-  height: 100%;
+  height: 28px;
+  line-height: 1;
   border-right: 1px solid var(--border-primary);
   cursor: pointer;
   color: var(--text-tertiary);
@@ -398,6 +530,7 @@
   transition: all 0.2s;
   min-width: 80px;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .bi-page-tab:hover {
@@ -422,16 +555,24 @@
 }
 
 .bi-page-add-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 18%;
+  width: auto;
+  height: 28px;
+  margin: 0 0 0 4px;
+  padding: 0 8px;
   border: none;
   background: transparent;
   cursor: pointer;
   color: var(--interactive-default);
-  transition: background-color 0.2s;
+  flex-shrink: 0;
+  line-height: 0;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.bi-page-add-btn svg {
+  display: block;
 }
 
 .bi-page-add-btn:hover {
@@ -444,6 +585,7 @@
   gap: 16px;
   color: var(--text-muted);
   font-size: 11px;
+  margin-left: auto;
 }
 
 .bi-status-item {
@@ -1031,11 +1173,20 @@
 .dark-theme .bi-workspace-root { 
   background-color: var(--bg-primary); 
   color: var(--text-primary); 
+  --bi-scrollbar-thumb: #4A1525 !important;
+  --bi-scrollbar-thumb-hover: #7A1E3A !important;
+  --bi-scrollbar-track: #0C0C10 !important;
+  --bi-scrollbar-button: #0C0C10 !important;
+}
+
+.dark-theme .bi-fullview-container {
+  background-color: var(--bg-primary);
 }
 
 .dark-theme .bi-view-switcher { 
   background-color: var(--bg-elevated); 
-  border-color: var(--border-primary); 
+  border-right-color: #475569;
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.25);
 }
 
 .dark-theme .bi-view-icon {
@@ -1655,3 +1806,7 @@
 .dark-theme .grid-cell-input { background: #1e293b; color: #f1f5f9; }
 .dark-theme .grid-cell-input:focus { background: #334155; }
 
+/* Shared link / Can View: full workspace visible, chart edits blocked via canvas + panes */
+.bi-workspace-root--view-only .bi-visual-card.view-only {
+  cursor: default;
+}

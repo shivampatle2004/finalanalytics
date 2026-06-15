@@ -53,7 +53,7 @@ const SmartVisualizationModal = ({ isOpen, onClose, onAddChart }) => {
         }
 
         try {
-            const response = await fetch('/api/smart/query', {
+            const response = await fetch('/analytics/api/smart/query', {
                 method: 'POST',
                 body: formData,
             });

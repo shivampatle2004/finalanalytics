@@ -1,17 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import * as Panels from 'react-resizable-panels';
-const Panel = Panels.Panel;
-const PanelGroup = Panels.PanelGroup;
-const PanelResizeHandle = Panels.PanelResizeHandle;
-
-import { 
-  Layout, Database, Home, ChevronRight, ChevronLeft, 
-  Plus, Download, Share2, MoreHorizontal, Settings, Filter, 
-  Search, ChevronDown, Trash2, Copy, Trash, Maximize2, Minimize2, 
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import {
+  Layout, Database, Home, ChevronRight, ChevronLeft,
+  Plus, Download, Share2, MoreHorizontal, Settings, Filter,
+  Search, ChevronDown, Trash2, Copy, Trash, Maximize2, Minimize2,
   FileText, BarChart3, Link2, Calendar, RefreshCw, X
 } from 'lucide-react';
-
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
@@ -19,16 +15,21 @@ import * as XLSX from 'xlsx';
 // BI Components
 import BIRibbon from './BIRibbon';
 import BIAIInsightsPanel from './BIAIInsightsPanel';
-import { extractChartContext, pickBestVisual } from '../utils/aiChartContext';
-import BIInsightsPanel from './BIInsightsPanel';
+import { extractChartContext, pickBestVisual, hydrateChartContext } from '../utils/aiChartContext';
+// import BIInsightsPanel from './BIInsightsPanel'; // Data Summary panel disabled
 import BIDashboardCanvas from './BIDashboardCanvas';
 import BIRightPanes from './BIRightPanes';
+import { useTheme } from '../../../shared/context/ThemeContext';
 import { useGlobalFilters } from '../context/FilterContext';
+import { normalizeFilterRules } from '../utils/filterUtils';
+import { defaultVisualTitle, formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 import BIFileMenu from './BIFileMenu';
 import BIModelView from './BIModelView';
 // import BICatalogView from './BICatalogView'; // Catalog is available inside Model view
 // import DataPreviewPanel from './DataPreviewPanel'; // Data view disabled — restore with Data tab
 import BIQuickMeasurePanel from './BIQuickMeasurePanel';
+import BIMeasureDesignerModal from './BIMeasureDesignerModal';
+import BINewTableModal from './BINewTableModal';
 import AddFileModal from './AddFileModal';
 import EnterDataModal from './EnterDataModal';
 import BISavedConnectionsPanel from './BISavedConnectionsPanel';
@@ -39,11 +40,19 @@ import BIConnectorsModal from './BIConnectorsModal';
 import BIConnectionConfigModal from './BIConnectionConfigModal';
 import DataVaultPanel from './DataVaultPanel';
 import PaginatedReportModal from './PaginatedReportModal';
+import ReportRefreshSettingsModal from './ReportRefreshSettingsModal';
+import BIQueryEditor from './BIQueryEditor';
+import BIDataSourceSettings from './BIDataSourceSettings';
+import BIParameterManager from './BIParameterManager';
+import BIVariableManager from './BIVariableManager';
+import dataManagementApi from '../services/dataManagementApi';
 import { MarkDateTableModal, ChangeDetectionModal } from './ModelingModals';
 import ManageRolesPanel from './ManageRolesPanel';
+import PublishReportModal from './PublishReportModal';
 import ViewAsModal, { RLSActiveBanner } from './ViewAsModal';
 import { RLSProvider, useRLS } from '../context/RLSContext';
-import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE } from '../constants/visualDefaults';
+import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE, PIE_DONUT_DEFAULT_SIZE, TEXT_BOX_DEFAULT_SIZE } from '../constants/visualDefaults';
+import { isViewOnlyWriteAction } from '../constants/viewPermissions';
 
 // Services
 // import DataService from '../services/DataService'; // Assume if needed
@@ -128,19 +137,47 @@ const SQL_MODAL_DEFAULTS = {
   ssl_mode: 'require',
 };
 
+/** Coerce visual/page/report filter rules from legacy persisted shapes. */
+function coerceFilterRules(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return coerceFilterRules(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (value && typeof value === 'object' && value.field && value.operator) {
+    return [value];
+  }
+  return [];
+}
+
 /** Backend may return options as object or JSON string (SQLite / older rows). */
 function normalizeGraphOptions(options) {
   if (!options) return {};
+  let base = {};
   if (typeof options === 'string') {
     try {
       const parsed = JSON.parse(options);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      base = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch {
       return {};
     }
+  } else if (typeof options === 'object' && !Array.isArray(options)) {
+    base = options;
   }
-  if (typeof options === 'object' && !Array.isArray(options)) return options;
-  return {};
+  if (Object.prototype.hasOwnProperty.call(base, 'filters')) {
+    base.filters = coerceFilterRules(base.filters);
+  }
+  if (Object.prototype.hasOwnProperty.call(base, 'pageFilters')) {
+    base.pageFilters = coerceFilterRules(base.pageFilters);
+  }
+  if (Object.prototype.hasOwnProperty.call(base, 'reportFilters')) {
+    base.reportFilters = coerceFilterRules(base.reportFilters);
+  }
+  return base;
 }
 
 function pageIdFromOptionsOrGraph(graph) {
@@ -154,11 +191,11 @@ function pageIdFromOptionsOrGraph(graph) {
  * BIWorkspace Component
  * The "Gold Standard" BI experience shared across AnalyticsDashboard and LandingPage.
  */
-const BIWorkspace = ({ 
-  fileId, 
+const BIWorkspace = ({
+  fileId,
   initialFileName,
   initialActiveView,
-  userId, 
+  userId,
   onLogout,
   onGoHome,
   onOpenFile,
@@ -190,7 +227,7 @@ const BIWorkspace = ({
   const excelFileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const reportBgColorInputRef = useRef(null);
-  
+
   // -- State: Core Data --
   const [fileName, setFileName] = useState(initialFileName || 'Untitled Report');
   const [fileDetails, setFileDetails] = useState(null);
@@ -205,7 +242,7 @@ const BIWorkspace = ({
   const [graphs, setGraphs] = useState([]);
   const [processingStatus, setProcessingStatus] = useState('idle');
   const [modelDiagnostics, setModelDiagnostics] = useState(null);
-  
+
   // -- State: UI Layout & Navigation --
   const [activeView, setActiveView] = useState(() => {
     if (initialActiveView === 'connections') return 'connections';
@@ -240,6 +277,7 @@ const BIWorkspace = ({
     }
   });
   const [activeVisualId, setActiveVisualId] = useState(null);
+  const [focusedVisualId, setFocusedVisualId] = useState(null);
   const [selectedData, setSelectedData] = useState(null);
   const [activeColumn, setActiveColumn] = useState(null);
   const [activeMeasure, setActiveMeasure] = useState(null);
@@ -258,7 +296,7 @@ const BIWorkspace = ({
   const [aiChatHistory, setAiChatHistory] = useState([]);
   const aiPanelOpenRef = useRef(false);
   useEffect(() => { aiPanelOpenRef.current = aiPanelOpen; }, [aiPanelOpen]);
-  useEffect(() => { try { localStorage.setItem('osa_ai_mode', aiMode); } catch (_) {} }, [aiMode]);
+  useEffect(() => { try { localStorage.setItem('osa_ai_mode', aiMode); } catch (_) { } }, [aiMode]);
 
   // -- State: Panels --
   const [isInsightsCollapsed, setIsInsightsCollapsed] = useState(true);
@@ -289,13 +327,33 @@ const BIWorkspace = ({
   const [pageViewMode, setPageViewMode] = useState('fit_page');
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [reportTheme, setReportTheme] = useState('theme_default');
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    try { return localStorage.getItem('osa_dark_mode') === 'true'; } catch (_) { return false; }
-  });
+  const { isDark, toggleTheme } = useTheme();
+  const [isDarkMode, setIsDarkModeState] = useState(isDark);
 
-  // Persist dark mode preference
   useEffect(() => {
-    try { localStorage.setItem('osa_dark_mode', isDarkMode); } catch (_) {}
+    setIsDarkModeState(isDark);
+  }, [isDark]);
+
+  const setIsDarkMode = useCallback((val) => {
+    setIsDarkModeState(prev => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      if (next !== isDark) {
+        toggleTheme();
+      }
+      return next;
+    });
+  }, [isDark, toggleTheme]);
+
+  // Persist dark mode preference & propagate to document.body for portaled elements
+  useEffect(() => {
+    try { localStorage.setItem('osa_dark_mode', isDarkMode); } catch (_) { }
+    if (isDarkMode) {
+      document.body.classList.add('dark-theme');
+      document.body.classList.remove('light-theme');
+    } else {
+      document.body.classList.add('light-theme');
+      document.body.classList.remove('dark-theme');
+    }
   }, [isDarkMode]);
 
   const applyReportTheme = useCallback((themeId) => {
@@ -317,15 +375,16 @@ const BIWorkspace = ({
   }, []);
   const [reportHeaderText, setReportHeaderText] = useState(REPORT_HEADER_PLACEHOLDER);
   const [reportBackgroundColor, setReportBackgroundColor] = useState('#ffffff');
+  const [reportNoFill, setReportNoFill] = useState(false);
   const [userSetBackgroundColor, setUserSetBackgroundColor] = useState(false);
-  
+
   // Auto-convert background color when switching to dark mode
   useEffect(() => {
     if (!userSetBackgroundColor) {
       // Only auto-convert if user hasn't set a custom color
       if (isDarkMode && reportBackgroundColor === '#ffffff') {
-        setReportBackgroundColor('#1e293b');
-      } else if (!isDarkMode && reportBackgroundColor === '#1e293b') {
+        setReportBackgroundColor('#0C0C10');
+      } else if (!isDarkMode && (reportBackgroundColor === '#0C0C10' || reportBackgroundColor === '#1e293b')) {
         setReportBackgroundColor('#ffffff');
       }
     }
@@ -337,18 +396,23 @@ const BIWorkspace = ({
   const quickMeasurePanelRef = useRef(null);
   const buttonBookmarksRef = useRef({});
   const buttonPageHistoryRef = useRef([]);
-  
+
   // -- State: Multi-page & Transformations --
   const [pages, setPages] = useState(DEFAULT_PAGES);
   const [activePageId, setActivePageId] = useState('page-1');
   const [showMeasureBar, setShowMeasureBar] = useState(false);
   const [measureFormula, setMeasureFormula] = useState('Measure = ');
   const [measures, setMeasures] = useState([]);
+  const [isMeasureDesignerOpen, setIsMeasureDesignerOpen] = useState(false);
+  const [editingMeasure, setEditingMeasure] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [uploadJob, setUploadJob] = useState({ active: false, phase: 'idle', progress: 0, message: '' });
   const [isFieldsRefreshing, setIsFieldsRefreshing] = useState(false);
   const [showAddFileModal, setShowAddFileModal] = useState(false);
+  const [measureToDelete, setMeasureToDelete] = useState(null);
+  const [deleteImpactData, setDeleteImpactData] = useState(null);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   /** True after File → Blank report until data is loaded for the new report or user cancels. Hides the previous report UI. */
   const [isNewReportDraft, setIsNewReportDraft] = useState(false);
   const [showSqlModal, setShowSqlModal] = useState(false);
@@ -400,7 +464,15 @@ const BIWorkspace = ({
   const [selectedConnector, setSelectedConnector] = useState(null);
   const [showDataVaultPanel, setShowDataVaultPanel] = useState(false);
   const [showMarkDateTableModal, setShowMarkDateTableModal] = useState(false);
+  const [showNewTableModal, setShowNewTableModal] = useState(false);
+  const [editCalculatedTable, setEditCalculatedTable] = useState(null);
   const [showChangeDetectionModal, setShowChangeDetectionModal] = useState(false);
+  const [showRefreshSettingsModal, setShowRefreshSettingsModal] = useState(false);
+  const [showQueryEditor, setShowQueryEditor] = useState(false);
+  const [queryEditorMode, setQueryEditorMode] = useState('edit');
+  const [showDataSourceSettings, setShowDataSourceSettings] = useState(false);
+  const [showParameterManager, setShowParameterManager] = useState(false);
+  const [showVariableManager, setShowVariableManager] = useState(false);
   // ── RLS state ──────────────────────────────────────────────────────────────
   const [showManageRoles, setShowManageRoles] = useState(false);
   const [showViewAs, setShowViewAs] = useState(false);
@@ -414,12 +486,12 @@ const BIWorkspace = ({
       if (typeof resource === 'string' && config) {
         const method = (config.method || 'GET').toUpperCase();
         if (['PUT', 'POST', 'PATCH', 'DELETE'].includes(method)) {
-           const headers = new Headers(config.headers || {});
-           if (simulationData.isViewAsActive && simulationData.activeRoles.length > 0) {
-             headers.set('X-Simulated-Role', simulationData.activeRoles.map(r => r.id).join(','));
-           }
-           config.headers = headers;
-           args[1] = config;
+          const headers = new Headers(config.headers || {});
+          if (simulationData.isViewAsActive && simulationData.activeRoles.length > 0) {
+            headers.set('X-Simulated-Role', simulationData.activeRoles.map(r => r.id).join(','));
+          }
+          config.headers = headers;
+          args[1] = config;
         }
       }
       return originalFetch.apply(this, args);
@@ -450,6 +522,19 @@ const BIWorkspace = ({
     alert(`"${element.title}" added to report. Open Insert > Paginated Report to generate PDF.`);
   }, []);
 
+  const handleDeleteVisual = useCallback((id) => {
+    if (!id) return;
+    setGraphs((prev) => prev.filter((g) => g.id !== id));
+    setActiveVisualId((prev) => (prev === id ? null : prev));
+    setFocusedVisualId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  const handleExpandVisual = useCallback((graph) => {
+    if (!graph?.id) return;
+    setFocusedVisualId(graph.id);
+    setSelectedData(null);
+  }, []);
+
   // Auto-update port based on DB type for SQL Modal
   useEffect(() => {
     if (showSqlModal) {
@@ -470,7 +555,7 @@ const BIWorkspace = ({
       setSqlSavedProfiles([]);
       return;
     }
-    fetch(`/api/db/saved?user_id=${encodeURIComponent(userId)}`)
+    fetch(`/analytics/api/db/saved?user_id=${encodeURIComponent(userId)}`)
       .then((r) => r.json())
       .then((d) => setSqlSavedProfiles(Array.isArray(d.profiles) ? d.profiles : []))
       .catch(() => setSqlSavedProfiles([]));
@@ -483,7 +568,7 @@ const BIWorkspace = ({
     setSqlSuccess('');
     setIsSqlConnecting(true);
     try {
-      const response = await fetch(`/api/connections/connect/${encodeURIComponent(profileId)}`, {
+      const response = await fetch(`/analytics/api/connections/connect/${encodeURIComponent(profileId)}`, {
         method: 'POST'
       });
       const data = await parseJsonResponseSafely(response);
@@ -548,9 +633,20 @@ const BIWorkspace = ({
     }
   }, []);
 
-  const handleOpenConnectorForm = async (engine) => {
+  const handleOpenConnectorForm = async (connectorResult) => {
+    if (connectorResult && typeof connectorResult === 'object') {
+      if (connectorResult.tableName) {
+        setShowConnectorsModal(false);
+        return;
+      }
+      connectorResult = connectorResult.engine || connectorResult.id || '';
+    }
+
+    const engine = String(connectorResult || '').trim();
+    if (!engine) return;
+
     try {
-      const res = await fetch(`/api/connectors/${engine}/schema`);
+      const res = await fetch(`/analytics/api/connectors/${encodeURIComponent(engine)}/schema`);
       if (!res.ok) throw new Error('Failed to fetch connector schema');
       const data = await res.json();
       setSelectedConnector({
@@ -643,8 +739,8 @@ const BIWorkspace = ({
 
         const inferred =
           (numericCount > 0) ? 'numeric'
-          : (dateCount / total >= 0.8) ? 'datetime'
-          : 'categorical';
+            : (dateCount / total >= 0.8) ? 'datetime'
+              : 'categorical';
 
         // Prefer inferred when it is numeric/datetime; otherwise keep backendType if present.
         const data_type = (inferred === 'numeric' || inferred === 'datetime')
@@ -669,12 +765,18 @@ const BIWorkspace = ({
 
   const [modelRelationships, setModelRelationships] = useState([]);
   const [modelActionRequest, setModelActionRequest] = useState(null);
-  
-  const { filters, removeFilter, clearFilters } = useGlobalFilters();
 
-  // -- State: Date Hierarchy & Filters --
-  const [dateHierarchy, setDateHierarchy] = useState(null);
-  const [dateFilter, setDateFilter] = useState({ year: null, month: null, quarter: null });
+  const {
+    filters,
+    removeFilter,
+    clearFilters,
+    applyReportCrossFilter,
+    clearReportCrossFilter,
+    reportCrossFilterEnabled,
+    crossFilterSourceVisualId,
+  } = useGlobalFilters();
+
+  // -- State: Chart refresh --
   const [isRefreshingCharts, setIsRefreshingCharts] = useState(false);
 
   useEffect(() => {
@@ -695,69 +797,51 @@ const BIWorkspace = ({
   // Global Change Detection Polling
   useEffect(() => {
     if (!fileId && (!modelTables || modelTables.length === 0)) return;
-    
+
     // Track notified changes to prevent spam
     const notifiedIds = new Set();
-    
+
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('/api/modeling/change-detection/status');
+        const res = await fetch('/analytics/api/modeling/change-detection/status');
         if (res.ok) {
           const data = await res.json();
+          if (!Array.isArray(data)) return;
           // Filter to only configs active in the current app context
           const currentTableIds = new Set();
           if (fileId) currentTableIds.add(fileId);
           if (modelTables) modelTables.forEach(t => currentTableIds.add(t.id));
-          
-          const changedConfigs = data.filter(c => 
-              currentTableIds.has(c.table_name) && 
-              c.status === 'Changed' && 
-              !notifiedIds.has(c.id)
+
+          const changedConfigs = data.filter(c =>
+            currentTableIds.has(c.table_name) &&
+            c.status === 'Changed' &&
+            !notifiedIds.has(c.id)
           );
-          
+
           if (changedConfigs.length > 0) {
             changedConfigs.forEach(c => notifiedIds.add(c.id));
-            
+
             // Step 6b: Auto-refresh charts and show toast instead of alert()
             setIsRefreshingCharts(true);
             setTimeout(() => setIsRefreshingCharts(false), 5000);
-            
+
             // Refresh visible graphs
             const activePageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
             const visible = activePageGraphs.filter((g) => !g?.options?.isHidden);
             prefetchVisibleGraphData(visible, datasetTotalRows);
-            
+
             // Reset status on backend
-            fetch(`/api/modeling/change-detection/reset/${changedConfigs[0].id}`, { method: 'POST' });
+            fetch(`/analytics/api/modeling/change-detection/reset/${changedConfigs[0].id}`, { method: 'POST' });
           }
         }
       } catch (err) {
-         // ignore fetch errors on poll
+        // ignore fetch errors on poll
       }
     }, 15000); // Check every 15s from the frontend
-    
+
     return () => clearInterval(interval);
   }, [fileId, modelTables, graphs, activePageId, datasetTotalRows]);
 
-  // Trigger charts refresh when date filters change
-  useEffect(() => {
-    if (!fileId || graphs.length === 0) return;
-    const activePageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
-    const visible = activePageGraphs.filter((g) => !g?.options?.isHidden);
-    prefetchVisibleGraphData(visible, datasetTotalRows);
-  }, [dateFilter]);
-
-  // Fetch Date Hierarchy
-  useEffect(() => {
-    if (!fileId) {
-      setDateHierarchy(null);
-      return;
-    }
-    fetch(`/api/modeling/date-hierarchy/${fileId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setDateHierarchy(d))
-      .catch(() => setDateHierarchy(null));
-  }, [fileId]);
   /** Server flag: blank report stub; Model view hides synthetic "main" table until real data exists. */
   const [blankReport, setBlankReport] = useState(false);
 
@@ -879,6 +963,40 @@ const BIWorkspace = ({
     }
   }, [fileId]);
 
+  const applyReportNoFill = useCallback(() => {
+    setReportNoFill(true);
+    setGraphs((prev) => prev.map((g) => ({
+      ...g,
+      options: {
+        ...(g.options || {}),
+        noFill: true,
+        bgColor: 'transparent',
+      },
+    })));
+  }, []);
+
+  const applyReportBackgroundFill = useCallback((color) => {
+    setReportNoFill(false);
+    setGraphs((prev) => prev.map((g) => ({
+      ...g,
+      options: {
+        ...(g.options || {}),
+        noFill: false,
+        bgColor: color,
+      },
+    })));
+  }, []);
+
+  const applyReportBackgroundReset = useCallback(() => {
+    setReportNoFill(false);
+    setGraphs((prev) => prev.map((g) => {
+      const opts = { ...(g.options || {}) };
+      delete opts.noFill;
+      delete opts.bgColor;
+      return { ...g, options: opts };
+    }));
+  }, []);
+
   const applyVisualUpdate = useCallback((visualId, updates) => {
     const startedAt = performance.now();
     const nextOptions = updates?.options;
@@ -909,7 +1027,12 @@ const BIWorkspace = ({
       const next = { ...g, ...updates };
       if (Object.prototype.hasOwnProperty.call(updates || {}, 'options')) {
         const nextOptions = cloneValue(updates?.options) || {};
-        next.options = { ...(g.options || {}), ...nextOptions };
+        const mergedOptions = { ...(g.options || {}), ...nextOptions };
+        // null = explicitly remove an option key (e.g. reset chart colors)
+        for (const [optKey, optVal] of Object.entries(nextOptions)) {
+          if (optVal === null) delete mergedOptions[optKey];
+        }
+        next.options = mergedOptions;
       }
       if (shouldInvalidateCache && !Object.prototype.hasOwnProperty.call(updates, 'cached_data')) {
         next.cached_data = null;
@@ -918,14 +1041,11 @@ const BIWorkspace = ({
     }));
 
     // Keep current side-pane tab unless caller explicitly asks to open filters.
-    if (
-      updates?.openFiltersPane &&
-      nextOptions &&
-      Object.prototype.hasOwnProperty.call(nextOptions, 'filters')
-    ) {
+    if (updates?.openFiltersPane) {
       setActiveVisualId(visualId);
       setRightPaneTab('filters');
       setActiveUtilityPane(null);
+      setIsRightPanesCollapsed(false);
       if (rightPanesPanelRef.current) {
         rightPanesPanelRef.current.expand();
       }
@@ -933,6 +1053,58 @@ const BIWorkspace = ({
 
     appendPerfLog('Visual update', performance.now() - startedAt);
   }, [appendPerfLog]);
+
+  /** Clear cached chart payloads so cross-filter refetches run on every visual. */
+  const invalidateAllVisualCaches = useCallback(() => {
+    setGraphs((prev) => prev.map((g) => ({ ...g, cached_data: null })));
+  }, []);
+
+  /** Apply the selected visual's slicer to every linked chart on the page (report-wide cross-filter). */
+  const applyCrossFilterToAllVisuals = useCallback((sourceVisualId, rules) => {
+    const normalized = normalizeFilterRules(rules).filter(
+      (f) => f?.field && f.operator === 'equals' && f.value != null && String(f.value).trim() !== ''
+    );
+    if (!sourceVisualId || normalized.length === 0) return;
+
+    flushSync(() => {
+      applyReportCrossFilter(sourceVisualId, normalized);
+    });
+
+    setGraphs((prev) =>
+      prev.map((g) => {
+        if (g.options?.crossFilterLinked === false) return g;
+        return {
+          ...g,
+          cached_data: null,
+          options: {
+            ...(g.options || {}),
+            pageFilters: normalized,
+          },
+        };
+      })
+    );
+  }, [applyReportCrossFilter]);
+
+  const unlinkCrossFilterFromAllVisuals = useCallback(() => {
+    flushSync(() => {
+      clearReportCrossFilter();
+    });
+    setGraphs((prev) =>
+      prev.map((g) => {
+        if (g.options?.crossFilterLinked === false) return g;
+        return {
+          ...g,
+          cached_data: null,
+          options: {
+            ...(g.options || {}),
+            filters: [],
+            pageFilters: [],
+          },
+        };
+      })
+    );
+  }, [clearReportCrossFilter]);
+
   const hasVizType = useCallback((dataTransfer) => {
     if (!dataTransfer) return false;
     const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
@@ -964,7 +1136,7 @@ const BIWorkspace = ({
       setDatasetLoadError(null);
       const safePage = Number.isFinite(page) && page > 0 ? page : 1;
       const offset = (safePage - 1) * datasetPageSize;
-      const res = await fetch(`/api/files/${fileId}/dataset?limit=${datasetPageSize}&offset=${offset}`);
+      const res = await fetch(`/analytics/api/files/${fileId}/dataset?limit=${datasetPageSize}&offset=${offset}`);
       if (res.status === 404) {
         setDataset(null);
         setDatasetLoadError(null);
@@ -1030,11 +1202,7 @@ const BIWorkspace = ({
     return () => document.body.classList.remove('report-active');
   }, []);
 
-  /**
-   * Data Summary: keep the left panel collapsed by default.
-   * The Panel only mounts after `isInitialLoading` is false, so an effect with `[]` ran while `ref` was null.
-   * Re-run when loading finishes, the report view mounts, or the file changes.
-   */
+  /* Data Summary panel disabled
   useLayoutEffect(() => {
     if (isInitialLoading) return;
     if (activeView !== 'report') return;
@@ -1046,6 +1214,7 @@ const BIWorkspace = ({
     const raf = requestAnimationFrame(collapseInsights);
     return () => cancelAnimationFrame(raf);
   }, [isInitialLoading, activeView, fileId]);
+  */
 
   // -- Effects: Data Initialization --
   useEffect(() => {
@@ -1109,7 +1278,7 @@ const BIWorkspace = ({
 
     const checkStatus = async () => {
       try {
-        const statusRes = await fetch(`/api/files/${fileId}/status`);
+        const statusRes = await fetch(`/analytics/api/files/${fileId}/status`);
         if (!statusRes.ok) return;
         const statusData = await statusRes.json();
         setFileDetails(statusData);
@@ -1135,9 +1304,9 @@ const BIWorkspace = ({
     try {
       if (!isBackground) setIsInitialLoading(true);
       let detectedRowCount = Number(fileDetails?.row_count || 0);
-      
+
       // 1. Fetch File Status
-      const statusRes = await fetch(`/api/files/${fileId}/status`);
+      const statusRes = await fetch(`/analytics/api/files/${fileId}/status`);
       if (statusRes.ok) {
         const statusData = await statusRes.ok ? await statusRes.json() : { status: 'failed' };
         setFileDetails(statusData);
@@ -1147,12 +1316,13 @@ const BIWorkspace = ({
       }
 
       // 2-6. Fetch workspace payloads in parallel to reduce startup latency.
-      const [schemaRes, statsRes, graphsRes, modelRes, diagnosticsRes] = await Promise.all([
-        fetch(`/api/files/${fileId}/schema`),
-        fetch(`/api/files/${fileId}/statistics`),
-        fetch(`/api/files/${fileId}/graphs`),
-        fetch(`/api/files/${fileId}/model`),
-        fetch(`/api/files/${fileId}/model/diagnostics`)
+      const [schemaRes, statsRes, graphsRes, modelRes, diagnosticsRes, measuresRes] = await Promise.all([
+        fetch(`/analytics/api/files/${fileId}/schema`),
+        fetch(`/analytics/api/files/${fileId}/statistics`),
+        fetch(`/analytics/api/files/${fileId}/graphs`),
+        fetch(`/analytics/api/files/${fileId}/model`),
+        fetch(`/analytics/api/files/${fileId}/model/diagnostics`),
+        fetch(`/analytics/api/modeling/measures?file_id=${fileId}`)
       ]);
 
       if (schemaRes.ok) {
@@ -1173,6 +1343,11 @@ const BIWorkspace = ({
           .filter((c) => c.column_name && c.column_name.trim() !== '');
 
         setSchema(normalizedSchema);
+      }
+
+      if (measuresRes && measuresRes.ok) {
+        const measuresData = await measuresRes.json();
+        setMeasures(measuresData || []);
       }
 
       if (statsRes.ok) {
@@ -1367,6 +1542,7 @@ const BIWorkspace = ({
               ? modelData.reportBackgroundColor
               : '#ffffff'
           );
+          setReportNoFill(modelData.reportNoFill === true);
         }
 
         prefetchVisibleGraphData(normalizedGraphs, detectedRowCount);
@@ -1410,6 +1586,7 @@ const BIWorkspace = ({
               ? modelData.reportBackgroundColor
               : '#ffffff'
           );
+          setReportNoFill(modelData.reportNoFill === true);
           if (modelData.sql_dataset) {
             setSqlDatasetConfig(modelData.sql_dataset);
           } else {
@@ -1450,7 +1627,7 @@ const BIWorkspace = ({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/sql-dataset`, {
+        const res = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/sql-dataset`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1607,7 +1784,7 @@ const BIWorkspace = ({
 
     const updates = await Promise.all(candidates.map(async (g) => {
       try {
-        const res = await fetch(`/api/files/${fileId}/graph-data`, {
+        const res = await fetch(`/analytics/api/files/${fileId}/graph-data`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1617,9 +1794,6 @@ const BIWorkspace = ({
             aggregation: g.aggregation,
             dimension_fields: g?.options?.dimension_fields || [],
             measure_fields: g?.options?.measure_fields || [],
-            year_filter: dateFilter.year,
-            month_filter: dateFilter.month,
-            quarter_filter: dateFilter.quarter
           })
         });
         if (!res.ok) return null;
@@ -1716,7 +1890,7 @@ const BIWorkspace = ({
       const pdf = new jsPDF('l', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      
+
       const margin = 10;
       const contentWidth = pdfWidth - (2 * margin);
       const contentHeight = (canvas.height * contentWidth) / canvas.width;
@@ -1797,7 +1971,7 @@ const BIWorkspace = ({
     if (userId) formData.append('user_id', userId);
     try {
       setUploadJob({ active: true, phase: 'uploading', progress: 15, message: 'Uploading file...' });
-      const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
+      const res = await fetch('/analytics/api/files/upload', { method: 'POST', body: formData });
       if (!res.ok) {
         let msg = `Upload failed (${res.status})`;
         if (res.status === 413) {
@@ -1812,7 +1986,7 @@ const BIWorkspace = ({
             const text = await res.text();
             if (text && text.trim()) msg = text.slice(0, 300);
           }
-        } catch {}
+        } catch { }
         alert(msg);
         if (newFileInputRef.current) newFileInputRef.current.value = '';
         return false;
@@ -1827,7 +2001,7 @@ const BIWorkspace = ({
       while (!isComplete && attempts < maxPollAttempts) {
         await new Promise((r) => setTimeout(r, 1200));
         attempts += 1;
-        const statusRes = await fetch(`/api/files/${newFileId}/status`);
+        const statusRes = await fetch(`/analytics/api/files/${newFileId}/status`);
         if (!statusRes.ok) continue;
         const statusData = await statusRes.json();
         const status = String(statusData?.status || '').toLowerCase();
@@ -1846,7 +2020,7 @@ const BIWorkspace = ({
 
       if (fileId && !isNewReportDraft) {
         try {
-          const addRes = await fetch(`/api/files/${encodeURIComponent(fileId)}/model/add-table`, {
+          const addRes = await fetch(`/analytics/api/files/${encodeURIComponent(fileId)}/model/add-table`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1870,7 +2044,7 @@ const BIWorkspace = ({
             await fetchInitialData(true);
             await loadDatasetForFeatures(1);
             try {
-              const diagnosticsRes = await fetch(`/api/files/${fileId}/model/diagnostics`);
+              const diagnosticsRes = await fetch(`/analytics/api/files/${fileId}/model/diagnostics`);
               if (diagnosticsRes.ok) {
                 setModelDiagnostics(await diagnosticsRes.json());
               }
@@ -1898,8 +2072,7 @@ const BIWorkspace = ({
       if (onOpenFile) {
         onOpenFile({ id: data.file_id, fileName: file.name });
       } else {
-        navigate(`/?fileId=${data.file_id}&fileName=${encodeURIComponent(file.name)}`, { replace: true });
-        window.location.reload();
+        navigate(`/analytics/workspace/${data.file_id}?fileName=${encodeURIComponent(file.name)}`, { replace: true });
       }
 
       if (newFileInputRef.current) newFileInputRef.current.value = '';
@@ -1937,7 +2110,7 @@ const BIWorkspace = ({
     const fd = new FormData();
     if (userId) fd.append('user_id', userId);
     try {
-      const res = await fetch('/api/files/blank-report', { method: 'POST', body: fd });
+      const res = await fetch('/analytics/api/files/blank-report', { method: 'POST', body: fd });
       if (!res.ok) {
         let msg = `Could not start blank report (${res.status})`;
         try {
@@ -1946,7 +2119,7 @@ const BIWorkspace = ({
             const err = await res.json();
             msg = err?.detail || err?.message || msg;
           }
-        } catch {}
+        } catch { }
         alert(msg);
         try {
           sessionStorage.removeItem(OSA_OPEN_SQL_AFTER_NEW_REPORT);
@@ -1975,36 +2148,89 @@ const BIWorkspace = ({
     }
   };
 
+  const openBlankCanvasReport = async () => {
+    const fd = new FormData();
+    if (userId) fd.append('user_id', userId);
+    try {
+      const res = await fetch('/analytics/api/files/blank-report', { method: 'POST', body: fd });
+      if (!res.ok) {
+        let msg = `Could not start blank canvas report (${res.status})`;
+        try {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const err = await res.json();
+            msg = err?.detail || err?.message || msg;
+          }
+        } catch { }
+        alert(msg);
+        return;
+      }
+      const data = await res.json();
+      const name = data.file_name || 'Untitled report.csv';
+      updateRecentFiles(data.file_id, name);
+
+      // Close the modal and reset draft state
+      setShowAddFileModal(false);
+      setIsNewReportDraft(false);
+
+      if (onOpenFile) {
+        onOpenFile({ id: data.file_id, fileName: name });
+      } else {
+        navigate(`/analytics/workspace/${data.file_id}?fileName=${encodeURIComponent(name)}`, { replace: true });
+      }
+    } catch (err) {
+      console.error('Blank canvas report failed:', err);
+      alert('Could not start a blank canvas report. Ensure the backend is running.');
+    }
+  };
+
   // -- Handlers: AI Insights --
   const AI_TASK_ENDPOINT = {
-    explain: '/api/ai/explain-chart',
-    trend: '/api/ai/explain-trend',
-    anomalies: '/api/ai/anomaly-detection',
-    rootCause: '/api/ai/root-cause',
-    summary: '/api/ai/generate-summary',
-    nextSteps: '/api/ai/next-steps',
-    story: '/api/ai/story',
+    explain: '/analytics/api/ai/explain-chart',
+    trend: '/analytics/api/ai/explain-trend',
+    anomalies: '/analytics/api/ai/anomaly-detection',
+    rootCause: '/analytics/api/ai/root-cause',
+    summary: '/analytics/api/ai/generate-summary',
+    nextSteps: '/analytics/api/ai/next-steps',
+    story: '/analytics/api/ai/story',
   };
 
   const buildAIChartContext = useCallback(() => {
     const pageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
     const selected = activeVisualId ? pageGraphs.find((g) => g.id === activeVisualId) : null;
     const target = selected || pickBestVisual(pageGraphs);
-    if (!target) return { ctx: null, fallback: false };
+    if (!target) return { ctx: null, fallback: false, target: null };
     const pageName = (pages || []).find((p) => p.id === activePageId)?.name || '';
     const ctx = extractChartContext(target, { pageName });
     return { ctx, fallback: !selected, target };
   }, [graphs, activePageId, activeVisualId, pages, getGraphPageId]);
 
+  const resolveAIChartContext = useCallback(async () => {
+    const pageGraphs = graphs.filter((g) => getGraphPageId(g) === activePageId);
+    const selected = activeVisualId ? pageGraphs.find((g) => g.id === activeVisualId) : null;
+    const target = selected || pickBestVisual(pageGraphs);
+    if (!target) return { ctx: null, fallback: false, target: null };
+    const pageName = (pages || []).find((p) => p.id === activePageId)?.name || '';
+    const ctx = await hydrateChartContext(target, fileId, { pageName });
+    return { ctx, fallback: !selected, target };
+  }, [graphs, activePageId, activeVisualId, pages, getGraphPageId, fileId]);
+
   const runAIInsight = useCallback(async (task, opts = {}) => {
     const endpoint = AI_TASK_ENDPOINT[task];
     if (!endpoint) return;
-    const { ctx } = buildAIChartContext();
+    const { ctx } = await resolveAIChartContext();
     if (!ctx) {
       setAiPanelOpen(true);
       setAiTask(task);
       setAiResult(null);
       setAiError('No visual is available on this page. Add a chart, then try again.');
+      return;
+    }
+    if (!Array.isArray(ctx.data) || !ctx.data.length) {
+      setAiPanelOpen(true);
+      setAiTask(task);
+      setAiResult(null);
+      setAiError('This visual has no data yet. Wait for the chart to load, or check axis fields.');
       return;
     }
     setAiPanelOpen(true);
@@ -2026,14 +2252,20 @@ const BIWorkspace = ({
     } finally {
       setAiLoading(false);
     }
-  }, [buildAIChartContext, aiMode]);
+  }, [resolveAIChartContext, aiMode]);
 
   const runAIAsk = useCallback(async (question) => {
-    const { ctx } = buildAIChartContext();
+    const { ctx } = await resolveAIChartContext();
     if (!ctx) {
       setAiPanelOpen(true);
       setAiTask('ask');
       setAiError('No visual is available to ask about.');
+      return;
+    }
+    if (!Array.isArray(ctx.data) || !ctx.data.length) {
+      setAiPanelOpen(true);
+      setAiTask('ask');
+      setAiError('This visual has no data yet. Wait for the chart to load, then ask again.');
       return;
     }
     setAiPanelOpen(true);
@@ -2042,7 +2274,7 @@ const BIWorkspace = ({
     setAiChatHistory((prev) => [...prev, { role: 'user', content: question }]);
     setAiLoading(true);
     try {
-      const res = await fetch('/api/ai/ask', {
+      const res = await fetch('/analytics/api/ai/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2063,7 +2295,7 @@ const BIWorkspace = ({
     } finally {
       setAiLoading(false);
     }
-  }, [buildAIChartContext, aiMode, aiChatHistory]);
+  }, [resolveAIChartContext, aiMode, aiChatHistory]);
 
   const exportAIReport = useCallback(() => {
     if (!aiResult) {
@@ -2108,16 +2340,20 @@ const BIWorkspace = ({
 
   // -- Handlers: Ribbon Actions --
   const handleRibbonAction = async (actionId, ...args) => {
+    if (simulationData.effectivePermission === 'view' && isViewOnlyWriteAction(actionId)) {
+      return;
+    }
+
     const patchModelConfig = async (partial) => {
       if (!fileId || !partial || typeof partial !== 'object') return null;
       try {
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
+        const modelRes = await fetch(`/analytics/api/files/${fileId}/model`);
         const existing = modelRes.ok ? await modelRes.json() : {};
         const payload = {
           ...(existing && typeof existing === 'object' ? existing : {}),
           ...(partial || {}),
         };
-        const saveRes = await fetch(`/api/files/${fileId}/model`, {
+        const saveRes = await fetch(`/analytics/api/files/${fileId}/model`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -2166,7 +2402,7 @@ const BIWorkspace = ({
         }
         console.log('📄 [Ribbon] Save As triggered. Default name:', defaultName);
         let newName = prompt('Save report as:', defaultName);
-        
+
         if (newName && fileId) {
           if (!newName.toLowerCase().endsWith('.osa')) {
             newName += '.osa';
@@ -2181,14 +2417,14 @@ const BIWorkspace = ({
               alert('Could not save current report state before Save As.');
               break;
             }
-            
+
             console.log('📄 [Ribbon] Current state saved. Sending save-as request for:', newName);
-            const res = await fetch(`/api/files/${fileId}/save-as`, {
+            const res = await fetch(`/analytics/api/files/${fileId}/save-as`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ fileName: newName })
             });
-            
+
             if (res.ok) {
               const data = await res.json();
               console.log('✅ [Ribbon] Save As successful. New file ID:', data.file_id);
@@ -2542,9 +2778,8 @@ const BIWorkspace = ({
         break;
       case 'new_measure':
         setActiveView('report');
-        setShowMeasureBar(true);
-        setMeasureFormula('Measure = ');
-        setRibbonTab('Measure tools');
+        setEditingMeasure(null);
+        setIsMeasureDesignerOpen(true);
         break;
       case 'new_visual_calc':
         setActiveView('report');
@@ -2569,7 +2804,7 @@ const BIWorkspace = ({
           };
           let currentCalc = [];
           try {
-            const res = await fetch(`/api/files/${fileId}/model`);
+            const res = await fetch(`/analytics/api/files/${fileId}/model`);
             const j = res.ok ? await res.json() : {};
             currentCalc = Array.isArray(j?.calculated_columns) ? j.calculated_columns : [];
           } catch {
@@ -2600,6 +2835,14 @@ const BIWorkspace = ({
         setActiveView('model');
         setModelActionRequest({ type: 'new_table', ts: Date.now() });
         break;
+      case 'new_calculated_table':
+        if (!fileId) {
+          alert('Please load a report first before creating a table.');
+          break;
+        }
+        setEditCalculatedTable(null);
+        setShowNewTableModal(true);
+        break;
       case 'manage_relationships':
         setActiveView('model');
         setModelActionRequest({ type: 'manage_relationships', ts: Date.now() });
@@ -2610,6 +2853,13 @@ const BIWorkspace = ({
           return;
         }
         setShowMarkDateTableModal(true);
+        break;
+      case 'refresh_settings':
+        if (!fileId) {
+          alert('Please load a report first to configure refresh settings.');
+          return;
+        }
+        setShowRefreshSettingsModal(true);
         break;
       case 'change_detection':
         if (!fileId) {
@@ -2626,7 +2876,7 @@ const BIWorkspace = ({
         const max = Number(prompt('Maximum value:', '100'));
         const step = Number(prompt('Step:', '1'));
         const def = Number(prompt('Default value:', String(min)));
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
+        const modelRes = await fetch(`/analytics/api/files/${fileId}/model`);
         const existing = modelRes.ok ? await modelRes.json() : {};
         const prev = Array.isArray(existing?.parameters) ? existing.parameters : [];
         const param = { id: `param-${Date.now()}`, type: 'numeric', name: name.trim(), min, max, step, default: def };
@@ -2641,7 +2891,7 @@ const BIWorkspace = ({
         const fieldsRaw = prompt('Comma-separated fields to include:', (schema || []).slice(0, 5).map((c) => c.column_name).join(', '));
         if (!fieldsRaw) break;
         const fields = fieldsRaw.split(',').map((s) => s.trim()).filter(Boolean);
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
+        const modelRes = await fetch(`/analytics/api/files/${fileId}/model`);
         const existing = modelRes.ok ? await modelRes.json() : {};
         const prev = Array.isArray(existing?.parameters) ? existing.parameters : [];
         const param = { id: `param-${Date.now()}`, type: 'field', name: name.trim(), fields };
@@ -2659,7 +2909,7 @@ const BIWorkspace = ({
       case 'qna_language':
       case 'qna_schema': {
         setActiveView('model');
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
+        const modelRes = await fetch(`/analytics/api/files/${fileId}/model`);
         const existing = modelRes.ok ? await modelRes.json() : {};
         const qna = { ...(existing?.qna || {}) };
         if (actionId === 'qna_setup') {
@@ -2701,7 +2951,47 @@ const BIWorkspace = ({
         setShowMeasureBar(true);
         setMeasureFormula(visualCalcTemplates[actionId] || 'Visual calculation = ');
         break;
+      case 'transform_data':
+        if (!fileId) {
+          alert('Please load a report with data first.');
+          return;
+        }
+        setQueryEditorMode('transform');
+        setShowQueryEditor(true);
+        break;
+      case 'edit_queries':
+        if (!fileId) {
+          alert('Please load a report with data first.');
+          return;
+        }
+        setQueryEditorMode('edit');
+        setShowQueryEditor(true);
+        break;
+      case 'data_src_settings':
+        if (!fileId) {
+          alert('Please load a report first.');
+          return;
+        }
+        setShowDataSourceSettings(true);
+        break;
+      case 'manage_parameters':
+        if (!fileId) {
+          alert('Please load a report first.');
+          return;
+        }
+        setShowParameterManager(true);
+        break;
+      case 'edit_variables':
+        if (!fileId) {
+          alert('Please load a report first.');
+          return;
+        }
+        setShowVariableManager(true);
+        break;
       case 'refresh':
+        if (fileId) {
+          dataManagementApi.refreshNow(fileId).catch(() => {});
+        }
         fetchInitialData();
         break;
       case 'enter_data':
@@ -2783,7 +3073,7 @@ const BIWorkspace = ({
         const target = presentContainerRef.current || reportRef.current;
         if (!target) break;
         if (document.fullscreenElement) {
-          document.exitFullscreen?.().catch(() => {});
+          document.exitFullscreen?.().catch(() => { });
           break;
         }
         target.requestFullscreen?.().catch(() => {
@@ -2851,14 +3141,14 @@ const BIWorkspace = ({
     const defaultWidth = 520;
     const defaultHeight = 360;
     const fallbackOffset = (graphs.length % 8) * 24;
-    
+
     const newVisual = {
       id: newId,
       graph_type: type,
       x_axis: '',
       y_axis: '',
-      options: { 
-        title: `New ${type.toUpperCase()}`,
+      options: {
+        title: defaultVisualTitle(type),
         size: 'medium',
         layerOrder: Date.now(),
         pageId: activePageId,
@@ -2868,13 +3158,20 @@ const BIWorkspace = ({
         y: Number.isFinite(dropPosition?.y) ? Math.max(0, dropPosition.y) : 120 + fallbackOffset
       }
     };
-    
+
     if (type === 'text') {
       newVisual.options.isText = true;
       newVisual.options.content = 'Double-click to edit text box';
+      newVisual.options.width = TEXT_BOX_DEFAULT_SIZE.width;
+      newVisual.options.height = TEXT_BOX_DEFAULT_SIZE.height;
+      newVisual.options.size = 'custom';
     }
 
-    if (type === 'metricCard') {
+    if (type === 'pie' || type === 'donut') {
+      newVisual.options.width = PIE_DONUT_DEFAULT_SIZE.width;
+      newVisual.options.height = PIE_DONUT_DEFAULT_SIZE.height;
+      newVisual.options.size = 'small';
+    } else if (type === 'metricCard') {
       newVisual.options.title = newVisual.options.title || 'Metric card';
       newVisual.options.width = METRIC_CARD_DEFAULT_SIZE.width;
       newVisual.options.height = METRIC_CARD_DEFAULT_SIZE.height;
@@ -2882,6 +3179,11 @@ const BIWorkspace = ({
     } else if (type === 'kpiCard') {
       newVisual.options.width = KPI_CARD_DEFAULT_SIZE.width;
       newVisual.options.height = KPI_CARD_DEFAULT_SIZE.height;
+    }
+
+    if (reportNoFill) {
+      newVisual.options.noFill = true;
+      newVisual.options.bgColor = 'transparent';
     }
 
     setGraphs(prev => [newVisual, ...prev]);
@@ -2897,7 +3199,7 @@ const BIWorkspace = ({
       x_axis: '',
       y_axis: '',
       options: {
-        title: options.title || `New ${graphType}`,
+        title: options.title || defaultVisualTitle(graphType),
         size: 'medium',
         layerOrder: Date.now(),
         pageId: activePageId,
@@ -2905,8 +3207,19 @@ const BIWorkspace = ({
       }
     };
 
-    if (graphType === 'text' && !newVisual.options.content) {
-      newVisual.options.content = 'Double-click to edit text box';
+    if (graphType === 'text') {
+      if (!newVisual.options.content) {
+        newVisual.options.content = 'Double-click to edit text box';
+      }
+      newVisual.options.width = newVisual.options.width ?? TEXT_BOX_DEFAULT_SIZE.width;
+      newVisual.options.height = newVisual.options.height ?? TEXT_BOX_DEFAULT_SIZE.height;
+      newVisual.options.size = 'custom';
+      newVisual.options.isText = true;
+    }
+
+    if (reportNoFill) {
+      newVisual.options.noFill = true;
+      newVisual.options.bgColor = 'transparent';
     }
 
     setGraphs(prev => [newVisual, ...prev]);
@@ -3122,11 +3435,11 @@ const BIWorkspace = ({
     setReportBookmarks((prev) => prev.map((b) => (
       b.id === bookmarkId
         ? {
-            ...b,
-            name: nameFromInput || b.name,
-            state: buildBookmarkState(bookmarkSaveOptions),
-            updatedAt: Date.now()
-          }
+          ...b,
+          name: nameFromInput || b.name,
+          state: buildBookmarkState(bookmarkSaveOptions),
+          updatedAt: Date.now()
+        }
         : b
     )));
     setActiveBookmarkId(bookmarkId);
@@ -3206,11 +3519,12 @@ const BIWorkspace = ({
       });
       localStorage.setItem('osa_recent_files', JSON.stringify(filtered.slice(0, 20)));
       window.dispatchEvent(new Event('osa_recent_files_updated'));
-    } catch (_) {}
+    } catch (_) { }
   };
 
   const handleSaveLayout = useCallback(async ({ silent = false } = {}) => {
     if (!fileId) return false;
+    if (simulationData.effectivePermission === 'view') return true;
     try {
       const payload = graphs.map(g => ({
         id: g.id,
@@ -3221,7 +3535,7 @@ const BIWorkspace = ({
       }));
 
       // 1) Fetch currently saved graphs to detect deletions from canvas
-      const existingRes = await fetch(`/api/files/${fileId}/graphs`);
+      const existingRes = await fetch(`/analytics/api/files/${fileId}/graphs`);
       const existingGraphs = existingRes.ok ? await existingRes.json() : [];
 
       // Silent autosave must not delete server-side graphs while the file is still processing,
@@ -3244,7 +3558,7 @@ const BIWorkspace = ({
 
       // 2) Persist all current graphs (upsert)
       await Promise.all(payload.map(graph =>
-        fetch(`/api/files/${fileId}/save-graph`, {
+        fetch(`/analytics/api/files/${fileId}/save-graph`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(graph)
@@ -3254,13 +3568,13 @@ const BIWorkspace = ({
       // 3) Remove graphs that user deleted locally before saving
       if (deletedGraphIds.length > 0) {
         await Promise.all(deletedGraphIds.map((graphId) =>
-          fetch(`/api/graphs/${graphId}`, { method: 'DELETE' })
+          fetch(`/analytics/api/graphs/${graphId}`, { method: 'DELETE' })
         ));
       }
 
       // 4) Persist page tabs metadata (including renamed tabs) into model_config
       try {
-        const modelRes = await fetch(`/api/files/${fileId}/model`);
+        const modelRes = await fetch(`/analytics/api/files/${fileId}/model`);
         const existingModel = modelRes.ok ? await modelRes.json() : {};
         const payloadWithPages = {
           ...(existingModel && typeof existingModel === 'object' ? existingModel : {}),
@@ -3270,10 +3584,11 @@ const BIWorkspace = ({
           activePageId,
           reportHeaderText,
           reportBackgroundColor,
+          reportNoFill,
           showGridlines,
           snapToGrid,
         };
-        await fetch(`/api/files/${fileId}/model`, {
+        await fetch(`/analytics/api/files/${fileId}/model`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payloadWithPages)
@@ -3292,7 +3607,7 @@ const BIWorkspace = ({
       console.error("❌ [SaveLayout] Save failed for file:", fileId, err);
       return false;
     }
-  }, [fileId, graphs, pages, activePageId, fileName, fileDetails?.status, reportHeaderText, reportBackgroundColor, showGridlines, snapToGrid]);
+  }, [fileId, graphs, pages, activePageId, fileName, fileDetails?.status, reportHeaderText, reportBackgroundColor, reportNoFill, showGridlines, snapToGrid, simulationData.effectivePermission]);
 
   /** Auto-save report canvas and page tabs so switching views or tabs does not lose work. */
   useEffect(() => {
@@ -3354,7 +3669,7 @@ const BIWorkspace = ({
     }
 
     try {
-      const response = await fetch('/api/db/connect', {
+      const response = await fetch('/analytics/api/db/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3433,7 +3748,7 @@ const BIWorkspace = ({
   //   formData.append('password', dataverseConnData.password);
   //
   //   try {
-  //     const response = await fetch('/api/sql/connect', {
+  //     const response = await fetch('/analytics/api/sql/connect', {
   //       method: 'POST',
   //       body: formData
   //     });
@@ -3498,18 +3813,313 @@ const BIWorkspace = ({
   }, [activePageId, activeVisualId, graphs, getGraphPageId]);
 
   // -- Handlers: Formula Bar --
-  const handleMeasureConfirm = () => {
-    const parts = measureFormula.split('=');
-    const name = parts[0].trim() || `Measure ${measures.length + 1}`;
-    const formula = parts.slice(1).join('=').trim();
-    if (formula) {
-      setMeasures(prev => [...prev, { name, formula }]);
+  // -- Handlers: Semantic Measures and Drag & Drop Inference --
+  const classifyField = (fieldName) => {
+    if (!fieldName) return 'dimension';
+    const cleanName = fieldName.replace(/^\[|\]$/g, '').trim();
+    const isCustomMeasure = (measures || []).some(m => m.name === cleanName || m.display_name === cleanName);
+    if (isCustomMeasure) {
+      return 'measure';
     }
-    setShowMeasureBar(false);
+    const schemaCol = (schema || []).find(c => c.column_name === cleanName);
+    if (schemaCol) {
+      const type = (schemaCol.data_type || '').toLowerCase();
+      if (type.includes('date') || type.includes('time') || type.includes('timestamp')) {
+        return 'date';
+      }
+      const isNumeric = ['int', 'float', 'num', 'double', 'real', 'decimal'].some(t => type.includes(t));
+      if (isNumeric) {
+        return 'measure';
+      }
+      return 'dimension';
+    }
+    return 'dimension';
   };
 
-  const handleMeasureCancel = () => {
-    setShowMeasureBar(false);
+  const handleSaveMeasure = (saved) => {
+    setMeasures(prev => {
+      const idx = prev.findIndex(m => m.id === saved.id);
+      if (idx > -1) {
+        return prev.map(m => m.id === saved.id ? saved : m);
+      } else {
+        return [...prev, saved];
+      }
+    });
+  };
+
+  const handleDuplicateMeasure = async (measure) => {
+    try {
+      const res = await fetch(`/analytics/api/modeling/measures/${measure.id}/duplicate`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        const duplicated = await res.json();
+        setMeasures(prev => [...prev, duplicated]);
+      } else {
+        const err = await res.json();
+        alert(`Failed to duplicate measure: ${err.detail || 'Server error'}`);
+      }
+    } catch (e) {
+      alert(`Network error duplicating measure: ${e.message}`);
+    }
+  };
+
+  const handleArchiveMeasure = async (measure) => {
+    try {
+      const res = await fetch(`/analytics/api/modeling/measures/${measure.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Archived' })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMeasures(prev => prev.map(m => m.id === updated.id ? updated : m));
+      } else {
+        const err = await res.json();
+        alert(`Failed to archive measure: ${err.detail || 'Server error'}`);
+      }
+    } catch (e) {
+      alert(`Network error archiving measure: ${e.message}`);
+    }
+  };
+
+  const handleDeprecateMeasure = async (measure) => {
+    try {
+      const res = await fetch(`/analytics/api/modeling/measures/${measure.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Deprecated' })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMeasures(prev => prev.map(m => m.id === updated.id ? updated : m));
+      } else {
+        const err = await res.json();
+        alert(`Failed to deprecate measure: ${err.detail || 'Server error'}`);
+      }
+    } catch (e) {
+      alert(`Network error deprecating measure: ${e.message}`);
+    }
+  };
+
+  const handleDeleteMeasure = async (measure) => {
+    try {
+      setMeasureToDelete(measure);
+      const impactRes = await fetch(`/analytics/api/modeling/measures/${measure.id}/impact`);
+      if (impactRes.ok) {
+        const impactData = await impactRes.json();
+        setDeleteImpactData(impactData);
+      } else {
+        setDeleteImpactData({ is_critical: false, impact: [] });
+      }
+      setShowDeleteConfirmModal(true);
+    } catch (e) {
+      console.error(e);
+      setDeleteImpactData({ is_critical: false, impact: [] });
+      setShowDeleteConfirmModal(true);
+    }
+  };
+
+  const executeDeleteMeasure = async () => {
+    if (!measureToDelete) return;
+    try {
+      const deleteRes = await fetch(`/analytics/api/modeling/measures/${measureToDelete.id}`, {
+        method: 'DELETE'
+      });
+      if (deleteRes.ok) {
+        setMeasures(prev => prev.filter(m => m.id !== measureToDelete.id));
+        setShowDeleteConfirmModal(false);
+        setMeasureToDelete(null);
+        setDeleteImpactData(null);
+      } else {
+        const err = await deleteRes.json();
+        alert(`Failed to delete measure: ${err.detail || 'Server error'}`);
+      }
+    } catch (e) {
+      alert(`Network error deleting measure: ${e.message}`);
+    }
+  };
+
+  const handleDropFieldOnCanvas = (fieldName, dropPosition) => {
+    if (isViewOnly) return;
+    const kind = classifyField(fieldName);
+    const newId = uniqueVisualId('graph');
+    const fallbackOffset = (graphs.length % 8) * 24;
+    
+    let graphType = 'table';
+    let xAxis = '';
+    let yAxis = '';
+    let aggregation = '';
+    let measureFields = [];
+    let dimensions = [];
+    let width = 520;
+    let height = 360;
+    
+    if (kind === 'measure') {
+      graphType = 'kpiCard';
+      yAxis = fieldName;
+      const isCustom = measures.some(m => m.name === fieldName);
+      aggregation = isCustom ? 'Calculated' : 'sum';
+      measureFields = [{ column: fieldName, aggregation }];
+      width = KPI_CARD_DEFAULT_SIZE.width;
+      height = KPI_CARD_DEFAULT_SIZE.height;
+    } else {
+      graphType = 'table';
+      xAxis = fieldName;
+      dimensions = [fieldName];
+    }
+    
+    const newVisual = {
+      id: newId,
+      graph_type: graphType,
+      x_axis: xAxis,
+      y_axis: yAxis,
+      aggregation: aggregation,
+      options: {
+        title: fieldName,
+        size: 'medium',
+        layerOrder: Date.now(),
+        pageId: activePageId,
+        width: width,
+        height: height,
+        x: Number.isFinite(dropPosition?.x) ? Math.max(0, dropPosition.x) : 32 + fallbackOffset,
+        y: Number.isFinite(dropPosition?.y) ? Math.max(0, dropPosition.y) : 120 + fallbackOffset,
+        measure_fields: measureFields,
+        dimensions: dimensions
+      }
+    };
+    
+    setGraphs(prev => [...prev, newVisual]);
+    setActiveVisualId(newId);
+  };
+
+  const handleDropFieldOnVisual = (fieldName, visualId) => {
+    if (isViewOnly) return;
+    
+    setGraphs(prev => prev.map(graph => {
+      if (graph.id !== visualId) return graph;
+      
+      const currentMeasures = [];
+      if (graph.y_axis) currentMeasures.push(graph.y_axis);
+      if (Array.isArray(graph.options?.measure_fields)) {
+        graph.options.measure_fields.forEach(mf => {
+          if (mf?.column) currentMeasures.push(mf.column);
+        });
+      }
+      const uniqueMeasures = [...new Set(currentMeasures)];
+      
+      const currentDimensions = [];
+      if (graph.x_axis) currentDimensions.push(graph.x_axis);
+      if (Array.isArray(graph.options?.dimensions)) {
+        graph.options.dimensions.forEach(d => {
+          if (d) currentDimensions.push(d);
+        });
+      }
+      const uniqueDimensions = [...new Set(currentDimensions)];
+      
+      const fieldKind = classifyField(fieldName);
+      
+      let measuresList = [...uniqueMeasures];
+      let dimensionsList = [...uniqueDimensions];
+      
+      if (fieldKind === 'measure') {
+        if (!measuresList.includes(fieldName)) {
+          measuresList.push(fieldName);
+        }
+      } else {
+        if (!dimensionsList.includes(fieldName)) {
+          dimensionsList.push(fieldName);
+        }
+      }
+      
+      const dates = dimensionsList.filter(f => classifyField(f) === 'date');
+      const otherDims = dimensionsList.filter(f => classifyField(f) === 'dimension');
+      
+      let nextType = graph.graph_type;
+      let xAxis = graph.x_axis;
+      let yAxis = graph.y_axis;
+      let agg = graph.aggregation;
+      let measureFields = graph.options?.measure_fields || [];
+      let dims = graph.options?.dimensions || [];
+      
+      if (measuresList.length === 1 && dimensionsList.length >= 1) {
+        // 1 Measure + 1 or more dimensions -> Bar Chart (or Line Chart if date dimension is present)
+        if (dates.length >= 1) {
+          nextType = 'line';
+          xAxis = dates[0];
+        } else {
+          nextType = 'bar';
+          xAxis = otherDims[0] || dimensionsList[0];
+        }
+        yAxis = measuresList[0];
+        const isCustom = measures.some(m => m.name === yAxis);
+        agg = isCustom ? 'Calculated' : 'sum';
+        measureFields = [{ column: yAxis, aggregation: agg }];
+        dims = [xAxis];
+      } else if (measuresList.length > 1) {
+        // Multiple Measures -> Multi-Series Chart (Bar Chart) or Comparison KPI Layout (if no dimensions)
+        if (dimensionsList.length === 0) {
+          if (graph.graph_type === 'kpiCard') {
+            nextType = 'kpiCard';
+          } else {
+            nextType = 'bar';
+          }
+          xAxis = '';
+        } else {
+          nextType = 'bar';
+          xAxis = dimensionsList[0];
+        }
+        yAxis = measuresList[0];
+        measureFields = measuresList.map(m => ({
+          column: m,
+          aggregation: measures.some(x => x.name === m) ? 'Calculated' : 'sum'
+        }));
+        dims = xAxis ? [xAxis] : [];
+      } else if (measuresList.length === 1 && dimensionsList.length === 0) {
+        // Measure Only -> KPI Card
+        nextType = 'kpiCard';
+        xAxis = '';
+        yAxis = measuresList[0];
+        const isCustom = measures.some(m => m.name === yAxis);
+        agg = isCustom ? 'Calculated' : 'sum';
+        measureFields = [{ column: yAxis, aggregation: agg }];
+        dims = [];
+      } else if (measuresList.length === 0 && dimensionsList.length > 0) {
+        // Dimension Only -> Table Visual
+        nextType = 'table';
+        xAxis = dimensionsList[0];
+        yAxis = '';
+        agg = '';
+        measureFields = [];
+        dims = dimensionsList;
+      }
+      
+      let w = graph.options?.width || 520;
+      let h = graph.options?.height || 360;
+      if (nextType === 'kpiCard' && graph.graph_type !== 'kpiCard') {
+        w = KPI_CARD_DEFAULT_SIZE.width;
+        h = KPI_CARD_DEFAULT_SIZE.height;
+      } else if (nextType !== 'kpiCard' && graph.graph_type === 'kpiCard') {
+        w = 520;
+        h = 360;
+      }
+      
+      return {
+        ...graph,
+        graph_type: nextType,
+        x_axis: xAxis,
+        y_axis: yAxis,
+        aggregation: agg,
+        options: {
+          ...graph.options,
+          title: graph.options?.title || fieldName,
+          width: w,
+          height: h,
+          measure_fields: measureFields,
+          dimensions: dims
+        }
+      };
+    }));
   };
 
   // -- Handlers: Drag & Drop --
@@ -3537,13 +4147,13 @@ const BIWorkspace = ({
     if (formatPainterVisualId && formatPainterVisualId !== id) {
       const sourceVisual = graphs.find(g => g.id === formatPainterVisualId);
       if (sourceVisual) {
-         setGraphs(prev => prev.map(g => {
-           if (g.id === id) {
-             const { x, y, width, height, size, title, ...sourceFormatOpts } = sourceVisual.options || {};
-             return { ...g, options: { ...g.options, ...(cloneValue(sourceFormatOpts) || {}) } };
-           }
-           return g;
-         }));
+        setGraphs(prev => prev.map(g => {
+          if (g.id === id) {
+            const { x, y, width, height, size, title, ...sourceFormatOpts } = sourceVisual.options || {};
+            return { ...g, options: { ...g.options, ...(cloneValue(sourceFormatOpts) || {}) } };
+          }
+          return g;
+        }));
       }
       setFormatPainterVisualId(null);
     }
@@ -3595,13 +4205,14 @@ const BIWorkspace = ({
     setIsPublishing(true);
     window.setTimeout(() => {
       const params = new URLSearchParams();
-      params.set('fileId', String(fileId));
       if (fileName) params.set('fileName', fileName);
       if (publishShareMode === 'rls' && publishSelectedRoleIds.length > 0) {
         params.set('simulateRole', publishSelectedRoleIds.join(','));
         params.set('shareLock', '1');
       }
-      setPublishLink(`${window.location.origin}/analytics/?${params.toString()}`);
+      const qs = params.toString();
+      const base = `${window.location.origin}/analytics/workspace/${encodeURIComponent(fileId)}`;
+      setPublishLink(qs ? `${base}?${qs}` : base);
       setIsPublishing(false);
       setPublishModalStep('done');
     }, 1600);
@@ -3618,11 +4229,11 @@ const BIWorkspace = ({
       if (userId) formData.append('user_id', userId);
 
       // 1. Upload the file
-      const uploadRes = await fetch('/api/files/upload', {
+      const uploadRes = await fetch('/analytics/api/files/upload', {
         method: 'POST',
         body: formData
       });
-      
+
       if (!uploadRes.ok) {
         throw new Error('Upload failed');
       }
@@ -3634,13 +4245,13 @@ const BIWorkspace = ({
       const maxPollAttempts = 180;
       let attempts = 0;
       let isComplete = false;
-      
+
       while (!isComplete && attempts < maxPollAttempts) {
         await new Promise(r => setTimeout(r, 1000));
         attempts += 1;
-        const statusRes = await fetch(`/api/files/${newFileId}/status`);
+        const statusRes = await fetch(`/analytics/api/files/${newFileId}/status`);
         if (!statusRes.ok) throw new Error(`Status check failed (${statusRes.status})`);
-        
+
         const statusData = await statusRes.json();
         const nextProgress = Number.isFinite(Number(statusData?.progress))
           ? Math.max(0, Math.min(100, Number(statusData.progress)))
@@ -3652,9 +4263,9 @@ const BIWorkspace = ({
           message: statusData.message || 'Processing uploaded data...'
         });
         if (statusData.status === 'completed') {
-            isComplete = true;
+          isComplete = true;
         } else if (statusData.status === 'failed') {
-            throw new Error(statusData.detail || statusData.message || statusData.error || "Data processing failed");
+          throw new Error(statusData.detail || statusData.message || statusData.error || "Data processing failed");
         }
       }
 
@@ -3662,14 +4273,14 @@ const BIWorkspace = ({
 
       // 3. Complete and navigate
       updateRecentFiles(newFileId, file.name);
-      
+
       if (onOpenFile) {
-         onOpenFile({ id: newFileId, fileName: file.name });
+        onOpenFile({ id: newFileId, fileName: file.name });
       } else {
-         const url = new URL(window.location.href);
-         url.searchParams.set('fileId', newFileId);
-         url.searchParams.set('fileName', file.name);
-         window.location.href = url.toString();
+        const url = new URL(window.location.href);
+        url.searchParams.set('fileId', newFileId);
+        url.searchParams.set('fileName', file.name);
+        window.location.href = url.toString();
       }
     } catch (err) {
       console.error(err);
@@ -3691,7 +4302,7 @@ const BIWorkspace = ({
   const isViewOnly = simulationData.effectivePermission === 'view';
 
   return (
-    <div className={`bi-workspace-root ${isDarkMode ? 'dark-theme' : ''} ${reportTheme} ${isMobileLayout ? 'bi-mobile-layout' : ''}`}>
+    <div className={`bi-workspace-root ${isDarkMode ? 'dark-theme' : ''} ${reportTheme} ${isMobileLayout ? 'bi-mobile-layout' : ''}${isViewOnly ? ' bi-workspace-root--view-only' : ''}`}>
       {uploadJob.active && (
         <div className="bi-upload-overlay" role="status" aria-live="polite">
           <div className="bi-upload-card">
@@ -3764,6 +4375,7 @@ const BIWorkspace = ({
         }}
         onEnterData={() => setShowEnterDataModal(true)}
         onSampleData={handleUploadSampleDataset}
+        onBlankCanvas={openBlankCanvasReport}
       />
       {showSqlModal && (
         <div
@@ -3818,148 +4430,148 @@ const BIWorkspace = ({
                 )}
 
                 <div className="sql-main-fields">
-              {sqlError && <div className="sql-error-banner">{sqlError}</div>}
-              {sqlSuccess && <div className="sql-success-banner">{sqlSuccess}</div>}
+                  {sqlError && <div className="sql-error-banner">{sqlError}</div>}
+                  {sqlSuccess && <div className="sql-success-banner">{sqlSuccess}</div>}
 
-              <div className="sql-form-group sql-field-connection-name">
-                <label className="sql-label">Connection Name</label>
-                <input
-                  className="sql-input sql-input-connection-name"
-                  data-sql-field="connection_name"
-                  name="connection_name"
-                  placeholder="e.g. Sales Postgres"
-                  value={sqlConnData.connection_name}
-                  onChange={handleSqlInputChange}
-                  required
-                />
-              </div>
-
-              <div className="sql-form-row">
-                <div className="sql-form-group sql-field-db-type">
-                  <label className="sql-label">Database Type</label>
-                  <select
-                    className="sql-select sql-select-db-type"
-                    data-sql-field="db_type"
-                    name="db_type"
-                    value={sqlConnData.db_type}
-                    onChange={handleSqlInputChange}
-                  >
-                    <option value="postgresql">PostgreSQL</option>
-                    <option value="mysql">MySQL</option>
-                    <option value="mssql">SQL Server (MSSQL)</option>
-                  </select>
-                </div>
-                <div className="sql-form-group sql-field-port">
-                  <label className="sql-label">Port</label>
-                  <input
-                    className="sql-input sql-input-port"
-                    data-sql-field="port"
-                    name="port"
-                    type="number"
-                    value={sqlConnData.port}
-                    onChange={handleSqlInputChange}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="sql-form-row">
-                <div className="sql-form-group sql-field-server">
-                  <label className="sql-label">Server</label>
-                  <input
-                    className="sql-input sql-input-server"
-                    data-sql-field="host"
-                    name="host"
-                    placeholder={"Friend's IP or Domain (e.g. 192.168.1.1)"}
-                    value={sqlConnData.host}
-                    onChange={handleSqlInputChange}
-                    required
-                  />
-                </div>
-                <div className="sql-form-group sql-field-database">
-                  <label className="sql-label">Database</label>
-                  <input
-                    className="sql-input sql-input-database"
-                    data-sql-field="database"
-                    name="database"
-                    placeholder={'database_name'}
-                    value={sqlConnData.database}
-                    onChange={handleSqlInputChange}
-                    required
-                  />
-                </div>
-              </div>
-
-              {sqlConnData.db_type !== 'sqlite' && (
-                <div className="sql-form-row">
-                  <div className="sql-form-group sql-field-username">
-                    <label className="sql-label">Username</label>
+                  <div className="sql-form-group sql-field-connection-name">
+                    <label className="sql-label">Connection Name</label>
                     <input
-                      className="sql-input sql-input-username"
-                      data-sql-field="username"
-                      name="username"
-                      placeholder="postgres"
-                      value={sqlConnData.username}
+                      className="sql-input sql-input-connection-name"
+                      data-sql-field="connection_name"
+                      name="connection_name"
+                      placeholder="e.g. Sales Postgres"
+                      value={sqlConnData.connection_name}
                       onChange={handleSqlInputChange}
                       required
                     />
                   </div>
-                  <div className="sql-form-group sql-field-password">
-                    <label className="sql-label">Password</label>
-                    <input
-                      className="sql-input sql-input-password"
-                      data-sql-field="password"
-                      name="password"
-                      type="password"
-                      value={sqlConnData.password}
-                      onChange={handleSqlInputChange}
-                      required
-                    />
+
+                  <div className="sql-form-row">
+                    <div className="sql-form-group sql-field-db-type">
+                      <label className="sql-label">Database Type</label>
+                      <select
+                        className="sql-select sql-select-db-type"
+                        data-sql-field="db_type"
+                        name="db_type"
+                        value={sqlConnData.db_type}
+                        onChange={handleSqlInputChange}
+                      >
+                        <option value="postgresql">PostgreSQL</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="mssql">SQL Server (MSSQL)</option>
+                      </select>
+                    </div>
+                    <div className="sql-form-group sql-field-port">
+                      <label className="sql-label">Port</label>
+                      <input
+                        className="sql-input sql-input-port"
+                        data-sql-field="port"
+                        name="port"
+                        type="number"
+                        value={sqlConnData.port}
+                        onChange={handleSqlInputChange}
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
 
-              <div className="sql-form-group">
-                <label className="sql-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={sqlSaveProfile}
-                    onChange={(e) => setSqlSaveProfile(e.target.checked)}
-                  />
-                  Save to recent connections (encrypted on server)
-                </label>
-              </div>
+                  <div className="sql-form-row">
+                    <div className="sql-form-group sql-field-server">
+                      <label className="sql-label">Server</label>
+                      <input
+                        className="sql-input sql-input-server"
+                        data-sql-field="host"
+                        name="host"
+                        placeholder={"Friend's IP or Domain (e.g. 192.168.1.1)"}
+                        value={sqlConnData.host}
+                        onChange={handleSqlInputChange}
+                        required
+                      />
+                    </div>
+                    <div className="sql-form-group sql-field-database">
+                      <label className="sql-label">Database</label>
+                      <input
+                        className="sql-input sql-input-database"
+                        data-sql-field="database"
+                        name="database"
+                        placeholder={'database_name'}
+                        value={sqlConnData.database}
+                        onChange={handleSqlInputChange}
+                        required
+                      />
+                    </div>
+                  </div>
 
-              <div className="sql-form-row">
-                <div className="sql-form-group sql-field-ssl-toggle">
-                  <label className="sql-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      name="ssl"
-                      type="checkbox"
-                      checked={Boolean(sqlConnData.ssl)}
-                      onChange={handleSqlInputChange}
-                    />
-                    Use SSL/TLS
-                  </label>
-                </div>
-                <div className="sql-form-group sql-field-ssl-mode">
-                  <label className="sql-label">SSL Mode</label>
-                  <select
-                    className="sql-select sql-select-ssl-mode"
-                    data-sql-field="ssl_mode"
-                    name="ssl_mode"
-                    value={sqlConnData.ssl_mode || 'require'}
-                    onChange={handleSqlInputChange}
-                    disabled={!sqlConnData.ssl}
-                  >
-                    <option value="disable">disable</option>
-                    <option value="prefer">prefer</option>
-                    <option value="require">require</option>
-                    <option value="verify-ca">verify-ca</option>
-                    <option value="verify-full">verify-full</option>
-                  </select>
-                </div>
-              </div>
+                  {sqlConnData.db_type !== 'sqlite' && (
+                    <div className="sql-form-row">
+                      <div className="sql-form-group sql-field-username">
+                        <label className="sql-label">Username</label>
+                        <input
+                          className="sql-input sql-input-username"
+                          data-sql-field="username"
+                          name="username"
+                          placeholder="postgres"
+                          value={sqlConnData.username}
+                          onChange={handleSqlInputChange}
+                          required
+                        />
+                      </div>
+                      <div className="sql-form-group sql-field-password">
+                        <label className="sql-label">Password</label>
+                        <input
+                          className="sql-input sql-input-password"
+                          data-sql-field="password"
+                          name="password"
+                          type="password"
+                          value={sqlConnData.password}
+                          onChange={handleSqlInputChange}
+                          required
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="sql-form-group">
+                    <label className="sql-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="checkbox"
+                        checked={sqlSaveProfile}
+                        onChange={(e) => setSqlSaveProfile(e.target.checked)}
+                      />
+                      Save to recent connections (encrypted on server)
+                    </label>
+                  </div>
+
+                  <div className="sql-form-row">
+                    <div className="sql-form-group sql-field-ssl-toggle">
+                      <label className="sql-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          name="ssl"
+                          type="checkbox"
+                          checked={Boolean(sqlConnData.ssl)}
+                          onChange={handleSqlInputChange}
+                        />
+                        Use SSL/TLS
+                      </label>
+                    </div>
+                    <div className="sql-form-group sql-field-ssl-mode">
+                      <label className="sql-label">SSL Mode</label>
+                      <select
+                        className="sql-select sql-select-ssl-mode"
+                        data-sql-field="ssl_mode"
+                        name="ssl_mode"
+                        value={sqlConnData.ssl_mode || 'require'}
+                        onChange={handleSqlInputChange}
+                        disabled={!sqlConnData.ssl}
+                      >
+                        <option value="disable">disable</option>
+                        <option value="prefer">prefer</option>
+                        <option value="require">require</option>
+                        <option value="verify-ca">verify-ca</option>
+                        <option value="verify-full">verify-full</option>
+                      </select>
+                    </div>
+                  </div>
 
                 </div>
               </div>
@@ -4080,12 +4692,11 @@ const BIWorkspace = ({
           onAction={handleRibbonAction}
           fileName={fileName}
           userId={userId}
+          isDarkMode={isDarkMode}
         />
       )}
 
-      {/* Top Ribbon - hidden in view only mode */}
-      {!isViewOnly && (
-        <BIRibbon
+      <BIRibbon
         activeTab={ribbonTab}
         setActiveTab={setRibbonTab}
         onAction={handleRibbonAction}
@@ -4102,17 +4713,15 @@ const BIWorkspace = ({
         activeColumn={activeColumn}
         setActiveColumn={setActiveColumn}
         onUpdateColumn={(colName, updates) => {
+          if (isViewOnly) return;
           setSchema(prev => prev.map(c => c.column_name === colName ? { ...c, ...updates } : c));
         }}
-        dateHierarchy={dateHierarchy}
-        dateFilter={dateFilter}
-        setDateFilter={setDateFilter}
         hideSecurityTools={shareLinkLocked}
+        isViewOnly={isViewOnly}
         aiMode={aiMode}
         isDarkMode={isDarkMode}
         setIsDarkMode={setIsDarkMode}
       />
-      )}
 
       {isRefreshingCharts && (
         <div className="osa-refresh-toast">
@@ -4124,9 +4733,9 @@ const BIWorkspace = ({
       <div className="bi-main-layout">
         {/* Left App Bar */}
         <div className="bi-view-switcher">
-          <div 
-            className={`bi-view-icon ${activeView === 'report' ? 'active' : ''}`} 
-            onClick={() => setActiveView('report')} 
+          <div
+            className={`bi-view-icon ${activeView === 'report' ? 'active' : ''}`}
+            onClick={() => setActiveView('report')}
             title="Report View"
           >
             <Layout size={20} />
@@ -4140,15 +4749,13 @@ const BIWorkspace = ({
             <Table size={20} />
           </div>
           */}
-          {!isViewOnly && (
-            <div 
-              className={`bi-view-icon ${activeView === 'model' ? 'active' : ''}`} 
-              onClick={() => setActiveView('model')} 
-              title="Model View"
-            >
-              <Database size={20} />
-            </div>
-          )}
+          <div
+            className={`bi-view-icon ${activeView === 'model' ? 'active' : ''}`}
+            onClick={() => setActiveView('model')}
+            title="Model View"
+          >
+            <Database size={20} />
+          </div>
           {/* Catalog full-page tab is not needed (Catalog exists in Model view)
           <div 
             className={`bi-view-icon ${activeView === 'catalog' ? 'active' : ''}`} 
@@ -4158,16 +4765,14 @@ const BIWorkspace = ({
             <FileText size={20} />
           </div>
           */}
-          {!isViewOnly && (
-            <div
-              className={`bi-view-icon ${activeView === 'connections' ? 'active' : ''}`}
-              onClick={() => setActiveView('connections')}
-              title="Connections"
-            >
-              <Link2 size={20} />
-            </div>
-          )}
-          
+          <div
+            className={`bi-view-icon ${activeView === 'connections' ? 'active' : ''}`}
+            onClick={() => setActiveView('connections')}
+            title="Connections"
+          >
+            <Link2 size={20} />
+          </div>
+
           {/* <div className="bi-view-icon bi-home-icon" onClick={() => onGoHome ? onGoHome() : navigate('/')} title="Go Home">
             <Home size={20} />
           </div> */}
@@ -4191,65 +4796,66 @@ const BIWorkspace = ({
           </div>
         ) : (
           <>
-        {/* View Content */}
-        {activeView === 'model' && (
-          <div className="bi-fullview-container bi-fullview-container--model">
-            <BIModelView 
-              schema={schema} 
-              fileName={fileName} 
-              fileId={fileId} 
-              userId={userId} 
-              suppressMainTableInModel={suppressMainTableInModel}
-              modelWorkspaceReady={!isInitialLoading}
-              showSqlImportModal={showSqlImportModal}
-              setShowSqlImportModal={setShowSqlImportModal}
-              onModelUpdate={async () => {
-                const startedAt = Date.now();
-                setIsFieldsRefreshing(true);
-                try {
-                  await fetchInitialData(true);
-                  setDatasetPage(1);
-                  await loadDatasetForFeatures(1);
-                } finally {
-                  // Avoid spinner flicker on very fast refreshes.
-                  const elapsed = Date.now() - startedAt;
-                  const minMs = 800;
-                  const waitMs = elapsed < minMs ? (minMs - elapsed) : 0;
-                  if (waitMs > 0) {
-                    setTimeout(() => setIsFieldsRefreshing(false), waitMs);
-                  } else {
-                    setIsFieldsRefreshing(false);
-                  }
-                }
-              }}
-              initialTables={modelTables}
-              initialRelationships={modelRelationships}
-              actionRequest={modelActionRequest}
-              onOpenSqlDataset={(mode) => {
-                /** Only explicit 'edit' loads the active dataset for update; anything else (new, undefined) saves as a new library entry. */
-                setSqlDatasetModalOpenNew(mode !== 'edit');
-                setSqlDatasetModalEditId(null);
-                setShowSqlDatasetModal(true);
-              }}
-              sqlDatasetName={sqlDatasetConfig?.name || null}
-              sqlDatasetQuery={sqlDatasetConfig?.query || ''}
-              sqlDatasetConnectionId={sqlDatasetConfig?.connection_id || null}
-              sqlDatasets={sqlDatasetsList}
-              activeSqlDatasetId={activeSqlDatasetId}
-              onSqlDatasetSelect={handleSqlDatasetSelect}
-              onSqlDatasetEdit={(id) => {
-                setSqlDatasetModalOpenNew(false);
-                setSqlDatasetModalEditId(id);
-                setShowSqlDatasetModal(true);
-              }}
-              onSqlDatasetDelete={handleSqlDatasetDelete}
-              onSqlDatasetRename={handleSqlDatasetRename}
-              sqlDatasetBusyId={sqlDatasetBusyId}
-            />
-          </div>
-        )}
+            {/* View Content */}
+            {activeView === 'model' && (
+              <div className="bi-fullview-container bi-fullview-container--model">
+                <BIModelView
+                  schema={schema}
+                  fileName={fileName}
+                  fileId={fileId}
+                  userId={userId}
+                  readOnly={isViewOnly}
+                  suppressMainTableInModel={suppressMainTableInModel}
+                  modelWorkspaceReady={!isInitialLoading}
+                  showSqlImportModal={showSqlImportModal}
+                  setShowSqlImportModal={setShowSqlImportModal}
+                  onModelUpdate={async () => {
+                    const startedAt = Date.now();
+                    setIsFieldsRefreshing(true);
+                    try {
+                      await fetchInitialData(true);
+                      setDatasetPage(1);
+                      await loadDatasetForFeatures(1);
+                    } finally {
+                      // Avoid spinner flicker on very fast refreshes.
+                      const elapsed = Date.now() - startedAt;
+                      const minMs = 800;
+                      const waitMs = elapsed < minMs ? (minMs - elapsed) : 0;
+                      if (waitMs > 0) {
+                        setTimeout(() => setIsFieldsRefreshing(false), waitMs);
+                      } else {
+                        setIsFieldsRefreshing(false);
+                      }
+                    }
+                  }}
+                  initialTables={modelTables}
+                  initialRelationships={modelRelationships}
+                  actionRequest={modelActionRequest}
+                  onOpenSqlDataset={(mode) => {
+                    /** Only explicit 'edit' loads the active dataset for update; anything else (new, undefined) saves as a new library entry. */
+                    setSqlDatasetModalOpenNew(mode !== 'edit');
+                    setSqlDatasetModalEditId(null);
+                    setShowSqlDatasetModal(true);
+                  }}
+                  sqlDatasetName={sqlDatasetConfig?.name || null}
+                  sqlDatasetQuery={sqlDatasetConfig?.query || ''}
+                  sqlDatasetConnectionId={sqlDatasetConfig?.connection_id || null}
+                  sqlDatasets={sqlDatasetsList}
+                  activeSqlDatasetId={activeSqlDatasetId}
+                  onSqlDatasetSelect={handleSqlDatasetSelect}
+                  onSqlDatasetEdit={(id) => {
+                    setSqlDatasetModalOpenNew(false);
+                    setSqlDatasetModalEditId(id);
+                    setShowSqlDatasetModal(true);
+                  }}
+                  onSqlDatasetDelete={handleSqlDatasetDelete}
+                  onSqlDatasetRename={handleSqlDatasetRename}
+                  sqlDatasetBusyId={sqlDatasetBusyId}
+                />
+              </div>
+            )}
 
-        {/* Catalog full-page view is not needed (Catalog exists in Model view)
+            {/* Catalog full-page view is not needed (Catalog exists in Model view)
         {activeView === 'catalog' && (
           <div className="bi-fullview-container">
             <BICatalogView
@@ -4261,21 +4867,21 @@ const BIWorkspace = ({
         )}
         */}
 
-        {activeView === 'connections' && (
-          <div className="bi-fullview-container">
-            <BISavedConnectionsPanel
-              userId={userId}
-              activeConnectionId={remoteConnectionId}
-              activeProfileId={remoteProfileId}
-              onConnected={handleRemoteDbConnected}
-              onDisconnected={handleRemoteDbDisconnected}
-              onMoreConnectors={() => setShowConnectorsModal(true)}
-              isGuest={isGuest}
-            />
-          </div>
-        )}
+            {activeView === 'connections' && (
+              <div className="bi-fullview-container">
+                <BISavedConnectionsPanel
+                  userId={userId}
+                  activeConnectionId={remoteConnectionId}
+                  activeProfileId={remoteProfileId}
+                  onConnected={handleRemoteDbConnected}
+                  onDisconnected={handleRemoteDbDisconnected}
+                  onMoreConnectors={() => setShowConnectorsModal(true)}
+                  isGuest={isGuest}
+                />
+              </div>
+            )}
 
-        {/* Data view panel — commented out for now (restore with Data tab above)
+            {/* Data view panel — commented out for now (restore with Data tab above)
         {activeView === 'data' && (
           <div className="bi-fullview-container">
             {datasetLoadError && !dataset ? (
@@ -4307,45 +4913,47 @@ const BIWorkspace = ({
         )}
         */}
 
-        {activeView === 'report' && (
-          <div
-            style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}
-            onDragOver={(e) => {
-              if (hasVizType(e.dataTransfer)) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-              }
-            }}
-            onDrop={(e) => {
-              const vizType = getVizTypeFromDrag(e.dataTransfer);
-              if (vizType) {
-                e.preventDefault();
-                const gridEl = e.currentTarget.querySelector('.bi-visuals-grid');
-                if (gridEl) {
-                  const r = gridEl.getBoundingClientRect();
-                  const x = e.clientX - r.left - 120;
-                  const y = e.clientY - r.top - 60;
-                  handleAddVisual(vizType, { x, y });
-                } else {
-                  handleAddVisual(vizType);
-                }
-              }
-            }}
-          >
-            {/* Collapsed State Ribbon Triggers */}
+            {activeView === 'report' && (
+              <div
+                style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}
+                onDragOver={(e) => {
+                  if (hasVizType(e.dataTransfer)) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }
+                }}
+                onDrop={(e) => {
+                  const vizType = getVizTypeFromDrag(e.dataTransfer);
+                  if (vizType) {
+                    e.preventDefault();
+                    const gridEl = e.currentTarget.querySelector('.bi-visuals-grid');
+                    if (gridEl) {
+                      const r = gridEl.getBoundingClientRect();
+                      const x = e.clientX - r.left - 120;
+                      const y = e.clientY - r.top - 60;
+                      handleAddVisual(vizType, { x, y });
+                    } else {
+                      handleAddVisual(vizType);
+                    }
+                  }
+                }}
+              >
+                {/* Collapsed State Ribbon Triggers */}
+                {/* Data Summary panel disabled
             {isInsightsCollapsed && (
               <div className="bi-ribbon-left" onClick={() => insightsPanelRef.current?.expand()} title="Expand Insights">
                 <ChevronRight size={14} /><Database size={14} />
               </div>
             )}
-            {isRightPanesCollapsed && (
-              <div className="bi-ribbon-right" onClick={() => rightPanesPanelRef.current?.expand()} title="Expand Tools">
-                <ChevronLeft size={14} /><Layout size={14} />
-              </div>
-            )}
+            */}
+                {isRightPanesCollapsed && (
+                  <div className="bi-ribbon-right" onClick={() => rightPanesPanelRef.current?.expand()} title="Expand Tools">
+                    <ChevronLeft size={14} /><Layout size={14} />
+                  </div>
+                )}
 
-            <PanelGroup direction="horizontal">
-              {/* Left Panel: Insights */}
+                <PanelGroup direction="horizontal" className="bi-workspace-panel-group">
+                  {/* Data Summary panel disabled
               <Panel
                 ref={insightsPanelRef}
                 defaultSize={20}
@@ -4368,567 +4976,593 @@ const BIWorkspace = ({
               </Panel>
 
               <PanelResizeHandle className="bi-resizer" />
+              */}
 
-              {/* Center Panel: Dashboard Canvas */}
-              <Panel defaultSize={60} minSize={30}>
-                <div ref={presentContainerRef} className="bi-center-column">
-                  <div className="bi-canvas-stack">
-                  {/* Formula Bar */}
-                  {showMeasureBar && (
-                    <div className="bi-measure-bar">
-                      <div className="bi-formula-icons">
-                        <button className="bi-measure-cancel" onClick={handleMeasureCancel}>✕</button>
-                        <button className="bi-measure-confirm" onClick={handleMeasureConfirm}>✓</button>
-                      </div>
-                      <div className="bi-formula-input-wrapper">
-                        <span className="bi-formula-line-number">1</span>
-                        <input
-                          className="bi-measure-input"
-                          type="text"
-                          value={measureFormula}
-                          onChange={e => setMeasureFormula(e.target.value)}
-                          autoFocus
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleMeasureConfirm();
-                            if (e.key === 'Escape') handleMeasureCancel();
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
+                  {/* Center Panel: Dashboard Canvas (80% — left Data Summary panel removed) */}
+                  <Panel defaultSize={80} minSize={30}>
+                    <div ref={presentContainerRef} className="bi-center-column">
+                      <div className="bi-canvas-stack">
+                        {/* Formula Bar */}
+                        {showMeasureBar && (
+                          <div className="bi-measure-bar">
+                            <div className="bi-formula-icons">
+                              <button className="bi-measure-cancel" onClick={handleMeasureCancel}>✕</button>
+                              <button className="bi-measure-confirm" onClick={handleMeasureConfirm}>✓</button>
+                            </div>
+                            <div className="bi-formula-input-wrapper">
+                              <span className="bi-formula-line-number">1</span>
+                              <input
+                                className="bi-measure-input"
+                                type="text"
+                                value={measureFormula}
+                                onChange={e => setMeasureFormula(e.target.value)}
+                                autoFocus
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') handleMeasureConfirm();
+                                  if (e.key === 'Escape') handleMeasureCancel();
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
 
-                  {/* Global Active Filters breadcrumbs ribbon bar */}
-                  {Object.entries(filters).some(([_, vals]) => Array.isArray(vals) && vals.length > 0) && (
-                    <div 
-                      className="bi-active-filters-ribbon"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '12px',
-                        padding: '6px 16px',
-                        backgroundColor: '#f1f5f9',
-                        borderBottom: '1px solid #cbd5e1',
-                        fontSize: '11px',
-                        color: '#475569',
-                        width: '100%',
-                        zIndex: 10
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: '#0f172a' }}>
-                          <Filter size={12} style={{ color: '#6366f1' }} />
-                          <span>Active Filters:</span>
-                        </div>
-                        {Object.entries(filters).map(([dimension, values]) => {
-                          if (!Array.isArray(values) || values.length === 0) return null;
-                          return (
-                            <div 
-                              key={dimension}
+                        {/* Global Active Filters breadcrumbs ribbon bar */}
+                        {Object.entries(filters).some(([_, vals]) => Array.isArray(vals) && vals.length > 0) && (
+                          <div
+                            className="bi-active-filters-ribbon"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '12px',
+                              padding: '6px 16px',
+                              backgroundColor: '#f1f5f9',
+                              borderBottom: '1px solid #cbd5e1',
+                              fontSize: '11px',
+                              color: '#475569',
+                              width: '100%',
+                              zIndex: 10
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: '#0f172a' }}>
+                                <Filter size={12} style={{ color: '#6366f1' }} />
+                                <span>Active Filters:</span>
+                              </div>
+                              {Object.entries(filters).map(([dimension, values]) => {
+                                if (!Array.isArray(values) || values.length === 0) return null;
+                                return (
+                                  <div
+                                    key={dimension}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px',
+                                      backgroundColor: '#ffffff',
+                                      border: '1px solid #e2e8f0',
+                                      borderRadius: '4px',
+                                      padding: '2px 8px',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 600, color: '#334155' }}>{dimension}:</span>
+                                    <span style={{ color: '#64748b' }}>{values.join(', ')}</span>
+                                    <button
+                                      onClick={() => {
+                                        // Clear all values for this dimension
+                                        values.forEach(v => removeFilter(dimension, v));
+                                      }}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: '#ef4444',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: 'bold',
+                                        padding: '0 2px',
+                                        display: 'flex',
+                                        alignItems: 'center'
+                                      }}
+                                      title={`Clear ${dimension} filter`}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <button
+                              onClick={clearFilters}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                backgroundColor: '#ffffff',
-                                border: '1px solid #e2e8f0',
+                                backgroundColor: '#ef4444',
+                                color: '#ffffff',
+                                border: 'none',
                                 borderRadius: '4px',
-                                padding: '2px 8px',
+                                padding: '3px 8px',
+                                marginRight: '25px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                flexShrink: 0,
+                                transition: 'background-color 0.2s',
                                 boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                               }}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
                             >
-                              <span style={{ fontWeight: 600, color: '#334155' }}>{dimension}:</span>
-                              <span style={{ color: '#64748b' }}>{values.join(', ')}</span>
-                              <button 
-                                onClick={() => {
-                                  // Clear all values for this dimension
-                                  values.forEach(v => removeFilter(dimension, v));
-                                }}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  color: '#ef4444',
-                                  cursor: 'pointer',
-                                  fontSize: '12px',
-                                  fontWeight: 'bold',
-                                  padding: '0 2px',
-                                  display: 'flex',
-                                  alignItems: 'center'
-                                }}
-                                title={`Clear ${dimension} filter`}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <button 
-                        onClick={clearFilters}
-                        style={{
-                          backgroundColor: '#ef4444',
-                          color: '#ffffff',
-                          border: 'none',
-                          borderRadius: '4px',
-                          padding: '3px 8px',
-                          marginRight: '25px',
-                          fontSize: '10px',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                          transition: 'background-color 0.2s',
-                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
-                      >
-                        Clear All
-                      </button>
-                    </div>
-                  )}
+                              Clear All
+                            </button>
+                          </div>
+                        )}
 
-                  <div className="bi-center-content">
-                    <div ref={reportRef} className={`bi-report-surface bi-page-view-${pageViewMode}`}>
-                      <BIDashboardCanvas
-                        graphs={activeVisibleGraphs}
-                        fileId={fileId}
-                        selection={selectedData}
-                        onDataClick={(data) => {
-                          const startedAt = performance.now();
-                          setSelectedData(data);
-                          if (data) {
-                            appendPerfLog('Data point interaction', performance.now() - startedAt);
-                          }
-                        }}
-                        activeVisualId={activeVisualId}
-                        onSelectVisual={handleSelectVisual}
-                        onUpdateVisual={applyVisualUpdate}
-                        onDeleteVisual={(id) => setGraphs(prev => prev.filter(g => g.id !== id))}
-                        onDragStart={handleDragStart}
-                        onDragOverCard={handleDragOver}
-                        onDragEnd={handleDragEnd}
-                        onDropCard={handleDrop}
-                        draggedItemIndex={draggedItemIndex}
-                        dragOverItemIndex={dragOverItemIndex}
-                        onButtonAction={handleButtonAction}
-                        onDeselectVisual={() => setActiveVisualId(null)}
-                        onAddToReport={handleAddToReport}
-                        showGridlines={showGridlines && !isViewOnly}
-                        snapToGrid={snapToGrid}
-                        isViewOnly={isViewOnly}
-                        reportTheme={reportTheme}
-                        reportHeaderText={reportHeaderText}
-                        reportBackgroundColor={reportBackgroundColor}
-                        onUpdateReportHeader={async (nextHeader) => {
-                          const trimmed = (nextHeader || '').trim();
-                          if (!trimmed) {
-                            setReportHeaderText(REPORT_HEADER_PLACEHOLDER);
-                            return;
-                          }
-                          
-                          setReportHeaderText(trimmed);
-                          
-                          // If we have a fileId and it's not a draft, also update the workspace name (fileName)
-                          if (fileId && !isNewReportDraft) {
-                            console.log(`🏷️ [Canvas] Syncing report header to workspace name: ${trimmed}`);
-                            setFileName(trimmed);
-                            try {
-                              const res = await fetch(`/api/files/${fileId}`, {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ fileName: trimmed })
-                              });
-                              if (res.ok) {
-                                console.log('✅ [Canvas] Workspace renamed successfully');
-                                updateRecentFiles(fileId, trimmed);
-                              } else {
-                                console.error('❌ [Canvas] Rename API failed');
-                              }
-                            } catch (err) {
-                              console.error('❌ [Canvas] Rename failed:', err);
-                            }
-                          }
-                        }}
-                      />
-                    </div>
+                        <div className="bi-center-content">
+                          <div ref={reportRef} className={`bi-report-surface bi-page-view-${pageViewMode}`}>
+                            <BIDashboardCanvas
+                              graphs={activeVisibleGraphs}
+                              fileId={fileId}
+                              selection={selectedData}
+                              measures={measures}
+                              schema={schema}
+                              onDataClick={(data) => {
+                                const startedAt = performance.now();
+                                setSelectedData(data);
+                                if (data) {
+                                  appendPerfLog('Data point interaction', performance.now() - startedAt);
+                                }
+                              }}
+                              activeVisualId={activeVisualId}
+                              onSelectVisual={handleSelectVisual}
+                              onUpdateVisual={applyVisualUpdate}
+                              focusedGraphId={focusedVisualId}
+                              onFocusGraph={setFocusedVisualId}
+                              onCloseFocusGraph={() => setFocusedVisualId(null)}
+                              onDragStart={handleDragStart}
+                              onDragOverCard={handleDragOver}
+                              onDragEnd={handleDragEnd}
+                              onDropCard={handleDrop}
+                              onDropFieldOnCanvas={handleDropFieldOnCanvas}
+                              onDropFieldOnVisual={handleDropFieldOnVisual}
+                              draggedItemIndex={draggedItemIndex}
+                              dragOverItemIndex={dragOverItemIndex}
+                              onButtonAction={handleButtonAction}
+                              onDeselectVisual={() => setActiveVisualId(null)}
+                              showGridlines={showGridlines && !isViewOnly}
+                              snapToGrid={snapToGrid}
+                              isViewOnly={isViewOnly}
+                              onApplyCrossFilter={applyCrossFilterToAllVisuals}
+                              onClearCrossFilter={unlinkCrossFilterFromAllVisuals}
+                              reportTheme={reportTheme}
+                              reportHeaderText={reportHeaderText}
+                              reportBackgroundColor={reportBackgroundColor}
+                              reportNoFill={reportNoFill}
+                              onUpdateReportHeader={async (nextHeader) => {
+                                const trimmed = (nextHeader || '').trim();
+                                if (!trimmed) {
+                                  setReportHeaderText(REPORT_HEADER_PLACEHOLDER);
+                                  return;
+                                }
 
-                    {activeUtilityPane && (
-                      <div className="bi-view-pane-dock">
-                        <div className="bi-view-pane-header">
-                          <span>
-                            {activeUtilityPane === 'bookmarks' ? 'Bookmarks' : ''}
-                            {activeUtilityPane === 'selection' ? 'Selection' : ''}
-                            {activeUtilityPane === 'performance' ? 'Performance analyzer' : ''}
-                            {activeUtilityPane === 'sync_slicers' ? 'Sync slicers' : ''}
-                          </span>
-                          <button type="button" onClick={() => setActiveUtilityPane(null)}>x</button>
-                        </div>
-                        <div className="bi-view-pane-body">
-                          {activeUtilityPane === 'bookmarks' && (
-                            <>
-                              <div className="bi-pane-action-row">
-                                <input
-                                  type="text"
-                                  className="bi-pane-text-input"
-                                  value={bookmarkDraftName}
-                                  onChange={(e) => setBookmarkDraftName(e.target.value)}
-                                  placeholder="Bookmark name"
-                                />
+                                setReportHeaderText(trimmed);
+
+                                // If we have a fileId and it's not a draft, also update the workspace name (fileName)
+                                if (fileId && !isNewReportDraft) {
+                                  console.log(`🏷️ [Canvas] Syncing report header to workspace name: ${trimmed}`);
+                                  setFileName(trimmed);
+                                  try {
+                                    const res = await fetch(`/analytics/api/files/${fileId}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ fileName: trimmed })
+                                    });
+                                    if (res.ok) {
+                                      console.log('✅ [Canvas] Workspace renamed successfully');
+                                      updateRecentFiles(fileId, trimmed);
+                                    } else {
+                                      console.error('❌ [Canvas] Rename API failed');
+                                    }
+                                  } catch (err) {
+                                    console.error('❌ [Canvas] Rename failed:', err);
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
+
+                          {activeUtilityPane && (
+                            <div className="bi-view-pane-dock">
+                              <div className="bi-view-pane-header">
+                                <span>
+                                  {activeUtilityPane === 'bookmarks' ? 'Bookmarks' : ''}
+                                  {activeUtilityPane === 'selection' ? 'Selection' : ''}
+                                  {activeUtilityPane === 'performance' ? 'Performance analyzer' : ''}
+                                  {activeUtilityPane === 'sync_slicers' ? 'Sync slicers' : ''}
+                                </span>
+                                <button type="button" onClick={() => setActiveUtilityPane(null)}>x</button>
                               </div>
-                              <div className="bi-pane-check-row">
-                                <label className="bi-pane-check">
-                                  <input
-                                    type="checkbox"
-                                    checked={bookmarkSaveOptions.includeData}
-                                    onChange={(e) => setBookmarkSaveOptions((prev) => ({ ...prev, includeData: e.target.checked }))}
-                                  />
-                                  <span>Include Data</span>
-                                </label>
-                                <label className="bi-pane-check">
-                                  <input
-                                    type="checkbox"
-                                    checked={bookmarkSaveOptions.includeDisplay}
-                                    onChange={(e) => setBookmarkSaveOptions((prev) => ({ ...prev, includeDisplay: e.target.checked }))}
-                                  />
-                                  <span>Include Display</span>
-                                </label>
-                                <label className="bi-pane-check">
-                                  <input
-                                    type="checkbox"
-                                    checked={bookmarkSaveOptions.includePage}
-                                    onChange={(e) => setBookmarkSaveOptions((prev) => ({ ...prev, includePage: e.target.checked }))}
-                                  />
-                                  <span>Include Page</span>
-                                </label>
-                              </div>
-                              <div className="bi-pane-action-row">
-                                <button type="button" className="bi-pane-action-btn" onClick={() => createReportBookmark()}>Add</button>
-                                <button
-                                  type="button"
-                                  className="bi-pane-action-btn bi-pane-action-btn-light"
-                                  onClick={() => updateReportBookmark(activeBookmarkId)}
-                                  disabled={!activeBookmarkId}
-                                >
-                                  Update
-                                </button>
-                                <button
-                                  type="button"
-                                  className="bi-pane-action-btn bi-pane-action-btn-light"
-                                  onClick={() => {
-                                    const defaultBookmark = reportBookmarks.find((b) => b.id === defaultBookmarkId);
-                                    if (defaultBookmark) applyReportBookmark(defaultBookmark);
-                                  }}
-                                  disabled={!defaultBookmarkId}
-                                >
-                                  Reset default
-                                </button>
-                              </div>
-                              {reportBookmarks.length === 0 ? (
-                                <div className="bi-pane-empty">No report bookmarks yet.</div>
-                              ) : (
-                                reportBookmarks.map((bm) => (
-                                  <div key={bm.id} className={`bi-pane-list-row ${activeBookmarkId === bm.id ? 'active' : ''}`}>
-                                    <button type="button" className="bi-pane-link" onClick={() => applyReportBookmark(bm)}>{bm.name}</button>
-                                    <div className="bi-pane-actions-inline">
+                              <div className="bi-view-pane-body">
+                                {activeUtilityPane === 'bookmarks' && (
+                                  <>
+                                    <div className="bi-pane-action-row">
+                                      <input
+                                        type="text"
+                                        className="bi-pane-text-input"
+                                        value={bookmarkDraftName}
+                                        onChange={(e) => setBookmarkDraftName(e.target.value)}
+                                        placeholder="Bookmark name"
+                                      />
+                                    </div>
+                                    <div className="bi-pane-check-row">
+                                      <label className="bi-pane-check">
+                                        <input
+                                          type="checkbox"
+                                          checked={bookmarkSaveOptions.includeData}
+                                          onChange={(e) => setBookmarkSaveOptions((prev) => ({ ...prev, includeData: e.target.checked }))}
+                                        />
+                                        <span>Include Data</span>
+                                      </label>
+                                      <label className="bi-pane-check">
+                                        <input
+                                          type="checkbox"
+                                          checked={bookmarkSaveOptions.includeDisplay}
+                                          onChange={(e) => setBookmarkSaveOptions((prev) => ({ ...prev, includeDisplay: e.target.checked }))}
+                                        />
+                                        <span>Include Display</span>
+                                      </label>
+                                      <label className="bi-pane-check">
+                                        <input
+                                          type="checkbox"
+                                          checked={bookmarkSaveOptions.includePage}
+                                          onChange={(e) => setBookmarkSaveOptions((prev) => ({ ...prev, includePage: e.target.checked }))}
+                                        />
+                                        <span>Include Page</span>
+                                      </label>
+                                    </div>
+                                    <div className="bi-pane-action-row">
+                                      <button type="button" className="bi-pane-action-btn" onClick={() => createReportBookmark()}>Add</button>
                                       <button
                                         type="button"
-                                        className="bi-pane-link"
-                                        onClick={() => {
-                                          setActiveBookmarkId(bm.id);
-                                          updateReportBookmark(bm.id);
-                                        }}
+                                        className="bi-pane-action-btn bi-pane-action-btn-light"
+                                        onClick={() => updateReportBookmark(activeBookmarkId)}
+                                        disabled={!activeBookmarkId}
                                       >
-                                        Save
+                                        Update
                                       </button>
                                       <button
                                         type="button"
-                                        className="bi-pane-link"
+                                        className="bi-pane-action-btn bi-pane-action-btn-light"
                                         onClick={() => {
-                                          setDefaultBookmarkId(bm.id);
-                                          setActiveBookmarkId(bm.id);
+                                          const defaultBookmark = reportBookmarks.find((b) => b.id === defaultBookmarkId);
+                                          if (defaultBookmark) applyReportBookmark(defaultBookmark);
                                         }}
+                                        disabled={!defaultBookmarkId}
                                       >
-                                        {defaultBookmarkId === bm.id ? 'Default' : 'Set default'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="bi-pane-delete"
-                                        onClick={() => {
-                                          setReportBookmarks((prev) => prev.filter((x) => x.id !== bm.id));
-                                          if (activeBookmarkId === bm.id) setActiveBookmarkId(null);
-                                          if (defaultBookmarkId === bm.id) setDefaultBookmarkId(null);
-                                        }}
-                                      >
-                                        Delete
+                                        Reset default
                                       </button>
                                     </div>
-                                  </div>
-                                ))
-                              )}
-                            </>
-                          )}
-                          {activeUtilityPane === 'selection' && (
-                            <>
-                              {activePageGraphs.length === 0 ? (
-                                <div className="bi-pane-empty">No visuals on this page.</div>
-                              ) : (
-                                activePageGraphs.map((g) => (
-                                  <div key={g.id} className="bi-pane-list-row">
-                                    <label className="bi-pane-check">
-                                      <input
-                                        type="checkbox"
-                                        checked={!g?.options?.isHidden}
-                                        onChange={(e) => applyVisualUpdate(g.id, { options: { ...g.options, isHidden: !e.target.checked } })}
-                                      />
-                                      <span>{g?.options?.title || g.graph_type || 'Visual'}</span>
-                                    </label>
-                                    <button type="button" className="bi-pane-link" onClick={() => setActiveVisualId(g.id)}>Focus</button>
-                                  </div>
-                                ))
-                              )}
-                            </>
-                          )}
-                          {activeUtilityPane === 'sync_slicers' && (
-                            <>
-                              {slicerVisuals.length === 0 ? (
-                                <div className="bi-pane-empty">Add a slicer visual first to enable sync settings.</div>
-                              ) : (
-                                slicerVisuals.map((g) => (
-                                  <div key={g.id} className="bi-pane-list-row">
-                                    <span>{g?.options?.title || `Slicer ${g.id.slice(-4)}`}</span>
-                                    <label className="bi-pane-check">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(g?.options?.syncAllPages)}
-                                        onChange={(e) => applyVisualUpdate(g.id, { options: { ...g.options, syncAllPages: e.target.checked } })}
-                                      />
-                                      <span>Sync all pages</span>
-                                    </label>
-                                  </div>
-                                ))
-                              )}
-                            </>
-                          )}
-                          {activeUtilityPane === 'performance' && (
-                            <>
-                              <div className="bi-pane-action-row">
-                                <button
-                                  type="button"
-                                  className="bi-pane-action-btn"
-                                  onClick={() => {
-                                    if (perfIsRecording) {
-                                      setPerfIsRecording(false);
-                                    } else {
-                                      perfMarkRef.current = performance.now();
-                                      setPerfIsRecording(true);
-                                      setPerfLogs((prev) => [
-                                        {
-                                          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                                          action: 'Recording started',
-                                          pageName: pages.find((p) => p.id === activePageId)?.name || activePageId,
-                                          duration: 0,
-                                          visuals: activeVisibleGraphs.length,
-                                          at: new Date().toLocaleTimeString()
-                                        },
-                                        ...prev
-                                      ].slice(0, 120));
-                                    }
-                                  }}
-                                >
-                                  {perfIsRecording ? 'Stop recording' : 'Start recording'}
-                                </button>
-                                <button type="button" className="bi-pane-action-btn bi-pane-action-btn-light" onClick={() => setPerfLogs([])}>
-                                  Clear
-                                </button>
+                                    {reportBookmarks.length === 0 ? (
+                                      <div className="bi-pane-empty">No report bookmarks yet.</div>
+                                    ) : (
+                                      reportBookmarks.map((bm) => (
+                                        <div key={bm.id} className={`bi-pane-list-row ${activeBookmarkId === bm.id ? 'active' : ''}`}>
+                                          <button type="button" className="bi-pane-link" onClick={() => applyReportBookmark(bm)}>{bm.name}</button>
+                                          <div className="bi-pane-actions-inline">
+                                            <button
+                                              type="button"
+                                              className="bi-pane-link"
+                                              onClick={() => {
+                                                setActiveBookmarkId(bm.id);
+                                                updateReportBookmark(bm.id);
+                                              }}
+                                            >
+                                              Save
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="bi-pane-link"
+                                              onClick={() => {
+                                                setDefaultBookmarkId(bm.id);
+                                                setActiveBookmarkId(bm.id);
+                                              }}
+                                            >
+                                              {defaultBookmarkId === bm.id ? 'Default' : 'Set default'}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="bi-pane-delete"
+                                              onClick={() => {
+                                                setReportBookmarks((prev) => prev.filter((x) => x.id !== bm.id));
+                                                if (activeBookmarkId === bm.id) setActiveBookmarkId(null);
+                                                if (defaultBookmarkId === bm.id) setDefaultBookmarkId(null);
+                                              }}
+                                            >
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                  </>
+                                )}
+                                {activeUtilityPane === 'selection' && (
+                                  <>
+                                    {activePageGraphs.length === 0 ? (
+                                      <div className="bi-pane-empty">No visuals on this page.</div>
+                                    ) : (
+                                      activePageGraphs.map((g) => (
+                                        <div key={g.id} className="bi-pane-list-row">
+                                          <label className="bi-pane-check">
+                                            <input
+                                              type="checkbox"
+                                              checked={!g?.options?.isHidden}
+                                              onChange={(e) => applyVisualUpdate(g.id, { options: { ...g.options, isHidden: !e.target.checked } })}
+                                            />
+                                            <span>{formatVisualDisplayTitle(g?.options?.title, g.graph_type)}</span>
+                                          </label>
+                                          <button type="button" className="bi-pane-link" onClick={() => setActiveVisualId(g.id)}>Focus</button>
+                                        </div>
+                                      ))
+                                    )}
+                                  </>
+                                )}
+                                {activeUtilityPane === 'sync_slicers' && (
+                                  <>
+                                    {slicerVisuals.length === 0 ? (
+                                      <div className="bi-pane-empty">Add a slicer visual first to enable sync settings.</div>
+                                    ) : (
+                                      slicerVisuals.map((g) => (
+                                        <div key={g.id} className="bi-pane-list-row">
+                                          <span>{g?.options?.title || `Slicer ${g.id.slice(-4)}`}</span>
+                                          <label className="bi-pane-check">
+                                            <input
+                                              type="checkbox"
+                                              checked={Boolean(g?.options?.syncAllPages)}
+                                              onChange={(e) => applyVisualUpdate(g.id, { options: { ...g.options, syncAllPages: e.target.checked } })}
+                                            />
+                                            <span>Sync all pages</span>
+                                          </label>
+                                        </div>
+                                      ))
+                                    )}
+                                  </>
+                                )}
+                                {activeUtilityPane === 'performance' && (
+                                  <>
+                                    <div className="bi-pane-action-row">
+                                      <button
+                                        type="button"
+                                        className="bi-pane-action-btn"
+                                        onClick={() => {
+                                          if (perfIsRecording) {
+                                            setPerfIsRecording(false);
+                                          } else {
+                                            perfMarkRef.current = performance.now();
+                                            setPerfIsRecording(true);
+                                            setPerfLogs((prev) => [
+                                              {
+                                                id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                                action: 'Recording started',
+                                                pageName: pages.find((p) => p.id === activePageId)?.name || activePageId,
+                                                duration: 0,
+                                                visuals: activeVisibleGraphs.length,
+                                                at: new Date().toLocaleTimeString()
+                                              },
+                                              ...prev
+                                            ].slice(0, 120));
+                                          }
+                                        }}
+                                      >
+                                        {perfIsRecording ? 'Stop recording' : 'Start recording'}
+                                      </button>
+                                      <button type="button" className="bi-pane-action-btn bi-pane-action-btn-light" onClick={() => setPerfLogs([])}>
+                                        Clear
+                                      </button>
+                                    </div>
+                                    {perfLogs.length === 0 ? (
+                                      <div className="bi-pane-empty">Start recording and interact with visuals to capture timings.</div>
+                                    ) : (
+                                      perfLogs.map((log) => (
+                                        <div key={log.id} className="bi-pane-list-row">
+                                          <span>{log.action || 'Canvas render'} - {log.pageName} ({log.visuals} visuals)</span>
+                                          <span>{log.duration} ms</span>
+                                        </div>
+                                      ))
+                                    )}
+                                  </>
+                                )}
                               </div>
-                              {perfLogs.length === 0 ? (
-                                <div className="bi-pane-empty">Start recording and interact with visuals to capture timings.</div>
-                              ) : (
-                                perfLogs.map((log) => (
-                                  <div key={log.id} className="bi-pane-list-row">
-                                    <span>{log.action || 'Canvas render'} - {log.pageName} ({log.visuals} visuals)</span>
-                                    <span>{log.duration} ms</span>
-                                  </div>
-                                ))
-                              )}
-                            </>
+                            </div>
                           )}
+
                         </div>
+                        {/* END bi-center-content */}
+
+                        {/* Status Bar / Page Tabs — inside bi-canvas-stack */}
+                        <div className="bi-page-tabs-bar">
+                          <div className="bi-page-tabs-list">
+                            {pages.map((page) => (
+                              <div
+                                key={page.id}
+                                className={`bi-page-tab ${activePageId === page.id ? 'active' : ''}`}
+                                onClick={() => navigateToPage(page.id, true)}
+                                onDoubleClick={() => !isViewOnly && handleRenamePage(page.id)}
+                              >
+                                <span className="bi-page-tab-name">{page.name}</span>
+                                {pages.length > 1 && !isViewOnly && (
+                                  <button className="bi-page-tab-close" onClick={(e) => { e.stopPropagation(); handleDeletePage(page.id); }}>✕</button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          {!isViewOnly && (
+                            <button type="button" className="bi-page-add-btn" onClick={handleAddPage} aria-label="Add page">
+                              <Plus size={14} strokeWidth={2} />
+                            </button>
+                          )}
+                          <div className="bi-status-right">
+                            {fileDetails?.created_at && (
+                              <span className="bi-status-item" title="Report created at">{fileDetails.created_at}</span>
+                            )}
+                            <span className="bi-status-item">{pages.length} pages</span>
+                            <span className="bi-status-item">Rows: {fileDetails?.row_count || '0'}</span>
+                          </div>
+                        </div>
+
                       </div>
-                    )}
+                      {/* END bi-canvas-stack */}
 
-                  </div>
-                  {/* END bi-center-content */}
-
-                  {/* Status Bar / Page Tabs — inside bi-canvas-stack */}
-                  <div className="bi-page-tabs-bar">
-                    <div className="bi-page-tabs-list">
-                      {pages.map((page) => (
-                        <div
-                          key={page.id}
-                          className={`bi-page-tab ${activePageId === page.id ? 'active' : ''}`}
-                          onClick={() => navigateToPage(page.id, true)}
-                          onDoubleClick={() => !isViewOnly && handleRenamePage(page.id)}
-                        >
-                          <span className="bi-page-tab-name">{page.name}</span>
-                          {pages.length > 1 && !isViewOnly && (
-                            <button className="bi-page-tab-close" onClick={(e) => { e.stopPropagation(); handleDeletePage(page.id); }}>✕</button>
-                          )}
-                        </div>
-                      ))}
-                      {!isViewOnly && (
-                        <button className="bi-page-add-btn" onClick={handleAddPage}><Plus size={14} /></button>
-                      )}
-                    </div>
-                    <div className="bi-status-right">
-                      {fileDetails?.created_at && (
-                        <span className="bi-status-item" title="Report created at">{fileDetails.created_at}</span>
-                      )}
-                      <span className="bi-status-item">{pages.length} pages</span>
-                      <span className="bi-status-item">Rows: {fileDetails?.row_count || '0'}</span>
-                    </div>
-                  </div>
-
-                  </div>
-                  {/* END bi-canvas-stack */}
-
-                  {/* Quick Measure Panel — flex sibling of bi-canvas-stack inside bi-center-column.
+                      {/* Quick Measure Panel — flex sibling of bi-canvas-stack inside bi-center-column.
                       No absolute positioning needed — it pushes the canvas left naturally. */}
-                  {isQuickMeasureOpen && (
-                    <div className={`bi-quick-measure-inline${isQuickMeasureCollapsed ? ' collapsed' : ''}`}>
-                      <BIQuickMeasurePanel
-                        isOpen={isQuickMeasureOpen}
-                        isCollapsed={isQuickMeasureCollapsed}
-                        onToggleCollapse={() => setIsQuickMeasureCollapsed(prev => !prev)}
-                        onClose={() => {
-                          setIsQuickMeasureOpen(false);
-                          setIsQuickMeasureCollapsed(false);
-                        }}
-                        schema={schema}
-                        fileId={fileId}
-                        onAddMeasure={(m) => {
-                          // Add measure to the measures list
-                          setMeasures(prev => [...prev, m]);
-                          
-                          // Debug: Log the full measure object
-                          console.log('=== Quick Measure Debug ===');
-                          console.log('Full measure object:', JSON.stringify(m, null, 2));
-                          console.log('Config:', m.config);
-                          console.log('Aggregation:', m.aggregation);
-                          
-                          // Extract the primary field from the measure config
-                          // For most templates, this is 'value_field', 'numerator', or the first param
-                          let primaryField = '';
-                          if (m.config) {
-                            // Try common field names first - always prefer numeric value fields
-                            primaryField = m.config.value_field || 
-                                         m.config.numerator || 
-                                         m.config.actual_field ||
-                                         m.config.current_field ||
-                                         m.config.part_field ||
-                                         m.config.field ||
-                                         // Skip date_field - use any other non-date field
-                                         Object.entries(m.config)
-                                           .filter(([k, v]) => k !== 'date_field' && v && typeof v === 'string')
-                                           .map(([k, v]) => v)[0] ||
-                                         Object.values(m.config)[0] || '';
-                          }
-                          
-                          console.log('Extracted primaryField:', primaryField);
-                          console.log('Will create KPI card with y_axis:', primaryField, 'aggregation:', m.aggregation);
-                          
-                          // Auto-create a KPI card visual on the canvas
-                          const newId = uniqueVisualId('graph');
-                          const fallbackOffset = (graphs.length % 8) * 24;
-                          const newVisual = {
-                            id: newId,
-                            graph_type: 'kpiCard',
-                            x_axis: '',
-                            y_axis: primaryField, // Use the actual column from field mappings
-                            aggregation: m.aggregation || 'sum', // Use the measure's aggregation
-                            options: {
-                              title: m.name,
-                              size: 'medium',
-                              width: KPI_CARD_DEFAULT_SIZE.width,
-                              height: KPI_CARD_DEFAULT_SIZE.height,
-                              x: 32 + fallbackOffset,
-                              y: 120 + fallbackOffset,
-                              layerOrder: Date.now(),
-                              pageId: activePageId,
-                              measureName: m.name, // Store measure name for reference
-                              measureFormula: m.formula, // Store formula for reference
-                              // Add measure_fields with Quick Measure metadata for backend
-                              measure_fields: primaryField ? [{
-                                column: primaryField,
-                                aggregation: (m.aggregation || 'sum').toUpperCase(),
-                                template_id: m.template_id, // Pass template ID for complex measures
-                                field_mappings: m.config // Pass field mappings for multi-field operations
-                              }] : []
-                            },
-                            cached_data: null
-                          };
-                          
-                          console.log('Created visual:', JSON.stringify(newVisual, null, 2));
-                          console.log('=== End Debug ===');
-                          
-                          setGraphs(prev => [newVisual, ...prev]);
-                          setActiveVisualId(newId);
-                          setActiveView('report');
-                        }}
-                      />
+                      {isQuickMeasureOpen && (
+                        <div className={`bi-quick-measure-inline${isQuickMeasureCollapsed ? ' collapsed' : ''}`}>
+                          <BIQuickMeasurePanel
+                            isOpen={isQuickMeasureOpen}
+                            isCollapsed={isQuickMeasureCollapsed}
+                            onToggleCollapse={() => setIsQuickMeasureCollapsed(prev => !prev)}
+                            onClose={() => {
+                              setIsQuickMeasureOpen(false);
+                              setIsQuickMeasureCollapsed(false);
+                            }}
+                            schema={schema}
+                            fileId={fileId}
+                            onAddMeasure={(m) => {
+                              // Add measure to the measures list
+                              setMeasures(prev => [...prev, m]);
+
+                              // Debug: Log the full measure object
+                              console.log('=== Quick Measure Debug ===');
+                              console.log('Full measure object:', JSON.stringify(m, null, 2));
+                              console.log('Config:', m.config);
+                              console.log('Aggregation:', m.aggregation);
+
+                              // Extract the primary field from the measure config
+                              // For most templates, this is 'value_field', 'numerator', or the first param
+                              let primaryField = '';
+                              if (m.config) {
+                                // Try common field names first - always prefer numeric value fields
+                                primaryField = m.config.value_field ||
+                                  m.config.numerator ||
+                                  m.config.actual_field ||
+                                  m.config.current_field ||
+                                  m.config.part_field ||
+                                  m.config.field ||
+                                  // Skip date_field - use any other non-date field
+                                  Object.entries(m.config)
+                                    .filter(([k, v]) => k !== 'date_field' && v && typeof v === 'string')
+                                    .map(([k, v]) => v)[0] ||
+                                  Object.values(m.config)[0] || '';
+                              }
+
+                              console.log('Extracted primaryField:', primaryField);
+                              console.log('Will create KPI card with y_axis:', primaryField, 'aggregation:', m.aggregation);
+
+                              // Auto-create a KPI card visual on the canvas
+                              const newId = uniqueVisualId('graph');
+                              const fallbackOffset = (graphs.length % 8) * 24;
+                              const newVisual = {
+                                id: newId,
+                                graph_type: 'kpiCard',
+                                x_axis: '',
+                                y_axis: primaryField, // Use the actual column from field mappings
+                                aggregation: m.aggregation || 'sum', // Use the measure's aggregation
+                                options: {
+                                  title: m.name,
+                                  size: 'medium',
+                                  width: KPI_CARD_DEFAULT_SIZE.width,
+                                  height: KPI_CARD_DEFAULT_SIZE.height,
+                                  x: 32 + fallbackOffset,
+                                  y: 120 + fallbackOffset,
+                                  layerOrder: Date.now(),
+                                  pageId: activePageId,
+                                  measureName: m.name, // Store measure name for reference
+                                  measureFormula: m.formula, // Store formula for reference
+                                  // Add measure_fields with Quick Measure metadata for backend
+                                  measure_fields: primaryField ? [{
+                                    column: primaryField,
+                                    aggregation: (m.aggregation || 'sum').toUpperCase(),
+                                    template_id: m.template_id, // Pass template ID for complex measures
+                                    field_mappings: m.config // Pass field mappings for multi-field operations
+                                  }] : []
+                                },
+                                cached_data: null
+                              };
+
+                              console.log('Created visual:', JSON.stringify(newVisual, null, 2));
+                              console.log('=== End Debug ===');
+
+                              setGraphs(prev => [newVisual, ...prev]);
+                              setActiveVisualId(newId);
+                              setActiveView('report');
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                {/* END bi-center-column */}
-              </Panel>
-
-              {!isViewOnly && (
-                <>
-                  <PanelResizeHandle className="bi-resizer" />
-
-                  {/* Right Panel: Tools */}
-                  <Panel
-                    ref={rightPanesPanelRef}
-                    defaultSize={20}
-                    minSize={10}
-                    collapsible={true}
-                    onCollapse={() => setIsRightPanesCollapsed(true)}
-                    onExpand={() => setIsRightPanesCollapsed(false)}
-                  >
-                    <BIRightPanes
-                      schema={schema}
-                      dataset={dataset}
-                      fileName={fileName}
-                      selectedVisual={activePageGraphs.find(g => g.id === activeVisualId)}
-                      isCollapsed={isRightPanesCollapsed}
-                      onToggleCollapse={() => isRightPanesCollapsed ? rightPanesPanelRef.current?.expand() : rightPanesPanelRef.current?.collapse()}
-                      onUpdateVisual={applyVisualUpdate}
-                      onAddVisual={handleAddVisual}
-                      measures={measures}
-                      forcedActiveTab={rightPaneTab}
-                      onActiveTabChange={setRightPaneTab}
-                      activeColumn={activeColumn}
-                      onSelectColumn={(col) => {
-                        setActiveColumn(col);
-                        setRibbonTab('Column tools');
-                        if (col?.column_name) {
-                          setSelectedData({ kind: 'field', columnName: col.column_name });
-                        }
-                      }}
-                      isFieldsRefreshing={isFieldsRefreshing}
-                    />
+                    {/* END bi-center-column */}
                   </Panel>
-                </>
-              )}
-            </PanelGroup>
-          </div>
-        )}
+
+                  <>
+                    <PanelResizeHandle className="bi-resizer" />
+
+                    {/* Right Panel: Tools */}
+                    <Panel
+                      ref={rightPanesPanelRef}
+                      defaultSize={20}
+                      minSize={10}
+                      collapsible={true}
+                      onCollapse={() => setIsRightPanesCollapsed(true)}
+                      onExpand={() => setIsRightPanesCollapsed(false)}
+                    >
+                      <BIRightPanes
+                        schema={schema}
+                        dataset={dataset}
+                        fileName={fileName}
+                        selectedVisual={activePageGraphs.find(g => g.id === activeVisualId)}
+                        reportNoFill={reportNoFill}
+                        onApplyReportNoFill={isViewOnly ? undefined : applyReportNoFill}
+                        onApplyReportBackgroundFill={isViewOnly ? undefined : applyReportBackgroundFill}
+                        onApplyReportBackgroundReset={isViewOnly ? undefined : applyReportBackgroundReset}
+                        isCollapsed={isRightPanesCollapsed}
+                        onToggleCollapse={() => isRightPanesCollapsed ? rightPanesPanelRef.current?.expand() : rightPanesPanelRef.current?.collapse()}
+                        onUpdateVisual={isViewOnly ? undefined : applyVisualUpdate}
+                        onUnlinkCrossFilter={isViewOnly ? undefined : unlinkCrossFilterFromAllVisuals}
+                        onAddVisual={isViewOnly ? undefined : handleAddVisual}
+                        onDeleteVisual={isViewOnly ? undefined : handleDeleteVisual}
+                        onAddToReport={handleAddToReport}
+                        onExpandVisual={handleExpandVisual}
+                        isViewOnly={isViewOnly}
+                        measures={measures}
+                        forcedActiveTab={rightPaneTab}
+                        onActiveTabChange={setRightPaneTab}
+                        activeColumn={activeColumn}
+                        onSelectColumn={(col) => {
+                          setActiveColumn(col);
+                          if (!isViewOnly) setRibbonTab('Column tools');
+                          if (col?.column_name) {
+                            setSelectedData({ kind: 'field', columnName: col.column_name });
+                          }
+                        }}
+                        isFieldsRefreshing={isFieldsRefreshing}
+                        onEditMeasure={isViewOnly ? undefined : (measure) => {
+                          setEditingMeasure(measure);
+                          setIsMeasureDesignerOpen(true);
+                        }}
+                        onDuplicateMeasure={isViewOnly ? undefined : handleDuplicateMeasure}
+                        onDeleteMeasure={isViewOnly ? undefined : handleDeleteMeasure}
+                        onArchiveMeasure={isViewOnly ? undefined : handleArchiveMeasure}
+                        onDeprecateMeasure={isViewOnly ? undefined : handleDeprecateMeasure}
+                      />
+                    </Panel>
+                  </>
+                </PanelGroup>
+              </div>
+            )}
           </>
         )}
       </div>
 
-      <ModalPortal 
-        isVisible={showEnterDataModal} 
-        onClose={() => setShowEnterDataModal(false)} 
+      <ModalPortal
+        isVisible={showEnterDataModal}
+        onClose={() => setShowEnterDataModal(false)}
         title="Enter Data"
       >
         <EnterDataModal
@@ -4937,156 +5571,23 @@ const BIWorkspace = ({
         />
       </ModalPortal>
 
-      <ModalPortal
-        isVisible={showPublishModal}
+      <PublishReportModal
+        isOpen={showPublishModal}
         onClose={closePublishModal}
-        title="Publish Report"
-      >
-        <div style={{ padding: '8px 0 4px', maxWidth: 520, margin: '0 auto' }}>
-          {publishModalStep === 'working' && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', padding: '24px 0' }}>
-              <div className="bi-loading-spinner" />
-              <p style={{ margin: 0, color: '#475569', fontSize: 14 }}>Creating your share link…</p>
-            </div>
-          )}
-
-          {publishModalStep === 'configure' && (
-            <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <p style={{ margin: 0, fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
-                Choose how people access this report when they open the published link. Row-level security comes from{' '}
-                <strong>Modeling → Security → Manage roles</strong> (view vs edit permissions per role).
-              </p>
-
-              <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', padding: '10px 12px', border: publishShareMode === 'full' ? '2px solid #8c2546' : '1px solid #e5e7eb', borderRadius: 8, background: publishShareMode === 'full' ? '#eff6ff' : '#fff' }}>
-                <input
-                  type="radio"
-                  name="publish-share-mode"
-                  checked={publishShareMode === 'full'}
-                  onChange={() => { setPublishShareMode('full'); setPublishSelectedRoleIds([]); }}
-                  style={{ marginTop: 3 }}
-                />
-                <span>
-                  <strong style={{ color: '#0f172a' }}>Full report access</strong>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-                    Link opens the report without forcing a security role. Recipients see data like a normal author session (not for external RLS enforcement).
-                  </div>
-                </span>
-              </label>
-
-              <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', padding: '10px 12px', border: publishShareMode === 'rls' ? '2px solid #7c3aed' : '1px solid #e5e7eb', borderRadius: 8, background: publishShareMode === 'rls' ? '#f5f3ff' : '#fff' }}>
-                <input
-                  type="radio"
-                  name="publish-share-mode"
-                  checked={publishShareMode === 'rls'}
-                  onChange={() => setPublishShareMode('rls')}
-                  style={{ marginTop: 3 }}
-                />
-                <span>
-                  <strong style={{ color: '#0f172a' }}>Restricted — apply security roles (recommended)</strong>
-                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-                    The link applies the roles you select. Data is filtered using each selected role&apos;s filter rules. <strong>Can View</strong> opens a read-only report; <strong>Can Edit</strong> / <strong>Can View and Edit</strong> allow layout changes. Recipients cannot turn off this mode on the link.
-                  </div>
-                </span>
-              </label>
-
-              {publishShareMode === 'rls' && (
-                <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px', background: '#fafafa' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Roles included in this link</span>
-                    {simulationData.isViewAsActive && simulationData.activeRoles.length > 0 && (
-                      <button
-                        type="button"
-                        className="bi-btn-secondary"
-                        style={{ padding: '4px 10px', fontSize: 11 }}
-                        onClick={() => setPublishSelectedRoleIds(simulationData.activeRoles.map((r) => r.id))}
-                      >
-                        Use current View as
-                      </button>
-                    )}
-                  </div>
-                  {!publishRolesList.length ? (
-                    <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>No roles loaded. Add roles under Manage roles first.</p>
-                  ) : (
-                    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {publishRolesList.map((role) => {
-                        const permLabel = role.permission === 'view_edit' ? 'Can View & Edit' : role.permission === 'edit' ? 'Can Edit' : 'Can View';
-                        const checked = publishSelectedRoleIds.includes(role.id);
-                        return (
-                          <li key={role.id}>
-                            <label style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer', fontSize: 13 }}>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => togglePublishRoleId(role.id)}
-                              />
-                              <span style={{ fontWeight: 600, color: '#0f172a' }}>{role.name}</span>
-                              <span style={{ fontSize: 12, color: '#64748b' }}>{permLabel}</span>
-                              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
-                                {(role.rules || []).length} rule{(role.rules || []).length !== 1 ? 's' : ''}
-                              </span>
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {publishShareMode === 'rls' && publishSelectedRoleIds.length > 0 && (() => {
-                    const hierarchy = ['view_edit', 'edit', 'view'];
-                    const selected = publishRolesList.filter((r) => publishSelectedRoleIds.includes(r.id));
-                    let bestIdx = 2;
-                    selected.forEach((role) => {
-                      const idx = hierarchy.indexOf(role.permission || 'view');
-                      if (idx >= 0 && idx < bestIdx) bestIdx = idx;
-                    });
-                    const eff = hierarchy[bestIdx];
-                    const expl = eff === 'view'
-                      ? 'Recipients get the most restrictive outcome: read-only report (view-only ribbon hidden).'
-                      : eff === 'edit'
-                        ? 'Recipients can edit visuals; data stays filtered by the selected role(s).'
-                        : 'Recipients can view and edit; data stays filtered by the selected role(s).';
-                    return (
-                      <p style={{ margin: '12px 0 0', fontSize: 12, color: '#475569', lineHeight: 1.45 }}>
-                        <strong>Effective link permission:</strong> {eff === 'view' ? 'View only' : eff === 'edit' ? 'Can edit' : 'Can view & edit'}. {expl} Multiple roles union visible rows.
-                      </p>
-                    );
-                  })()}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
-                <button type="button" className="bi-btn-secondary" onClick={closePublishModal}>Cancel</button>
-                <button type="button" className="bi-btn-primary" onClick={handleConfirmPublish}>Create link</button>
-              </div>
-            </div>
-          )}
-
-          {publishModalStep === 'done' && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px', padding: '8px 0' }}>
-              <div style={{ color: '#00cc66', fontSize: '48px', lineHeight: 1 }}>{'\u2713'}</div>
-              <h3 style={{ margin: 0 }}>Link ready</h3>
-              <p style={{ margin: 0, fontSize: 13, color: '#475569', textAlign: 'center', maxWidth: 440, lineHeight: 1.5 }}>
-                {publishShareMode === 'rls'
-                  ? 'This URL applies the selected security roles. Opening it filters data and sets view or edit access from those roles.'
-                  : 'Anyone with this link can open the report with normal full access (no forced security role).'}
-              </p>
-              <div style={{ display: 'flex', width: '100%', gap: '10px', alignItems: 'center', background: '#f5f5f5', padding: '10px', borderRadius: '4px' }}>
-                <input readOnly value={publishLink} style={{ flex: 1, border: 'none', background: 'transparent', fontSize: '11px' }} />
-                <button className="bi-btn-secondary" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={() => { navigator.clipboard.writeText(publishLink); alert('Link copied!'); }}>Copy</button>
-                <button
-                  className="bi-btn-secondary"
-                  style={{ padding: '4px 8px', fontSize: '11px' }}
-                  onClick={() => window.open(publishLink, '_blank', 'noopener,noreferrer')}
-                  disabled={!publishLink}
-                >
-                  Open
-                </button>
-              </div>
-              <button type="button" className="bi-btn-primary" onClick={closePublishModal}>Close</button>
-            </div>
-          )}
-        </div>
-
-      </ModalPortal>
+        step={publishModalStep}
+        shareMode={publishShareMode}
+        onShareModeChange={(mode) => {
+          setPublishShareMode(mode);
+          if (mode === 'full') setPublishSelectedRoleIds([]);
+        }}
+        rolesList={publishRolesList}
+        selectedRoleIds={publishSelectedRoleIds}
+        onToggleRoleId={togglePublishRoleId}
+        onUseViewAsRoles={() => setPublishSelectedRoleIds(simulationData.activeRoles.map((r) => r.id))}
+        viewAsActive={simulationData.isViewAsActive && simulationData.activeRoles.length > 0}
+        onConfirm={handleConfirmPublish}
+        publishLink={publishLink}
+      />
 
       <BISqlDatasetModal
         isOpen={showSqlDatasetModal}
@@ -5118,13 +5619,13 @@ const BIWorkspace = ({
         }}
       />
 
-      <BIOptionsModal 
-        isOpen={showOptionsModal} 
-        onClose={() => setShowOptionsModal(false)} 
+      <BIOptionsModal
+        isOpen={showOptionsModal}
+        onClose={() => setShowOptionsModal(false)}
       />
-      <BIAboutModal 
-        isOpen={showAboutModal} 
-        onClose={() => setShowAboutModal(false)} 
+      <BIAboutModal
+        isOpen={showAboutModal}
+        onClose={() => setShowAboutModal(false)}
       />
       <PaginatedReportModal
         isOpen={showPaginatedReportModal}
@@ -5135,6 +5636,7 @@ const BIWorkspace = ({
         reportElements={reportElements}
         onReportElementsChange={setReportElements}
         userId={userId}
+        availableGraphs={graphs}
       />
       <MarkDateTableModal
         isOpen={showMarkDateTableModal}
@@ -5146,6 +5648,66 @@ const BIWorkspace = ({
           setShowMarkDateTableModal(false);
           setRibbonTab('Home');
         }}
+      />
+      <ReportRefreshSettingsModal
+        isOpen={showRefreshSettingsModal}
+        onClose={() => setShowRefreshSettingsModal(false)}
+        reportId={fileId}
+        resourceType="dashboard"
+        userId={userId}
+        onRefreshComplete={async () => {
+          await fetchInitialData(true);
+          setGraphs((prev) => prev.map((g) => ({ ...g, cached_data: null })));
+        }}
+      />
+      <BIQueryEditor
+        isOpen={showQueryEditor}
+        onClose={() => setShowQueryEditor(false)}
+        fileId={fileId}
+        mode={queryEditorMode}
+        onApplied={async () => {
+          await fetchInitialData(true);
+          setGraphs((prev) => prev.map((g) => ({ ...g, cached_data: null })));
+        }}
+      />
+      <BINewTableModal
+        isOpen={showNewTableModal}
+        onClose={() => { setShowNewTableModal(false); setEditCalculatedTable(null); }}
+        fileId={fileId}
+        editTable={editCalculatedTable}
+        onSaved={async () => {
+          await fetchInitialData(true);
+          try {
+            const modelRes = await fetch(`/analytics/api/files/${fileId}/model`);
+            if (modelRes.ok) {
+              const modelData = await modelRes.json();
+              setModelTables(modelData.tables || []);
+              setModelRelationships(modelData.relationships || []);
+            }
+          } catch (e) {
+            console.error('Failed to reload model after table create:', e);
+          }
+          setGraphs((prev) => prev.map((g) => ({ ...g, cached_data: null })));
+        }}
+      />
+      <BIDataSourceSettings
+        isOpen={showDataSourceSettings}
+        onClose={() => setShowDataSourceSettings(false)}
+        fileId={fileId}
+      />
+      <BIParameterManager
+        isOpen={showParameterManager}
+        onClose={() => setShowParameterManager(false)}
+        fileId={fileId}
+        onParametersChanged={async () => {
+          await fetchInitialData(true);
+          setGraphs((prev) => prev.map((g) => ({ ...g, cached_data: null })));
+        }}
+      />
+      <BIVariableManager
+        isOpen={showVariableManager}
+        onClose={() => setShowVariableManager(false)}
+        fileId={fileId}
       />
       <ChangeDetectionModal
         isOpen={showChangeDetectionModal}
@@ -5236,11 +5798,11 @@ const BIWorkspace = ({
           } else if (vaultItem.table_name) {
             // Convert table-based connector data to a physical dataset
             try {
-              const res = await fetch(`/api/vault/items/${vaultItem.id}/preview?limit=50000`);
+              const res = await fetch(`/analytics/api/vault/items/${vaultItem.id}/preview?limit=50000`);
               if (!res.ok) throw new Error('Failed to fetch dataset content');
               const data = await res.json();
               if (!data.rows || !data.columns) throw new Error('Invalid table data format');
-              
+
               // Convert to CSV
               const headers = data.columns.map(c => c.name);
               const escapeCsv = (str) => {
@@ -5252,17 +5814,17 @@ const BIWorkspace = ({
                 headers.join(','),
                 ...data.rows.map(row => headers.map(h => escapeCsv(row[h])).join(','))
               ].join('\n');
-              
+
               const file = new File([csvContent], `${vaultItem.name || 'dataset'}.csv`, { type: 'text/csv' });
-              
+
               const formData = new FormData();
               formData.append('file', file);
               if (userId) formData.append('user_id', userId);
-              
-              const uploadRes = await fetch('/api/files/upload', { method: 'POST', body: formData });
+
+              const uploadRes = await fetch('/analytics/api/files/upload', { method: 'POST', body: formData });
               if (!uploadRes.ok) throw new Error('Failed to materialize dataset into workspace');
               const uploadData = await uploadRes.json();
-              
+
               const name = vaultItem.name || 'Connector Extract.csv';
               if (onOpenFile) {
                 onOpenFile({ id: uploadData.file_id, fileName: name });
@@ -5279,6 +5841,121 @@ const BIWorkspace = ({
           }
         }}
       />
+
+      <BIMeasureDesignerModal
+        isOpen={isMeasureDesignerOpen}
+        onClose={() => {
+          setIsMeasureDesignerOpen(false);
+          setEditingMeasure(null);
+        }}
+        fileId={fileId}
+        schema={schema}
+        existingMeasures={measures}
+        measureToEdit={editingMeasure}
+        onSave={handleSaveMeasure}
+      />
+
+      <ModalPortal
+        isVisible={showDeleteConfirmModal}
+        onClose={() => {
+          setShowDeleteConfirmModal(false);
+          setMeasureToDelete(null);
+          setDeleteImpactData(null);
+        }}
+        title="Delete Governed Measure"
+      >
+          {measureToDelete && (
+              <div className="bi-delete-impact-modal" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--df-text, #334155)', lineHeight: '1.5' }}>
+                      Are you sure you want to delete the governed metric <strong>{measureToDelete.display_name || measureToDelete.name}</strong>? This action cannot be undone.
+                  </div>
+                  
+                  {deleteImpactData && deleteImpactData.is_critical && deleteImpactData.impact && deleteImpactData.impact.length > 0 ? (
+                      <div style={{
+                          background: '#fef2f2',
+                          border: '1px solid #fee2e2',
+                          borderRadius: '6px',
+                          padding: '12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px'
+                      }}>
+                          <span style={{ color: '#991b1b', fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              ⚠️ Accidental Deletion Warning
+                          </span>
+                          <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>
+                              This metric is in use. Deleting it will break the following objects:
+                          </span>
+                          <div style={{
+                              maxHeight: '150px',
+                              overflowY: 'auto',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              paddingLeft: '14px',
+                              fontSize: '11px',
+                              color: '#991b1b'
+                          }}>
+                              {deleteImpactData.impact.map((imp, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '4px' }}>
+                                      <span>•</span>
+                                      <span><strong>{imp.name}</strong> ({imp.type}) - {imp.details}</span>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  ) : (
+                      <div style={{
+                          background: 'var(--df-bg-secondary, #f8fafc)',
+                          border: '1px solid var(--df-border, #e2e8f0)',
+                          borderRadius: '6px',
+                          padding: '10px 12px',
+                          fontSize: '12px',
+                          color: 'var(--df-text-soft, #475569)'
+                      }}>
+                          ✓ No external dashboard or report linkages will be broken by this delete.
+                      </div>
+                  )}
+                  
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px', borderTop: '1px solid var(--df-border, #e2e8f0)', paddingTop: '10px' }}>
+                      <button 
+                          onClick={() => {
+                              setShowDeleteConfirmModal(false);
+                              setMeasureToDelete(null);
+                              setDeleteImpactData(null);
+                          }}
+                          style={{
+                              padding: '6px 12px',
+                              border: '1px solid var(--df-border, #cbd5e1)',
+                              background: 'var(--df-panel, #ffffff)',
+                              color: 'var(--df-text, #475569)',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: 'pointer'
+                          }}
+                      >
+                          Cancel
+                      </button>
+                      <button 
+                          onClick={executeDeleteMeasure}
+                          style={{
+                              padding: '6px 12px',
+                              border: 'none',
+                              background: '#ef4444',
+                              color: '#ffffff',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: 'pointer'
+                          }}
+                      >
+                          Delete Measure
+                      </button>
+                  </div>
+              </div>
+          )}
+      </ModalPortal>
     </div>
   );
 };
@@ -5339,7 +6016,7 @@ function ViewAsModalInner({ fileId, showModal, onClose, onOpenManageRoles, onSim
       getRoles(fileId).then((roles) => {
         const active = roles.filter((r) => simulateRoleIds.split(',').includes(String(r.id)));
         if (active.length > 0) setActiveRoles(active);
-      }).catch(() => {});
+      }).catch(() => { });
     });
   }, [fileId, isViewAsActive, setActiveRoles]);
 

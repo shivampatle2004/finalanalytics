@@ -40,7 +40,7 @@ export const MarkDateTableModal = ({ isOpen, onClose, schema, fileId, modelTable
         setSuccess('');
         
         try {
-            const res = await fetch('/api/modeling/mark-date-table', {
+            const res = await fetch('/analytics/api/modeling/mark-date-table', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -192,7 +192,7 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
 
     const checkExisting = async () => {
         try {
-            const res = await fetch('/api/modeling/change-detection/status');
+            const res = await fetch('/analytics/api/modeling/change-detection/status');
             if (res.ok) {
                 const data = await res.json();
                 // Match against the file UUID, not the display name
@@ -222,7 +222,7 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
         setSuccess('');
         
         try {
-            const res = await fetch('/api/modeling/change-detection/setup', {
+            const res = await fetch('/analytics/api/modeling/change-detection/setup', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -237,7 +237,7 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
                 throw new Error(data.detail || 'Setup failed');
             }
             
-            setSuccess(`🔍 Background tracking started for '${selectedColumn}'. You'll be alerted automatically if the data changes.`);
+            setSuccess(`Tracking started on column "${selectedColumn}". The server checks every 60 seconds and refreshes charts when values change.`);
             setTimeout(() => {
                 if (onSuccess) onSuccess();
                 else onClose();
@@ -271,7 +271,9 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
                 
                 <div className="osa-modal-body">
                     <p className="modal-description">
-                        Setup continuous background monitoring on a column. This will poll dataset values and auto-refresh the report if new metrics or values are detected.
+                        Monitor a column for value changes every <strong>60 seconds</strong>. When the data changes, charts on this report refresh automatically.
+                        For live API feeds (e.g. crypto prices), track a numeric column like <strong>price</strong> or <strong>mktcap</strong> — not <strong>id</strong>.
+                        For fixed intervals, use <strong>Refresh settings</strong> instead.
                     </p>
                     
                     {existingStatus && !success && (
@@ -321,7 +323,9 @@ export const ChangeDetectionModal = ({ isOpen, onClose, schema, fileId, modelTab
                                 </option>
                             ))}
                         </select>
-                        <small className="help-text">Select ID, Timestamp, or Version columns for optimal detection.</small>
+                        <small className="help-text">
+                            API datasets: use price, mktcap, or lastupdate. Static files: use timestamp or version columns.
+                        </small>
                     </div>
                     
                     {error && (

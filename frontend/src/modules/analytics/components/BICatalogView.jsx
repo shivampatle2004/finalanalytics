@@ -31,7 +31,7 @@ export default function BICatalogView({ modelTables = [], sqlDatasets = [], acti
           pg_schemas: (remoteSchema || 'public').trim() || 'public',
           include_row_counts: 'true',
         });
-        const res = await fetch(`/api/db/schema?${q.toString()}`);
+        const res = await fetch(`/analytics/api/db/schema?${q.toString()}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const msg = data.detail || data.message || `Failed to load tables (${res.status})`;
@@ -62,7 +62,7 @@ export default function BICatalogView({ modelTables = [], sqlDatasets = [], acti
       }
       try {
         const q = new URLSearchParams({ connection_id: connectionId });
-        const res = await fetch(`/api/db/schemas?${q.toString()}`);
+        const res = await fetch(`/analytics/api/db/schemas?${q.toString()}`);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || data.message || 'Failed to load schemas');
         if (cancelled) return;

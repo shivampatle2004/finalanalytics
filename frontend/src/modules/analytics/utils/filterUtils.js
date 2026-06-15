@@ -14,11 +14,72 @@ export const dimensionAppliesToChartAxis = (dimension, xAxis) => {
     return false;
 };
 
+/** Normalize persisted / API filter rules to `{ field, operator, value }[]`. */
+export const normalizeFilterRules = (list) => {
+    let rules = list;
+    if (typeof rules === 'string') {
+        try {
+            rules = JSON.parse(rules);
+        } catch {
+            return [];
+        }
+    }
+    if (Array.isArray(rules)) {
+        return rules
+            .filter((f) => f?.field && String(f.field).trim())
+            .map((f) => {
+                const op = String(f.operator || 'equals').toLowerCase();
+                return {
+                    ...f,
+                    field: String(f.field).trim(),
+                    operator: op === 'all' ? 'all' : op,
+                };
+            })
+            .filter((f) => f.operator && f.operator !== 'all');
+    }
+    if (rules && typeof rules === 'object' && rules.field && rules.operator) {
+        return normalizeFilterRules([rules]);
+    }
+    return [];
+};
+
+/** Ensure cross-visual filter map values are always string arrays. */
+export const sanitizeFilterMap = (filterMap) => {
+    if (!filterMap || typeof filterMap !== 'object') return {};
+    const out = {};
+    for (const [dimension, values] of Object.entries(filterMap)) {
+        if (!dimension) continue;
+        let list = values;
+        if (!Array.isArray(list)) {
+            if (list == null || String(list).trim() === '') continue;
+            list = [list];
+        }
+        const cleaned = list
+            .map((v) => (v == null ? '' : String(v).trim()))
+            .filter((v) => v !== '');
+        if (cleaned.length > 0) out[dimension] = cleaned;
+    }
+    return out;
+};
+
 /** Convert visual filter rules (`{ field, operator, value }[]`) to FilterContext map shape. */
+/** Convert FilterContext map shape back to visual filter rules. */
+export const filterMapToFilterRules = (filterMap) => {
+    const map = sanitizeFilterMap(filterMap);
+    const out = [];
+    for (const [field, vals] of Object.entries(map)) {
+        for (const value of vals) {
+            out.push({ field, operator: 'equals', value: String(value) });
+        }
+    }
+    return out;
+};
+
 export const filterRulesToFilterMap = (rules) => {
     const out = {};
-    if (!Array.isArray(rules)) return out;
-    for (const rule of rules) {
+    const normalized = normalizeFilterRules(rules);
+    if (!normalized.length) return out;
+    for (const rule of normalized) {
         if (!rule?.field || rule.operator !== 'equals') continue;
         const val = rule.value;
         if (val == null || String(val).trim() === '') continue;

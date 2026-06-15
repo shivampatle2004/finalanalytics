@@ -77,9 +77,11 @@ class GraphEngine:
         df: Any,
         dimensions: List[str],
         measures: List[Dict[str, str]],
-        graph_type: Optional[str] = None
+        graph_type: Optional[str] = None,
+        semantic_measures: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
         import pandas as pd
+        import numpy as np
 
         if not dimensions:
             return {"labels": [], "values": []}
@@ -88,9 +90,15 @@ class GraphEngine:
         if missing_dimensions:
             return {"labels": [], "values": []}
 
-        # When the report contains multiple independent tables (no relationships), the merged
-        # dataframe can include rows where the selected fields are all null because they belong
-        # to another table block. Drop those rows so each visual reflects its own selected table.
+        # Build semantic dict
+        semantic_dict = {}
+        if semantic_measures:
+            for sm in semantic_measures:
+                if isinstance(sm, dict):
+                    semantic_dict[sm["name"]] = sm["expression"]
+                else:
+                    semantic_dict[sm.name] = sm.expression
+
         def _is_blank(v):
             if v is None:
                 return True
@@ -122,7 +130,6 @@ class GraphEngine:
                 .size()
                 .reset_index(name="COUNT")
                 .sort_values(by="COUNT", ascending=False)
-                # Removed hardcoded limit to support full dataset visualization
             )
 
             labels = [
@@ -132,8 +139,6 @@ class GraphEngine:
             values = grouped["COUNT"].tolist()
             rows = grouped.to_dict("records")
             if graph_type in {"pie", "donut"}:
-                # For pie/donut, keep full category distribution.
-                # Frontend dense-mode handles visual readability.
                 pass
             else:
                 labels, values, rows = GraphEngine._cap_points(labels, values, rows)
@@ -219,12 +224,17 @@ class GraphEngine:
         normalized_measures = []
 
         has_time_intel = False
-        time_intel_cols = []
+        custom_measure_mappings = {}
 
         for m in measures:
             column = m.get("column")
             raw_agg = str(m.get("aggregation", "sum")).strip().lower()
-            if raw_agg in time_intel_aggs:
+            
+            # 1. Custom semantic measure
+            if column in semantic_dict:
+                agg_engine = "Calculated"
+                agg_ui = "Calculated"
+            elif raw_agg in time_intel_aggs:
                 agg_engine = "sum"
                 agg_ui = raw_agg.upper()
                 has_time_intel = True
@@ -232,39 +242,46 @@ class GraphEngine:
                 agg_engine = GraphEngine._normalize_agg_to_engine(raw_agg)
                 agg_ui = GraphEngine._normalize_agg_to_ui(raw_agg)
 
-            if column not in df.columns:
+            if column not in df.columns and column not in semantic_dict:
                 return {"labels": [], "values": []}
-            if agg_engine not in supported_aggs:
+            if agg_engine not in supported_aggs and agg_engine != "Calculated":
                 return {"labels": [], "values": []}
-            source_column = column
-            if agg_engine != "count":
-                source_series = df[column]
-                if isinstance(source_series, pd.DataFrame):
-                    source_series = source_series.iloc[:, 0] if source_series.shape[1] > 0 else pd.Series(dtype="float64")
-                # Clean currency symbols before converting to numeric
-                if source_series.dtype == 'object':
-                    cleaned_series = source_series.astype(str).str.replace(r'[$€£¥,\s]', '', regex=True)
-                    numeric_series = pd.to_numeric(cleaned_series, errors='coerce')
-                else:
-                    numeric_series = pd.to_numeric(source_series, errors='coerce')
-                if numeric_series.notna().sum() == 0:
-                    # Fallback for non-numeric measures: count rows by dimension.
-                    agg_engine = "count"
-                    agg_ui = "COUNT"
-                else:
-                    source_column = f"__measure_numeric_{len(named_aggs)}"
-                    work_df[source_column] = numeric_series
 
             alias = f"{agg_ui}_{column}"
-            named_aggs[alias] = (source_column, agg_engine)
-            measure_expressions.append(f"{agg_ui}({column})")
-            normalized_measures.append({
-                "column": column,
-                "aggregation": agg_ui
-            })
+            if agg_engine == "Calculated":
+                custom_measure_mappings[alias] = column
+                measure_expressions.append(f"{column}")
+                normalized_measures.append({
+                    "column": column,
+                    "aggregation": "Calculated"
+                })
+            else:
+                source_column = column
+                if agg_engine != "count":
+                    source_series = df[column]
+                    if isinstance(source_series, pd.DataFrame):
+                        source_series = source_series.iloc[:, 0] if source_series.shape[1] > 0 else pd.Series(dtype="float64")
+                    # Clean currency symbols
+                    if source_series.dtype == 'object':
+                        cleaned_series = source_series.astype(str).str.replace(r'[$€£¥,\s]', '', regex=True)
+                        numeric_series = pd.to_numeric(cleaned_series, errors='coerce')
+                    else:
+                        numeric_series = pd.to_numeric(source_series, errors='coerce')
+                    if numeric_series.notna().sum() == 0:
+                        agg_engine = "count"
+                        agg_ui = "COUNT"
+                    else:
+                        source_column = f"__measure_numeric_{len(named_aggs)}"
+                        work_df[source_column] = numeric_series
 
-        # Keep only rows where at least one selected dimension or measure has a value.
-        # This removes irrelevant rows from unrelated tables in "multi-table, no-relationship" mode.
+                named_aggs[alias] = (source_column, agg_engine)
+                measure_expressions.append(f"{agg_ui}({column})")
+                normalized_measures.append({
+                    "column": column,
+                    "aggregation": agg_ui
+                })
+
+        # Keep only rows where at least one selected dimension or standard measure has a value.
         measure_cols = [m.get("column") for m in measures if isinstance(m, dict) and m.get("column") in work_df.columns]
         relevant_cols = [c for c in [*dimensions, *measure_cols] if c in work_df.columns]
         if relevant_cols:
@@ -278,52 +295,96 @@ class GraphEngine:
         for dim in dimensions:
             work_df[dim] = work_df[dim].astype(str).replace("nan", "Unknown").fillna("Unknown")
 
-        grouped = (
-            work_df
-            .groupby(dimensions, dropna=False, sort=False)
-            .agg(**named_aggs)
-            .reset_index()
-        )
+        # Perform custom aggregation looping if there are custom semantic measures
+        if custom_measure_mappings:
+            records = []
+            for group_name, group_df in work_df.groupby(dimensions, dropna=False, sort=False):
+                row = {}
+                if len(dimensions) == 1:
+                    row[dimensions[0]] = group_name
+                else:
+                    for idx, dim in enumerate(dimensions):
+                        row[dim] = group_name[idx]
+
+                # Standard aggs
+                for alias, (col, method) in named_aggs.items():
+                    series = group_df[col]
+                    if method == "sum":
+                        val = series.sum()
+                    elif method == "mean":
+                        val = series.mean()
+                    elif method == "min":
+                        val = series.min()
+                    elif method == "max":
+                        val = series.max()
+                    elif method == "count":
+                        val = float(series.count())
+                    else:
+                        val = series.sum()
+                    
+                    try:
+                        row[alias] = None if pd.isna(val) else float(val)
+                    except Exception:
+                        row[alias] = None
+
+                # Custom semantic measures
+                for alias, col in custom_measure_mappings.items():
+                    from services.quick_measure_engine import MeasureRegistry
+                    try:
+                        measure_result = MeasureRegistry.resolve(
+                            col,
+                            group_df,
+                            {"measures": semantic_dict}
+                        )
+                        if isinstance(measure_result, dict):
+                            measure_result = list(measure_result.values())[0] if measure_result else 0
+                        
+                        try:
+                            if pd.isna(measure_result):
+                                val = None
+                            else:
+                                val = float(measure_result)
+                        except Exception:
+                            val = None
+                    except Exception:
+                        val = None
+                    row[alias] = val
+
+                records.append(row)
+            grouped = pd.DataFrame(records)
+        else:
+            grouped = (
+                work_df
+                .groupby(dimensions, dropna=False, sort=False)
+                .agg(**named_aggs)
+                .reset_index()
+            )
 
         if has_time_intel and len(dimensions) > 0:
-            # For YTD/MTD/RunningSum, sort chronologically by the first dimension and cumsum
             try:
-                # Convert first dimension to datetime if possible for sorting
                 grouped['_sort_date'] = pd.to_datetime(grouped[dimensions[0]], errors='coerce')
-                # If conversion entirely fails, just sort lexicographically
                 if grouped['_sort_date'].isna().all():
                     grouped['_sort_date'] = grouped[dimensions[0]]
-                
                 grouped = grouped.sort_values('_sort_date')
-                
                 for alias, (col, method) in named_aggs.items():
-                    # Find which formula this alias belongs to
                     m_config = next((x for x in measures if f"{GraphEngine._normalize_agg_to_ui(x.get('aggregation', 'sum'))}_{x.get('column')}" == alias), None)
                     if not m_config: continue
-                    
                     formula = str(m_config.get("aggregation", "")).lower()
-                    
                     if formula == "ytd":
-                        # Group by year and cumsum
                         years = grouped['_sort_date'].dt.year
                         grouped[alias] = grouped.groupby(years)[alias].cumsum()
                     elif formula == "mtd":
-                        # Group by month (year+month) and cumsum
                         months = grouped['_sort_date'].dt.to_period('M')
                         grouped[alias] = grouped.groupby(months)[alias].cumsum()
                     elif formula == "runningsum":
-                        # Global cumsum
                         grouped[alias] = grouped[alias].cumsum()
-                
                 grouped = grouped.drop(columns=['_sort_date'])
             except Exception as e:
                 print(f"DEBUG: Time intel calculation failed: {str(e)}")
                 pass
 
-
-
-        first_measure_alias = list(named_aggs.keys())[0]
-        first_measure_agg = normalized_measures[0]["aggregation"]
+        first_measure_alias = list(custom_measure_mappings.keys())[0] if custom_measure_mappings else list(named_aggs.keys())[0]
+        first_measure_agg = measures[0]["aggregation"]
         numeric_sort_values = pd.to_numeric(grouped[first_measure_alias], errors='coerce')
         if numeric_sort_values.notna().sum() > 0:
             grouped = grouped.assign(__sort_value=numeric_sort_values)
@@ -331,8 +392,6 @@ class GraphEngine:
                 by="__sort_value",
                 ascending=(first_measure_agg == "MIN")
             ).drop(columns=["__sort_value"])
-        else:
-            grouped = grouped
 
         labels = [
             " | ".join(str(row[d]) for d in dimensions)
@@ -364,80 +423,146 @@ class GraphEngine:
         }
 
     @staticmethod
-    def _scalar_measure_aggregate(df: Any, measures: List[Dict[str, str]], graph_type: Optional[str] = None) -> Dict[str, Any]:
+    def _scalar_measure_aggregate(df: Any, measures: List[Dict[str, str]], graph_type: Optional[str] = None, semantic_measures: Optional[List[Any]] = None) -> Dict[str, Any]:
         """
         Single total row when measures are set without dimensions (KPI / metric card style).
         Avoids 400 errors when measure_fields are sent but dimension_fields are missing or invalid.
-        
-        For Quick Measures with complex logic (division, percentage, etc.), this will delegate
-        to QuickMeasureEngine.execute_measure() if template_id is provided.
+        Supports evaluating multiple measures side-by-side.
         """
         import pandas as pd
+        import numpy as np
 
         if not measures:
-            return {"labels": [], "values": []}
+            return {"labels": [], "values": [], "rows": []}
 
-        m0 = measures[0]
-        col = str(m0.get("column") or "").strip()
-        
-        # Check if this is a Quick Measure with a template_id
-        template_id = m0.get("template_id")
-        field_mappings = m0.get("field_mappings")
-        
-        if template_id and field_mappings:
-            # Use Quick Measure execution engine for complex measures
-            from services.quick_measure_engine import QuickMeasureEngine
-            result = QuickMeasureEngine.execute_measure(df, template_id, field_mappings)
-            if result.get("error"):
-                return {"labels": [], "values": [], "error": result["error"]}
-            return {
-                "labels": ["Total"],
-                "values": [result.get("result", 0)],
-                "total_points": 1,
-            }
-        
-        # Standard aggregation path for regular measures
-        if not col or col not in df.columns:
-            return {"labels": [], "values": []}
+        # Build semantic dict
+        semantic_dict = {}
+        if semantic_measures:
+            for sm in semantic_measures:
+                if isinstance(sm, dict):
+                    semantic_dict[sm["name"]] = sm["expression"]
+                else:
+                    semantic_dict[sm.name] = sm.expression
 
-        agg_engine = GraphEngine._normalize_agg_to_engine(m0.get("aggregation", "sum"))
-        raw_series = df[col]
-        if isinstance(raw_series, pd.DataFrame):
-            raw_series = raw_series.iloc[:, 0] if raw_series.shape[1] > 0 else pd.Series(dtype="float64")
-        
-        # Clean currency symbols and commas before converting to numeric
-        # Handles formats like: "$2,317", "€1.234,56", "1,234.56", etc.
-        if raw_series.dtype == 'object':
-            cleaned_series = raw_series.astype(str).str.replace(r'[$€£¥,\s]', '', regex=True)
-            numeric_series = pd.to_numeric(cleaned_series, errors="coerce")
-        else:
-            numeric_series = pd.to_numeric(raw_series, errors="coerce")
+        def to_native(v):
+            if pd.isna(v):
+                return None
+            if isinstance(v, pd.Timestamp):
+                return v.isoformat()
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if hasattr(v, "item"):
+                try:
+                    v_native = v.item()
+                    if pd.isna(v_native):
+                        return None
+                    if hasattr(v_native, "isoformat"):
+                        return v_native.isoformat()
+                    return v_native
+                except Exception:
+                    pass
+            return v
 
-        if agg_engine == "sum":
-            val = numeric_series.sum()
-        elif agg_engine == "mean":
-            val = numeric_series.mean()
-        elif agg_engine == "min":
-            val = numeric_series.min()
-        elif agg_engine == "max":
-            val = numeric_series.max()
-        elif agg_engine == "count":
-            val = float(numeric_series.count())
-        else:
-            val = numeric_series.sum()
+        labels = []
+        values = []
+        rows = []
 
-        try:
-            if pd.isna(val):
-                val = None
-            elif val is not None:
-                val = float(val)
-        except Exception:
+        for m in measures:
+            col = str(m.get("column") or "").strip()
+            if not col:
+                continue
+
             val = None
 
+            # 1. Custom Semantic Measure
+            if col in semantic_dict:
+                from services.quick_measure_engine import MeasureRegistry
+                try:
+                    measure_result = MeasureRegistry.resolve(
+                        col,
+                        df,
+                        {"measures": semantic_dict}
+                    )
+                    if isinstance(measure_result, dict):
+                        measure_result = list(measure_result.values())[0] if measure_result else 0
+                    val = to_native(measure_result)
+                except Exception:
+                    val = None
+
+            # 2. Quick Measure with template_id
+            elif m.get("template_id") and (m.get("field_mappings") or m.get("config")):
+                template_id = m.get("template_id")
+                field_mappings = m.get("field_mappings") or m.get("config")
+                from services.quick_measure_engine import QuickMeasureEngine
+                try:
+                    result = QuickMeasureEngine.execute_measure(df, template_id, field_mappings)
+                    measure_result = result.get("result", 0)
+                    if isinstance(measure_result, dict):
+                        measure_result = list(measure_result.values())[0] if measure_result else 0
+                    val = to_native(measure_result)
+                except Exception:
+                    val = None
+
+            # 3. Standard Column aggregation
+            elif col in df.columns:
+                raw_agg = m.get("aggregation") or "sum"
+                agg_engine = GraphEngine._normalize_agg_to_engine(raw_agg)
+                raw_series = df[col]
+                if isinstance(raw_series, pd.DataFrame):
+                    raw_series = raw_series.iloc[:, 0] if raw_series.shape[1] > 0 else pd.Series(dtype="float64")
+                
+                # Clean currency symbols and commas before converting to numeric
+                if raw_series.dtype == 'object':
+                    cleaned_series = raw_series.astype(str).str.replace(r'[$€£¥,\s]', '', regex=True)
+                    numeric_series = pd.to_numeric(cleaned_series, errors="coerce")
+                else:
+                    numeric_series = pd.to_numeric(raw_series, errors="coerce")
+
+                if agg_engine == "sum":
+                    val = numeric_series.sum()
+                elif agg_engine == "mean":
+                    val = numeric_series.mean()
+                elif agg_engine == "min":
+                    val = numeric_series.min()
+                elif agg_engine == "max":
+                    val = numeric_series.max()
+                elif agg_engine == "count":
+                    val = float(numeric_series.count())
+                else:
+                    val = numeric_series.sum()
+
+                try:
+                    if pd.isna(val):
+                        val = None
+                    elif val is not None:
+                        val = float(val)
+                except Exception:
+                    val = None
+
+            display_name = col
+            if semantic_measures:
+                display_name = next(
+                    (sm.get("display_name") or col for sm in semantic_measures
+                     if isinstance(sm, dict) and sm.get("name") == col),
+                    col
+                )
+            labels.append(display_name)
+            values.append(val)
+            rows.append({"name": display_name, "value": val})
+
+        is_scalar = len(labels) == 1
         return {
-            "labels": ["Total"],
-            "values": [val],
-            "total_points": 1,
+            "labels": labels,
+            "values": values,
+            "total_points": len(labels),
+            "measure": measures[0].get("column"),
+            "measures": [m.get("column") for m in measures],
+            "scalar": is_scalar,
+            "axis_mapping": {
+                "x_axis": "Measure" if not is_scalar else "Category",
+                "y_axis": measures[0].get("column") if is_scalar else "Value",
+            },
+            "rows": rows,
         }
 
     @staticmethod
@@ -556,7 +681,8 @@ class GraphEngine:
         y: str = None,
         aggregation: str = None,
         dimension_fields: Optional[List[str]] = None,
-        measure_fields: Optional[List[Dict[str, str]]] = None
+        measure_fields: Optional[List[Dict[str, str]]] = None,
+        semantic_measures: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
         import pandas as pd
         
@@ -571,21 +697,12 @@ class GraphEngine:
         # Power BI style field well config path (must run before legacy x-axis guard so
         # measure-only requests with empty x_axis still work).
         if dimension_fields or measure_fields:
-            # Special-case: table should return raw rows/columns, not labels/values.
-            if graph_type == "table":
+            # Special-case: table should return raw rows/columns if no measures are requested,
+            # otherwise it should go through the standard aggregation pipeline.
+            is_grouped_table = graph_type == "table" and len(measure_fields or []) > 0
+            if graph_type == "table" and not is_grouped_table:
                 dimensions = [d for d in (dimension_fields or []) if isinstance(d, str) and d.strip()]
-                measures = [m for m in (measure_fields or []) if isinstance(m, dict)]
-                measure_cols = [
-                    str(m.get("column")).strip()
-                    for m in measures
-                    if m.get("column") is not None and str(m.get("column")).strip()
-                ]
-
-                ordered_cols = []
-                for c in [*dimensions, *measure_cols]:
-                    if c in df.columns and c not in ordered_cols:
-                        ordered_cols.append(c)
-
+                ordered_cols = [c for c in dimensions if c in df.columns]
                 sample = df[ordered_cols] if ordered_cols else df
                 import numpy as np
                 sample = sample.replace([np.inf, -np.inf], None).where(pd.notnull(sample), None)
@@ -597,6 +714,16 @@ class GraphEngine:
             dimensions = [d for d in (dimension_fields or []) if isinstance(d, str) and d.strip()]
             dimensions = [d for d in dimensions if d in df.columns]
             measures = []
+            
+            # Extract semantic names
+            semantic_names = set()
+            if semantic_measures:
+                for sm in semantic_measures:
+                    if isinstance(sm, dict):
+                        semantic_names.add(sm.get("name"))
+                    else:
+                        semantic_names.add(getattr(sm, "name", None))
+
             for m in (measure_fields or []):
                 if not isinstance(m, dict):
                     continue
@@ -604,7 +731,7 @@ class GraphEngine:
                 if col is None or not str(col).strip():
                     continue
                 col = str(col).strip()
-                if col not in df.columns:
+                if col not in df.columns and col not in semantic_names:
                     continue
                 # Preserve template_id and field_mappings for Quick Measure execution
                 measure_entry = {
@@ -620,13 +747,13 @@ class GraphEngine:
             # Backward compatibility fallback if only one side is sent
             if not dimensions and x and x in df.columns:
                 dimensions = [x]
-            if not measures and y and y in df.columns:
+            if not measures and y and (y in df.columns or y in semantic_names):
                 measures = [{"column": y, "aggregation": GraphEngine._normalize_agg_to_ui(aggregation or "sum")}]
 
             if dimensions:
-                return GraphEngine._run_field_well_aggregation(df, dimensions, measures, graph_type=graph_type)
+                return GraphEngine._run_field_well_aggregation(df, dimensions, measures, graph_type=graph_type, semantic_measures=semantic_measures)
             if measures:
-                return GraphEngine._scalar_measure_aggregate(df, measures, graph_type=graph_type)
+                return GraphEngine._scalar_measure_aggregate(df, measures, graph_type=graph_type, semantic_measures=semantic_measures)
             # No valid field-well config — fall through to legacy path if possible
 
         # Legacy charts require a valid x column (non-table).

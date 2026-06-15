@@ -7,9 +7,11 @@ from utils.logger import get_logger
 from services.data_engine import DataEngine
 from services.report_pdf_service import sync_generate_pdf
 from services.paginated_report_engine import PaginatedReportEngine
+from services.report_visual_renderer import ReportVisualRenderer
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import os
 import io
+
 
 logger = get_logger("routers.reports")
 
@@ -109,6 +111,15 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
 
             logger.info(f"Element type: {el_type}, has inline data: {inline_data is not None}")
 
+            # ── Image snapshot: frontend captured a live chart screenshot ──
+            if el_type == "image_snapshot":
+                # config already has title + image_b64; pass straight through
+                elements.append({
+                    "type": "image_snapshot",
+                    "config_json": config_json,
+                })
+                continue
+
             # ── Charts: modal sends type "chart" with chartType inside config ──
             if el_type == "chart":
                 ct = (config_json.get("chartType") or config_json.get("chart_type") or "bar").lower()
@@ -120,7 +131,7 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
                     config_json["chart_data"] = _cap_row_list(chart_data, row_cap)
                 elif all_data:
                     config_json["chart_data"] = _cap_row_list(all_data, row_cap)
-            elif el_type in ("bar", "line", "pie", "area", "column"):
+            elif el_type in ("bar", "line", "pie", "area", "column", "donut"):
                 ct = el_type if el_type != "column" else "bar"
                 config_json["chart_type"] = config_json.get("chartType") or ct
                 chart_data = inline_data
@@ -187,6 +198,388 @@ def generate_pdf_direct(payload: Dict[str, Any] = Body(...)):
             status_code=500,
             content={"error": str(e)}
         )
+
+
+# ─── Power BI-Level Report Visual PDF ────────────────────────────────────────
+
+@router.post("/generate-visual-pdf")
+def generate_visual_pdf(payload: Dict[str, Any] = Body(...)):
+    """
+    Power BI Paginated Report style PDF generation.
+
+    Accepts full visual state (graphDefinition + reportConfig) per visual.
+    Re-applies all filters, drill state, and transforms via ReportVisualRenderer.
+    Never uses screenshots — charts are re-rendered from data specifically for print.
+
+    Payload schema:
+    {
+        "title":           str,
+        "page_size":       "A4" | "LETTER",
+        "orientation":     "portrait" | "landscape",
+        "file_id":         str,
+        "include_summary": bool,
+        "rows_per_page":   int,
+        "visuals": [
+            {
+                "id":              str,
+                "title":           str,
+                "visualType":      str,
+                "graphDefinition": { ... },
+                "reportConfig":    { ... }
+            }
+        ],
+        "table_columns":   [str]
+    }
+    """
+    try:
+        title          = payload.get("title", "Report")
+        page_size      = payload.get("page_size", "A4")
+        orientation    = payload.get("orientation", "portrait")
+        file_id        = payload.get("file_id")
+        include_summary = bool(payload.get("include_summary", False))
+        rows_per_page   = max(1, min(int(payload.get("rows_per_page", 30) or 30), 50_000))
+        visuals         = payload.get("visuals") or []
+        table_columns   = payload.get("table_columns") or []
+
+        logger.info(
+            "[VisualPDF] Generating report '%s': %d visuals, %d table columns, file_id=%s",
+            title, len(visuals), len(table_columns), file_id
+        )
+
+        # ── Load master dataset ───────────────────────────────────────────────
+        df = None
+        semantic_dict = {}
+        measures_meta = {}
+        db_session = SessionLocal()
+        try:
+            if file_id:
+                from services.model_engine import ModelEngine
+                df = ModelEngine.load_report_dataframe(file_id, db_session)
+                if df is not None:
+                    import numpy as np
+                    df = df.replace([np.inf, -np.inf], None)
+                    df = df.where(df.notnull(), None)
+                    logger.info("[VisualPDF] Loaded %d rows × %d cols from file_id=%s",
+                                len(df), len(df.columns), file_id)
+
+                # Fetch custom semantic measures from database
+                from models import SemanticMeasure
+                semantic_measures_list = db_session.query(SemanticMeasure).filter(SemanticMeasure.file_id == file_id).all()
+                semantic_dict = {m.name: m.expression for m in semantic_measures_list}
+                for m in semantic_measures_list:
+                    measures_meta[m.name] = {
+                        "display_name": m.display_name or m.name,
+                        "format": m.format or "General",
+                        "currency": m.currency or "₹",
+                        "decimal_places": m.decimal_places if m.decimal_places is not None else 2,
+                        "display_units": m.display_units or "None"
+                    }
+        except Exception as df_exc:
+            logger.error("[VisualPDF] Dataset load error: %s", df_exc)
+        finally:
+            db_session.close()
+
+        # ── Render each visual → PNG bytes ────────────────────────────────────
+        elements = []
+
+        for idx, vis in enumerate(visuals):
+            vis_title   = vis.get("title") or f"Visual {idx + 1}"
+            vis_type    = str(vis.get("visualType") or "bar").lower()
+            graph_def   = vis.get("graphDefinition") or {}
+            report_cfg  = vis.get("reportConfig") or {}
+            one_per_page = bool(report_cfg.get("oneChartPerPage", True))
+
+            # Apply display name matching to visual title
+            y_axis = graph_def.get("y_axis")
+            if y_axis in measures_meta:
+                meta = measures_meta[y_axis]
+                if not vis.get("title") or vis.get("title") == f"Visual {idx + 1}" or vis.get("title").lower() == y_axis.lower():
+                    vis_title = meta["display_name"]
+                vis = dict(vis)
+                vis["title"] = vis_title
+                vis["measure_meta"] = meta
+
+            logger.info("[VisualPDF] Rendering visual %d/%d: '%s' (%s)",
+                        idx + 1, len(visuals), vis_title, vis_type)
+
+            # Tables are handled separately via the table builder
+            if vis_type == "table":
+                table_data = None
+                valid_cols = []
+                if df is not None and not df.empty:
+                    dim_fields  = (graph_def.get("options") or {}).get("dimension_fields") or []
+                    meas_fields = (graph_def.get("options") or {}).get("measure_fields") or []
+                    cols_wanted = [m.get("column") for m in meas_fields if isinstance(m, dict) and m.get("column")]
+                    all_cols    = list(dict.fromkeys(dim_fields + cols_wanted))
+
+                    # Evaluate semantic measures if they are in all_cols
+                    if semantic_dict:
+                        from services.quick_measure_engine import MeasureRegistry
+                        for col_name in all_cols:
+                            if col_name in semantic_dict and col_name not in df.columns:
+                                try:
+                                    val = MeasureRegistry.resolve(col_name, df, {"measures": semantic_dict}, row_wise=True)
+                                    df[col_name] = val
+                                except Exception as ex:
+                                    logger.warning("[VisualPDF] Failed to evaluate semantic measure %s in visual table: %s", col_name, ex)
+                                    df[col_name] = None
+
+                    valid_cols  = [c for c in all_cols if c in df.columns] or list(df.columns[:10])
+                    
+                    # Format each row's cells if they represent semantic measures
+                    table_data = []
+                    for row in df.to_dict("records"):
+                        formatted_row = {}
+                        for c in valid_cols:
+                            raw_val = row.get(c)
+                            if c in measures_meta:
+                                from services.semantic_measure_engine import SemanticMeasureEngine
+                                meta = measures_meta[c]
+                                formatted_val = SemanticMeasureEngine.format_result(
+                                    raw_val,
+                                    format_type=meta["format"],
+                                    decimal_places=meta["decimal_places"],
+                                    currency=meta["currency"],
+                                    display_units=meta["display_units"]
+                                )
+                                formatted_row[c] = "" if formatted_val == "BLANK" else formatted_val
+                            else:
+                                formatted_row[c] = raw_val
+                        table_data.append(formatted_row)
+                    table_data  = table_data[:rows_per_page]
+
+                col_specs = []
+                for c in (valid_cols if table_data else []):
+                    header_name = c
+                    if c in measures_meta:
+                        header_name = measures_meta[c]["display_name"]
+                    col_specs.append({"name": c, "header": header_name})
+
+                elements.append({
+                    "type": "table",
+                    "config_json": {
+                        "title":        vis_title,
+                        "table_data":   table_data or [],
+                        "columns":      col_specs,
+                        "rows_per_page": rows_per_page,
+                        "show_header":   True,
+                    },
+                    "one_per_page": one_per_page,
+                })
+                continue
+
+            # Skip non-chart types
+            SKIP_TYPES = {"slicer", "text", "shape", "button", "image", "kpicards"}
+            if vis_type in SKIP_TYPES:
+                logger.info("[VisualPDF] Skipping non-chart type: %s", vis_type)
+                continue
+
+            # Render via dedicated report renderer
+            print(f"CHART START - index: {idx}, title: {vis_title}")
+            print(f"CHART TYPE: {vis_type}")
+            logger.info("CHART START - index: %d, title: %s", idx, vis_title)
+            logger.info("CHART TYPE: %s", vis_type)
+
+            img_bytes = None
+            if df is not None and not df.empty:
+                print(f"PAYLOAD SIZE: df rows={len(df)}")
+                logger.info("PAYLOAD SIZE: df rows=%d", len(df))
+                try:
+                    # Ensure file_id is always present in graph_def (both snake_case and camelCase)
+                    # so _aggregate_df can always resolve semantic measures.
+                    if file_id and not graph_def.get("file_id") and not graph_def.get("fileId"):
+                        vis = dict(vis)
+                        vis["graphDefinition"] = dict(graph_def)
+                        vis["graphDefinition"]["file_id"] = file_id
+                    elif file_id and not graph_def.get("file_id"):
+                        vis = dict(vis)
+                        vis["graphDefinition"] = dict(graph_def)
+                        vis["graphDefinition"]["file_id"] = file_id
+
+                    img_bytes = ReportVisualRenderer.render(df, vis)
+                    if img_bytes:
+                        print("RENDER SUCCESS")
+                        logger.info("RENDER SUCCESS")
+                    else:
+                        print("RENDER FAILURE - renderer returned None")
+                        logger.info("RENDER FAILURE - renderer returned None")
+                except Exception as render_err:
+                    print(f"RENDER FAILURE: {render_err}")
+                    logger.error("RENDER FAILURE: %s", render_err, exc_info=True)
+            else:
+                print("RENDER FAILURE - df is empty or None")
+                logger.warning("[VisualPDF] No dataframe available for visual '%s'", vis_title)
+
+            if img_bytes:
+                elements.append({
+                    "type": "visual",
+                    "config_json": {
+                        "title":       vis_title,
+                        "image_bytes": img_bytes,
+                    },
+                    "one_per_page": one_per_page,
+                })
+                print("FLOWABLE ADDED")
+                logger.info("FLOWABLE ADDED")
+                # Optionally add data table below the chart
+                if bool(report_cfg.get("includeDataTable")) and df is not None and not df.empty:
+                    rows_for_table = ReportVisualRenderer.render.__func__ if False else None
+                    # Get aggregated rows for the data table
+                    try:
+                        from services.report_visual_renderer import (
+                            _apply_filter_rules, _apply_drill_state,
+                            _aggregate_df
+                        )
+                        options     = graph_def.get("options") or {}
+                        work_df     = _apply_filter_rules(df.copy(), options.get("filters") or [])
+                        work_df     = _apply_drill_state(work_df, options)
+                        table_rows  = _aggregate_df(work_df, graph_def)
+                        if table_rows:
+                            table_rows = table_rows[:rows_per_page]
+                            
+                            col_specs = []
+                            first_row = table_rows[0]
+                            for k in first_row.keys():
+                                header_name = k
+                                if k in measures_meta:
+                                    header_name = measures_meta[k]["display_name"]
+                                col_specs.append({"name": k, "header": header_name})
+                                
+                            formatted_table_rows = []
+                            for row in table_rows:
+                                formatted_row = {}
+                                for k, v in row.items():
+                                    if k in measures_meta:
+                                        from services.semantic_measure_engine import SemanticMeasureEngine
+                                        meta = measures_meta[k]
+                                        formatted_val = SemanticMeasureEngine.format_result(
+                                            v,
+                                            format_type=meta["format"],
+                                            decimal_places=meta["decimal_places"],
+                                            currency=meta["currency"],
+                                            display_units=meta["display_units"]
+                                        )
+                                        formatted_row[k] = "" if formatted_val == "BLANK" else formatted_val
+                                    else:
+                                        formatted_row[k] = v
+                                formatted_table_rows.append(formatted_row)
+
+                            elements.append({
+                                "type": "table",
+                                "config_json": {
+                                    "title":        f"{vis_title} — Data",
+                                    "table_data":   formatted_table_rows,
+                                    "columns":      col_specs,
+                                    "rows_per_page": rows_per_page,
+                                    "show_header":   True,
+                                },
+                                "one_per_page": False,
+                            })
+                    except Exception as tbl_exc:
+                        logger.warning("[VisualPDF] Data table for visual '%s' failed: %s", vis_title, tbl_exc)
+            else:
+                logger.warning("[VisualPDF] Render returned no image for '%s'; adding placeholder", vis_title)
+
+        # ── Evaluate semantic measures in table_columns ────────────────────────
+        if table_columns and df is not None and not df.empty and semantic_dict:
+            from services.quick_measure_engine import MeasureRegistry
+            for col_name in table_columns:
+                if col_name in semantic_dict and col_name not in df.columns:
+                    try:
+                        val = MeasureRegistry.resolve(col_name, df, {"measures": semantic_dict}, row_wise=True)
+                        df[col_name] = val
+                    except Exception as ex:
+                        logger.warning("[VisualPDF] Failed to evaluate semantic measure %s: %s", col_name, ex)
+                        df[col_name] = None
+
+        # ── Data table section (manually selected columns) ────────────────────
+        if table_columns and df is not None and not df.empty:
+            valid_table_cols = [c for c in table_columns if c in df.columns]
+            if valid_table_cols:
+                col_specs = []
+                for c in valid_table_cols:
+                    header_name = c
+                    if c in measures_meta:
+                        header_name = measures_meta[c]["display_name"]
+                    col_specs.append({"name": c, "header": header_name})
+                    
+                all_data = []
+                for row in df[valid_table_cols].to_dict("records"):
+                    formatted_row = {}
+                    for c in valid_table_cols:
+                        raw_val = row.get(c)
+                        if c in measures_meta:
+                            from services.semantic_measure_engine import SemanticMeasureEngine
+                            meta = measures_meta[c]
+                            formatted_val = SemanticMeasureEngine.format_result(
+                                raw_val,
+                                format_type=meta["format"],
+                                decimal_places=meta["decimal_places"],
+                                currency=meta["currency"],
+                                display_units=meta["display_units"]
+                            )
+                            formatted_row[c] = "" if formatted_val == "BLANK" else formatted_val
+                        else:
+                            formatted_row[c] = raw_val
+                    all_data.append(formatted_row)
+                all_data     = all_data[:rows_per_page]
+                elements.append({
+                    "type": "table",
+                    "config_json": {
+                        "table_data":    all_data,
+                        "columns":       col_specs,
+                        "rows_per_page": rows_per_page,
+                        "show_header":   True,
+                    },
+                    "one_per_page": False,
+                })
+
+        # ── Flatten to engine format (one_per_page injected into config_json) ─
+        engine_elements = []
+        for el in elements:
+            cfg = dict(el.get("config_json") or {})
+            cfg["one_per_page"] = el.get("one_per_page", False)
+            engine_elements.append({"type": el["type"], "config_json": cfg})
+
+        logger.info("[VisualPDF] Built %d PDF elements", len(engine_elements))
+
+        if not engine_elements:
+            return JSONResponse(status_code=422, content={"error": "No renderable visuals in the report."})
+
+        # ── Data provider (used for summary KPIs) ─────────────────────────────
+        all_data_rows = df.to_dict("records") if df is not None and not df.empty else []
+
+        def data_provider(_ds_index):
+            return all_data_rows
+
+        report_config = {
+            "page_size":       page_size,
+            "orientation":     orientation,
+            "header_text":     title,
+            "include_summary": include_summary,
+            "include_chart":   False,
+            "rows_per_page":   rows_per_page,
+        }
+
+        pdf_bytes = PaginatedReportEngine.generate_pdf(report_config, engine_elements, data_provider)
+
+        if not pdf_bytes or len(pdf_bytes) < 100:
+            return JSONResponse(status_code=500, content={"error": "PDF generation produced an empty file."})
+
+        pdf_buffer = io.BytesIO(pdf_bytes)
+        pdf_buffer.seek(0)
+        safe_name  = title.replace(" ", "_").replace("/", "-")
+
+        logger.info("[VisualPDF] Done — %d bytes", len(pdf_bytes))
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'},
+        )
+
+    except Exception as exc:
+        logger.error("[VisualPDF] Error: %s", exc, exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @router.post("", status_code=201)

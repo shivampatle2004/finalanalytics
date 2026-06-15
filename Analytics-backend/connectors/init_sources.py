@@ -2,8 +2,8 @@ import os
 import subprocess
 import sys
 
-# We'll use the venv explicitly
-python_exe = r"d:\ArithWise\ArithflowL\backend\venv\Scripts\python.exe"
+# Use the interpreter that launched this script so OSA-3105 stays self-contained.
+python_exe = sys.executable
 
 sources = [
     "shopify", "hubspot", "github", "slack", "zendesk", "salesforce", 

@@ -41,6 +41,8 @@ function Chart({ type, data, options = {}, height = 300 }) {
   if (options.sort === 'asc') chartData.sort((a, b) => a.value - b.value);
   if (options.sort === 'desc') chartData.sort((a, b) => b.value - a.value);
 
+  const animation = !window.isExportingReportPdf;
+
   const renderChart = () => {
     switch (type) {
       case 'bar':
@@ -51,7 +53,7 @@ function Chart({ type, data, options = {}, height = 300 }) {
             <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={formatNumber} tick={{ fill: axisColor, fontSize: 12 }} label={options.yLabel ? { value: options.yLabel, angle: -90, position: 'insideLeft' } : undefined} />
             <Tooltip cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} />
             {options.showLegend && <Legend />}
-            <Bar dataKey="value" name={options.yLabel || 'Value'} radius={[4, 4, 0, 0]} fill={mainColor}>
+            <Bar dataKey="value" name={options.yLabel || 'Value'} radius={[4, 4, 0, 0]} fill={mainColor} isAnimationActive={animation}>
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={options.color ? mainColor : VIBRANT_PALETTE[index % VIBRANT_PALETTE.length]} />
               ))}
@@ -66,7 +68,7 @@ function Chart({ type, data, options = {}, height = 300 }) {
             <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={formatNumber} tick={{ fill: axisColor, fontSize: 12 }} label={options.yLabel ? { value: options.yLabel, angle: -90, position: 'insideLeft', fill: axisColor } : undefined} />
             <Tooltip formatter={tooltipFormatter} />
             {options.showLegend && <Legend />}
-            <Line type="monotone" name={options.yLabel || 'Value'} dataKey="value" stroke={mainColor} strokeWidth={3} dot={{ r: 4, fill: mainColor, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} />
+            <Line type="monotone" name={options.yLabel || 'Value'} dataKey="value" stroke={mainColor} strokeWidth={3} dot={{ r: 4, fill: mainColor, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={animation} />
           </LineChart>
         );
       case 'pie':
@@ -79,6 +81,7 @@ function Chart({ type, data, options = {}, height = 300 }) {
               paddingAngle={2}
               dataKey="value"
               nameKey="month"
+              isAnimationActive={animation}
             >
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={options.color ? mainColor : PIE_COLORS[index % PIE_COLORS.length]} />
@@ -98,6 +101,7 @@ function Chart({ type, data, options = {}, height = 300 }) {
               paddingAngle={5}
               dataKey="value"
               nameKey="month"
+              isAnimationActive={animation}
             >
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={options.color ? mainColor : PIE_COLORS[index % PIE_COLORS.length]} />
@@ -121,7 +125,7 @@ function Chart({ type, data, options = {}, height = 300 }) {
             <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={formatNumber} label={options.yLabel ? { value: options.yLabel, angle: -90, position: 'insideLeft' } : undefined} />
             <Tooltip formatter={tooltipFormatter} />
             {options.showLegend && <Legend />}
-            <Area type="monotone" name={options.yLabel || 'Value'} dataKey="value" stroke={mainColor} strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
+            <Area type="monotone" name={options.yLabel || 'Value'} dataKey="value" stroke={mainColor} strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" isAnimationActive={animation} />
           </AreaChart>
         );
       case 'table':

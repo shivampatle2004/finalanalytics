@@ -8,7 +8,6 @@ const getProxyTarget = (req, localTarget, remoteTarget) => {
   const host = req.headers.host || '';
   const referer = req.headers.referer || '';
   const origin = req.headers.origin || '';
-
   const isLocal = 
     host.includes('localhost') || 
     host.includes('127.0.0.1') || 

@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, ChevronDown, ChevronRight, Zap, Play, Plus, Search, Info, Settings, Code, Activity, Database, Sparkles, Wand2 } from 'lucide-react';
+import {
+  QUICK_MEASURE_TEMPLATE_FALLBACK,
+  countQuickMeasureTemplates,
+  generateQuickMeasureFormula,
+} from '../constants/quickMeasureTemplates';
 import './BIQuickMeasurePanel.css';
 
 const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapsed, onToggleCollapse, fileId }) => {
@@ -15,6 +20,32 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
   const [activeCategory, setActiveCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [templateSource, setTemplateSource] = useState('loading');
+
+  const schemaColumns = useMemo(
+    () => (Array.isArray(schema) ? schema : []).map((col) => ({
+      name: col.column_name || col.name || col.field || '',
+      type: col.data_type || col.type || col.dtype || 'unknown',
+    })).filter((col) => col.name),
+    [schema]
+  );
+
+  const getColumnsForParam = (param) => {
+    const expected = String(param?.type || 'any').toLowerCase();
+    if (expected === 'any' || expected === 'text' || expected === 'number') return schemaColumns;
+
+    const numericTokens = ['int', 'float', 'decimal', 'double', 'real', 'numeric', 'number'];
+    const dateTokens = ['date', 'time', 'timestamp', 'datetime'];
+    const textTokens = ['text', 'varchar', 'string', 'char', 'object', 'category'];
+
+    return schemaColumns.filter((col) => {
+      const type = String(col.type || '').toLowerCase();
+      if (expected === 'numeric') return numericTokens.some((token) => type.includes(token));
+      if (expected === 'datetime') return dateTokens.some((token) => type.includes(token));
+      if (expected === 'categorical') return textTokens.some((token) => type.includes(token));
+      return true;
+    });
+  };
 
   // Fetch templates and suggestions on mount
   useEffect(() => {
@@ -29,11 +60,17 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
       const res = await fetch('/analytics/api/modeling/quick-measures/templates');
       if (res.ok) {
         const data = await res.json();
-        setTemplates(data);
+        if (data && countQuickMeasureTemplates(data) > 0) {
+          setTemplates(data);
+          setTemplateSource('backend');
+          return;
+        }
       }
     } catch (e) {
       console.error("Failed to load Quick Measure templates", e);
     }
+    setTemplates(QUICK_MEASURE_TEMPLATE_FALLBACK);
+    setTemplateSource('local');
   };
 
   const fetchSuggestions = async () => {
@@ -51,6 +88,13 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
       console.error("Failed to load Quick Measure suggestions", e);
     }
   };
+
+  useEffect(() => {
+    const firstCategory = Object.keys(templates || {})[0];
+    if (!activeCategory && firstCategory) {
+      setActiveCategory(firstCategory);
+    }
+  }, [templates, activeCategory]);
 
   const currentTemplate = useMemo(() => {
     for (const cat of Object.values(templates)) {
@@ -93,10 +137,13 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
           const data = await res.json();
           setPreviewFormula(data.formula);
           setValidationErrors(data.errors || []);
+          return;
         }
       } catch (e) {
         console.error("Failed to generate formula", e);
       }
+      setPreviewFormula(generateQuickMeasureFormula(currentTemplate, fieldMappings));
+      setValidationErrors([]);
     };
     generatePreview();
   }, [fieldMappings, currentTemplate, schema]);
@@ -126,7 +173,7 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
   };
 
   const handleSave = async () => {
-    if (!currentTemplate || !measureName.trim()) return;
+    if (!currentTemplate || !measureName.trim() || validationErrors.length > 0) return;
 
     // If formula hasn't been generated yet, generate it now before saving
     let formulaToSave = previewFormula;
@@ -252,7 +299,13 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
           <div className="qm-header-icon-box">
             <Zap size={18} />
           </div>
-          <h3>Quick Measures</h3>
+          <div>
+            <h3>Quick Measures</h3>
+            <span className="qm-template-count">
+              {countQuickMeasureTemplates(templates)} templates
+              {templateSource === 'local' ? ' - local catalogue' : ''}
+            </span>
+          </div>
         </div>
         <div className="qm-header-actions">
           <button className="qm-icon-btn" onClick={onToggleCollapse} title="Collapse">
@@ -346,7 +399,9 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
             </div>
 
             <div className="qm-params-list">
-              {currentTemplate.params.map(param => (
+              {currentTemplate.params.map(param => {
+                const columnOptions = getColumnsForParam(param);
+                return (
                 <div className="qm-param-row" key={param.key}>
                   <label>
                     {param.label}
@@ -367,15 +422,16 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
                       onChange={e => setFieldMappings(prev => ({...prev, [param.key]: e.target.value}))}
                     >
                       <option value="">Select a column...</option>
-                      {schema?.map(col => (
-                        <option key={col.column_name} value={col.column_name}>
-                          {col.column_name} ({col.data_type})
+                      {columnOptions.map(col => (
+                        <option key={col.name} value={col.name}>
+                          {col.name} ({col.type})
                         </option>
                       ))}
                     </select>
                   )}
                 </div>
-              ))}
+              );
+              })}
             </div>
           </div>
         )}
@@ -389,7 +445,7 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
 
             {validationErrors.length > 0 ? (
               <div className="qm-validation-warnings">
-                <div className="qm-warning-title">⚠ Type hints (you can still save):</div>
+                <div className="qm-warning-title">Validation required before saving:</div>
                 {validationErrors.map((err, i) => <div key={i} className="qm-warning-item">{err}</div>)}
               </div>
             ) : previewFormula ? (
@@ -436,7 +492,7 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
             <button className="qm-btn qm-btn-ghost" onClick={onClose}>Cancel</button>
             <button
               className="qm-btn qm-btn-primary"
-              disabled={!currentTemplate || loading}
+              disabled={!currentTemplate || loading || validationErrors.length > 0 || !previewFormula}
               onClick={handleSave}
             >
               {loading ? 'Saving...' : <><Plus size={14} /> Add Measure</>}
@@ -450,4 +506,3 @@ const BIQuickMeasurePanel = ({ isOpen, onClose, schema, onAddMeasure, isCollapse
 
 export default BIQuickMeasurePanel;
 // Force Vite HMR reload
-

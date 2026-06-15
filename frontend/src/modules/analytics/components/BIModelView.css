@@ -1569,3 +1569,424 @@
     }
 }
 .bi-model-date-table-badge { margin-left: 6px; font-size: 11px; vertical-align: middle; }
+
+/* ── Dark Theme Overrides for Model View ───────────────────────────── */
+.dark-theme .bi-model-view {
+    background-color: var(--bg-primary);
+}
+
+.dark-theme .bi-model-toolbar {
+    background-color: var(--bg-elevated);
+    border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .bi-model-toolbar-label {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-hint {
+    color: var(--text-muted);
+}
+
+.dark-theme .bi-model-btn {
+    background: var(--bg-primary);
+    border-color: var(--border-primary);
+    color: var(--text-secondary);
+}
+
+.dark-theme .bi-model-btn:hover:not(:disabled) {
+    background: var(--bg-secondary);
+    border-color: var(--border-secondary);
+    color: var(--text-primary);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.dark-theme .bi-model-btn-primary {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-inverse);
+}
+
+.dark-theme .bi-model-btn-primary:hover:not(:disabled) {
+    background: var(--accent-primary-hover);
+    border-color: var(--accent-primary-hover);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.dark-theme .bi-model-btn-sql {
+    border-color: #818cf8;
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.dark-theme .bi-model-btn-sql:hover:not(:disabled) {
+    background: rgba(99, 102, 241, 0.25);
+    border-color: #6366f1;
+    color: #e0e7ff;
+}
+
+.dark-theme .bi-model-sql-strip {
+    background: var(--bg-secondary);
+    border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .bi-model-sql-strip-text {
+    color: var(--text-secondary);
+}
+
+.dark-theme .bi-model-sql-strip-text strong {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-sql-strip-text code {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-sql-open {
+    background: var(--bg-primary);
+    border-color: #6366f1;
+    color: #a5b4fc;
+}
+
+.dark-theme .bi-model-sql-open:hover {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.dark-theme .bi-model-sql-active {
+    color: var(--status-success);
+}
+
+.dark-theme .bi-model-sql-inactive {
+    color: var(--text-muted);
+}
+
+.dark-theme .bi-model-icon-btn {
+    background: var(--bg-primary);
+    color: var(--text-tertiary);
+}
+
+.dark-theme .bi-model-icon-btn:hover:not(:disabled) {
+    background: rgba(244, 63, 94, 0.15);
+    color: #f43f5e;
+    border-color: #fda4af;
+}
+
+.dark-theme .bi-model-canvas {
+    background-color: var(--bg-primary);
+    background-image: radial-gradient(circle, var(--border-primary) 1px, transparent 1px);
+}
+
+.dark-theme .bi-model-table {
+    background-color: var(--bg-elevated);
+    border-color: var(--border-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.dark-theme .bi-model-table:active {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .bi-model-table-header {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark-theme .bi-model-column-row {
+    border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .bi-model-column-row:hover {
+    background-color: var(--bg-secondary);
+}
+
+.dark-theme .bi-model-column-active {
+    background-color: rgba(122, 30, 58, 0.15) !important;
+    border-left-color: var(--accent-primary);
+}
+
+.dark-theme .bi-model-collapse-btn {
+    color: var(--text-tertiary);
+    border-top-color: var(--border-primary);
+    background: var(--bg-secondary);
+}
+
+.dark-theme .bi-model-collapse-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary-hover);
+}
+
+.dark-theme .bi-model-column-active .bi-model-col-name {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-column-active .bi-model-col-type {
+    color: var(--accent-primary);
+}
+
+.dark-theme .bi-model-col-name {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-col-dtype {
+    color: var(--text-tertiary);
+}
+
+.dark-theme .bi-model-col-dtype-select {
+    color: var(--text-tertiary);
+}
+
+.dark-theme .bi-model-col-dtype-select:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-col-dtype-select:focus {
+    background: var(--bg-primary);
+    border-color: var(--border-secondary);
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-empty p {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-empty span {
+    color: var(--text-tertiary);
+}
+
+.dark-theme .bi-model-relations-panel {
+    background: var(--bg-elevated);
+    border-color: var(--border-primary);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .bi-model-relations-header {
+    background: var(--bg-elevated);
+}
+
+.dark-theme .bi-model-relations-panel.is-expanded .bi-model-relations-header {
+    border-bottom-color: var(--border-primary);
+}
+
+.dark-theme .bi-model-relations-header:hover {
+    background: var(--bg-secondary);
+}
+
+.dark-theme .bi-model-relations-header-title {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-relations-count {
+    color: #818cf8;
+    background: rgba(99, 102, 241, 0.15);
+    border-color: #6366f1;
+}
+
+.dark-theme .bi-model-relations-chevron {
+    color: var(--text-tertiary);
+}
+
+.dark-theme .bi-model-rel-row:hover {
+    background: var(--bg-secondary);
+    border-color: var(--border-primary);
+}
+
+.dark-theme .bi-model-rel-badge {
+    color: var(--text-primary);
+    background: rgba(122, 30, 58, 0.2);
+    border-color: var(--border-primary);
+}
+
+.dark-theme .bi-model-rel-badge--sql {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.15);
+    border-color: #818cf8;
+}
+
+.dark-theme .bi-model-rel-badge--sql-tag {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.15);
+    border-color: #818cf8;
+}
+
+.dark-theme .bi-model-rel-desc {
+    color: var(--text-secondary);
+}
+
+.dark-theme .bi-model-rel-arrow-text {
+    color: var(--text-muted);
+}
+
+.dark-theme .bi-model-rel-del {
+    border-color: var(--border-primary);
+    background: var(--bg-primary);
+    color: var(--text-muted);
+}
+
+.dark-theme .bi-model-rel-del:hover {
+    background: rgba(220, 38, 38, 0.15);
+    border-color: #fecaca;
+    color: #dc2626;
+}
+
+.dark-theme .bi-model-import-card {
+    background: var(--bg-elevated);
+    box-shadow: 0 16px 35px rgba(0, 0, 0, 0.5);
+}
+
+.dark-theme .bi-model-import-card h3 {
+    color: var(--text-primary);
+}
+
+.dark-theme .bi-model-import-card p {
+    color: var(--text-secondary);
+}
+
+.dark-theme .bi-model-import-spinner {
+    border-color: var(--border-primary);
+    border-top-color: var(--accent-primary);
+}
+
+.dark-theme .bi-model-import-track {
+    background: var(--border-primary);
+}
+
+.dark-theme .bi-catalog-popup-empty {
+    color: var(--text-tertiary);
+}
+
+.bi-model-view--read-only .bi-model-toolbar button,
+.bi-model-view--read-only .bi-model-btn,
+.bi-model-view--read-only .bi-model-relationship-form button,
+.bi-model-view--read-only .bi-model-table {
+    pointer-events: none;
+}
+
+.bi-model-view--read-only .bi-model-toolbar,
+.bi-model-view--read-only .bi-model-relationship-form {
+    opacity: 0.75;
+}
+
+/* ── ADDITIONAL DARK THEME STYLES FOR MODEL VIEW ── */
+.dark-theme .bi-model-view {
+    background-color: var(--bg-primary);
+}
+.dark-theme .bi-model-toolbar {
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-primary);
+}
+.dark-theme .bi-model-toolbar-label {
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-btn {
+    background: var(--bg-tertiary);
+    border-color: var(--border-primary);
+    color: var(--text-secondary);
+}
+.dark-theme .bi-model-btn:hover:not(:disabled) {
+    background: var(--border-primary);
+    color: var(--text-primary);
+    border-color: var(--border-secondary);
+}
+.dark-theme .bi-model-sql-strip {
+    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    border-bottom-color: var(--border-primary);
+}
+.dark-theme .bi-model-sql-strip-text {
+    color: var(--text-secondary);
+}
+.dark-theme .bi-model-sql-strip-text strong {
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-sql-strip-text code {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-table {
+    background-color: var(--bg-elevated);
+    border-color: var(--border-primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.dark-theme .bi-model-column-row {
+    border-bottom-color: var(--bg-primary);
+}
+.dark-theme .bi-model-column-row:hover {
+    background-color: var(--bg-tertiary);
+}
+.dark-theme .bi-model-col-name {
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-col-dtype-select {
+    color: var(--text-muted);
+}
+.dark-theme .bi-model-col-dtype-select:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-primary);
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-relations-panel {
+    background: var(--bg-elevated);
+    border-color: var(--border-primary);
+    box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.5);
+}
+.dark-theme .bi-model-relations-header {
+    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+}
+.dark-theme .bi-model-relations-header:hover {
+    background: var(--bg-tertiary);
+}
+.dark-theme .bi-model-relations-header-title {
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-rel-row:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-primary);
+}
+.dark-theme .bi-model-rel-desc {
+    color: var(--text-secondary);
+}
+.dark-theme .bi-model-rel-del {
+    border-color: var(--border-primary);
+    background: var(--bg-primary);
+    color: var(--text-muted);
+}
+.dark-theme .bi-model-rel-del:hover {
+    background: var(--status-error);
+    color: #fff;
+    border-color: var(--status-error);
+}
+.dark-theme .bi-model-collapse-btn {
+    border-top-color: var(--border-primary);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+}
+.dark-theme .bi-model-collapse-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-sql-inactive {
+    color: var(--text-muted);
+}
+.dark-theme .bi-model-sql-open {
+    background: var(--bg-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-sql-open:hover {
+    background: var(--bg-tertiary);
+}
+.dark-theme .bi-model-icon-btn {
+    background: var(--bg-primary);
+    border-color: var(--border-primary);
+    color: var(--text-muted);
+}
+.dark-theme .bi-model-icon-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.dark-theme .bi-model-canvas {
+    background-color: var(--bg-primary);
+    background-image: radial-gradient(circle, #334155 1px, transparent 1px);
+}
+

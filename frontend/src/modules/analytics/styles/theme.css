@@ -66,25 +66,27 @@
   --input-text: #0f172a;
   --input-placeholder: #94a3b8;
   
-  /* Scrollbar */
-  --scrollbar-track: #f1f5f9;
-  --scrollbar-thumb: #cbd5e1;
-  --scrollbar-thumb-hover: #94a3b8;
+  /* Scrollbar — thin & light (Power BI reference) */
+  --scrollbar-track: #f2f2f2;
+  --scrollbar-thumb: #c8c8c8;
+  --scrollbar-thumb-hover: #a8a8a8;
+  --scrollbar-size: 5px;
+  --scrollbar-button: #e8e8e8;
 }
 
 /* ── Dark Theme ────────────────────────────────────────────────────────── */
 .dark-theme {
   /* Backgrounds */
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --bg-elevated: #1e293b;
-  --bg-overlay: rgba(0, 0, 0, 0.75);
+  --bg-primary: #0C0C10;
+  --bg-secondary: #0C0C10;
+  --bg-tertiary: #1A1A22;
+  --bg-elevated: #15151F;
+  --bg-overlay: rgba(0, 0, 0, 0.85);
   
   /* Canvas & Report */
-  --canvas-bg: #0f172a;
-  --canvas-default-bg: #1e293b;
-  --report-surface: #1e293b;
+  --canvas-bg: #0C0C10;
+  --canvas-default-bg: #15151F;
+  --report-surface: #15151F;
   
   /* Text Colors */
   --text-primary: #f1f5f9;
@@ -129,17 +131,18 @@
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
   
-  /* Input & Form */
-  --input-bg: #0f172a;
-  --input-border: #475569;
+  --input-bg: #15151F;
+  --input-border: #4A1525;
   --input-text: #f1f5f9;
   --input-placeholder: #64748b;
   
   /* Scrollbar */
-  --scrollbar-track: #1e293b;
-  --scrollbar-thumb: #475569;
-  --scrollbar-thumb-hover: #64748b;
+  --scrollbar-track: #0C0C10;
+  --scrollbar-thumb: #4A1525;
+  --scrollbar-thumb-hover: #7A1E3A;
+  --scrollbar-button: #0C0C10;
 }
+
 
 /* ── Global Scrollbar Styling ──────────────────────────────────────────── */
 * {
@@ -148,8 +151,8 @@
 }
 
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--scrollbar-size, 6px);
+  height: var(--scrollbar-size, 6px);
 }
 
 *::-webkit-scrollbar-track {
@@ -158,11 +161,31 @@
 
 *::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 4px;
+  border-radius: 3px;
+  border: 1px solid var(--scrollbar-track);
+  background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-button:single-button {
+  background-color: var(--scrollbar-button, #e8e8e8);
+  border: none;
+  width: var(--scrollbar-size, 5px);
+  height: 10px;
+}
+
+*::-webkit-scrollbar-button:single-button:vertical:decrement,
+*::-webkit-scrollbar-button:single-button:vertical:increment {
+  height: 10px;
+}
+
+*::-webkit-scrollbar-button:single-button:horizontal:decrement,
+*::-webkit-scrollbar-button:single-button:horizontal:increment {
+  width: 10px;
 }
 
 /* ── Selection Colors ───────────────────────────────────────────────────── */
@@ -175,3 +198,30 @@
   background-color: var(--accent-primary);
   color: var(--text-inverse);
 }
+
+/* ── Fluent Theme Transition ────────────────────────────────────────────── */
+.app-container,
+.bi-workspace-root,
+.bi-canvas,
+.bi-pane-view,
+.bi-ribbon,
+.bi-visual-card,
+.bi-visual-header,
+.bi-visual-content,
+.bi-fields-pane,
+.bi-filters-pane,
+.bi-visualizations-pane,
+.bi-catalog-view,
+.bi-model-view,
+.bi-query-editor,
+.bi-about-modal,
+.bi-nt-panel,
+.prm-modal,
+button,
+select,
+input,
+textarea,
+a {
+  transition: background-color 0.3s ease, color 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+

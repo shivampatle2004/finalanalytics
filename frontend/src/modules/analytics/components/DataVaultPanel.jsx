@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Archive, Search, RefreshCw, X, Eye, Download, Trash2,
+  Archive, Search, RefreshCw, Eye, Download, Trash2,
   FileSpreadsheet, FileText, Database, Code2, Table,
   AlertCircle, LayoutGrid
 } from 'lucide-react';
@@ -13,18 +13,18 @@ import './DataVaultPanel.css';
 
 // ── Source icon & class helpers ───────────────────────────────────────────────
 const SOURCE_ICON = {
-  csv:        <FileText size={20} />,
-  excel:      <FileSpreadsheet size={20} />,
-  json:       <Code2 size={20} />,
-  parquet:    <FileText size={20} />,
-  mysql:      <Database size={20} />,
-  postgresql: <Database size={20} />,
-  mssql:      <Database size={20} />,
-  sqlite:     <Database size={20} />,
-  api:        <LayoutGrid size={20} />,
-  sql:        <Database size={20} />,
-  entered:    <Table size={20} />,
-  file:       <FileText size={20} />,
+  csv:        <FileText size={16} />,
+  excel:      <FileSpreadsheet size={16} />,
+  json:       <Code2 size={16} />,
+  parquet:    <FileText size={16} />,
+  mysql:      <Database size={16} />,
+  postgresql: <Database size={16} />,
+  mssql:      <Database size={16} />,
+  sqlite:     <Database size={16} />,
+  api:        <LayoutGrid size={16} />,
+  sql:        <Database size={16} />,
+  entered:    <Table size={16} />,
+  file:       <FileText size={16} />,
 };
 
 const SOURCE_CLASS = (src) => {
@@ -67,7 +67,7 @@ const PreviewModal = ({ item, onClose }) => {
     if (!item) return;
     setState({ loading: true, error: null, data: null });
 
-    fetch(`/api/vault/items/${item.id}/preview?limit=200`)
+    fetch(`/analytics/api/vault/items/${item.id}/preview?limit=200`)
       .then(r => {
         if (!r.ok) return r.json().then(e => Promise.reject(new Error(e?.detail || `HTTP ${r.status}`)));
         return r.json();
@@ -85,13 +85,11 @@ const PreviewModal = ({ item, onClose }) => {
       <div className="dv-preview-modal" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="dv-preview-header">
-          <div>
-            <h3>
-              {item.name}
-              <span>— {String(item.source_name).toUpperCase()} preview</span>
-            </h3>
-          </div>
-          <button className="dv-close-btn" onClick={onClose} title="Close"><X size={14} /></button>
+          <h3>
+            {item.name}
+            <span>{String(item.source_name).toUpperCase()} preview</span>
+          </h3>
+          <button type="button" className="dv-close-btn" onClick={onClose} title="Close">×</button>
         </div>
 
         {/* Body */}
@@ -149,57 +147,44 @@ const VaultCard = ({ item, onLoad, onPreview, onDelete }) => {
   const icon = SOURCE_ICON[src] || SOURCE_ICON.file;
   const cls = SOURCE_CLASS(src);
 
+  const metaParts = [
+    item.source_name ? String(item.source_name).toUpperCase() : null,
+    item.row_count > 0 ? `${fmtNum(item.row_count)} rows` : null,
+    item.column_count > 0 ? `${item.column_count} cols` : null,
+    fmtDate(item.created_at) !== '—' ? fmtDate(item.created_at) : null,
+  ].filter(Boolean);
+
   return (
-    <div className="dv-card" id={`dv-card-${item.id}`}>
-      {/* Source icon */}
-      <div className={`dv-card-icon ${cls}`}>{icon}</div>
-
-      {/* Info */}
-      <div className="dv-card-info">
-        <div className="dv-card-name" title={item.name}>{item.name}</div>
-        <div className="dv-card-meta">
-          <span className="dv-chip source">{item.source_name}</span>
-          {item.row_count > 0 && (
-            <span className="dv-chip" title="Row count">
-              {fmtNum(item.row_count)} rows
-            </span>
-          )}
-          {item.column_count > 0 && (
-            <span className="dv-chip" title="Column count">
-              {item.column_count} cols
-            </span>
-          )}
-          <span className="dv-card-timestamp" title={item.created_at}>
-            {fmtDate(item.created_at)}
-          </span>
-        </div>
+    <div className="dv-row" id={`dv-card-${item.id}`}>
+      <div className={`dv-row-icon ${cls}`}>{icon}</div>
+      <div className="dv-row-body">
+        <div className="dv-row-name" title={item.name}>{item.name}</div>
+        <div className="dv-row-meta">{metaParts.join(' · ')}</div>
       </div>
-
-      {/* Actions */}
-      <div className="dv-card-actions">
+      <div className="dv-row-actions">
         <button
-          className="dv-btn-load"
+          className="dv-act dv-act--load"
           id={`dv-load-${item.id}`}
           onClick={() => onLoad(item)}
-          title="Load this dataset into the workspace"
+          title="Load into workspace"
         >
-          <Download size={12} /> Load
+          <Download size={14} />
         </button>
         <button
-          className="dv-btn-preview"
+          className="dv-act dv-act--preview"
           id={`dv-preview-${item.id}`}
           onClick={() => onPreview(item)}
-          title="Preview dataset"
+          title="Preview"
         >
-          <Eye size={12} /> Preview
+          <Eye size={14} />
         </button>
         <button
-          className="dv-btn-delete"
+          className="dv-act dv-act--delete"
           id={`dv-delete-${item.id}`}
           onClick={() => onDelete(item)}
-          title="Remove from DataVault"
+          title="Remove from vault"
         >
-          <Trash2 size={12} />
+          <Trash2 size={14} />
         </button>
       </div>
     </div>
@@ -222,7 +207,7 @@ const DataVaultPanel = ({ isOpen, onClose, onLoadDataset }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/vault/items');
+      const res = await fetch('/analytics/api/vault/items');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setItems(Array.isArray(data.items) ? data.items : []);
@@ -265,7 +250,7 @@ const DataVaultPanel = ({ isOpen, onClose, onLoadDataset }) => {
   const handleDelete = useCallback(async (item) => {
     if (!window.confirm(`Remove "${item.name}" from DataVault? The underlying dataset file will NOT be deleted.`)) return;
     try {
-      const res = await fetch(`/api/vault/items/${item.id}`, { method: 'DELETE' });
+      const res = await fetch(`/analytics/api/vault/items/${item.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
         throw new Error(e?.detail || `HTTP ${res.status}`);
@@ -283,53 +268,46 @@ const DataVaultPanel = ({ isOpen, onClose, onLoadDataset }) => {
       <div className="dv-overlay" onClick={onClose} id="datavault-overlay">
         <div className="dv-panel" onClick={e => e.stopPropagation()} id="datavault-panel">
 
-          {/* ── Header ── */}
+          {/* ── Header: title + search + filter + refresh in one row ── */}
           <div className="dv-header">
-            <div className="dv-header-icon">
-              <Archive size={20} />
+            <Archive size={18} className="dv-header-icon" strokeWidth={2.25} />
+            <h2 className="dv-header-title">DataVault</h2>
+            <div className="dv-header-tools">
+              <div className="dv-search-wrapper">
+                <Search size={14} />
+                <input
+                  id="datavault-search"
+                  className="dv-search"
+                  placeholder="Search datasets…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <span className="dv-tool-sep" aria-hidden="true" />
+              <select
+                id="datavault-source-filter"
+                className="dv-source-filter"
+                value={sourceFilter}
+                onChange={e => setSourceFilter(e.target.value)}
+              >
+                <option value="all">All sources</option>
+                {sources.map(s => (
+                  <option key={s} value={s}>{s.toUpperCase()}</option>
+                ))}
+              </select>
+              <span className="dv-tool-sep" aria-hidden="true" />
+              <button
+                type="button"
+                id="datavault-refresh"
+                className={`dv-refresh-btn ${spinning ? 'spinning' : ''}`}
+                onClick={() => fetchItems(true)}
+                title="Refresh"
+              >
+                <RefreshCw size={15} />
+              </button>
             </div>
-            <div className="dv-header-text">
-              <h2>DataVault</h2>
-              <p>Central storage layer for all fetched datasets</p>
-            </div>
-            {items.length > 0 && (
-              <span className="dv-badge">{items.length} dataset{items.length !== 1 ? 's' : ''}</span>
-            )}
-            <button className="dv-close-btn" onClick={onClose} title="Close DataVault" id="datavault-close">
-              <X size={15} />
-            </button>
-          </div>
-
-          {/* ── Toolbar ── */}
-          <div className="dv-toolbar">
-            <div className="dv-search-wrapper">
-              <Search size={14} />
-              <input
-                id="datavault-search"
-                className="dv-search"
-                placeholder="Search datasets by name or source…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-            <select
-              id="datavault-source-filter"
-              className="dv-source-filter"
-              value={sourceFilter}
-              onChange={e => setSourceFilter(e.target.value)}
-            >
-              <option value="all">All sources</option>
-              {sources.map(s => (
-                <option key={s} value={s}>{s.toUpperCase()}</option>
-              ))}
-            </select>
-            <button
-              id="datavault-refresh"
-              className={`dv-refresh-btn ${spinning ? 'spinning' : ''}`}
-              onClick={() => fetchItems(true)}
-              title="Refresh DataVault"
-            >
-              <RefreshCw size={14} />
+            <button className="dv-close-btn" onClick={onClose} title="Close" id="datavault-close" type="button">
+              ×
             </button>
           </div>
 
@@ -385,10 +363,10 @@ const DataVaultPanel = ({ isOpen, onClose, onLoadDataset }) => {
           {/* ── Footer ── */}
           <div className="dv-footer">
             <span>
-              {filtered.length} of {items.length} dataset{items.length !== 1 ? 's' : ''}
-              {sourceFilter !== 'all' && ` · filtered by ${sourceFilter.toUpperCase()}`}
+              {filtered.length} of {items.length}
+              {sourceFilter !== 'all' && ` · ${sourceFilter.toUpperCase()}`}
             </span>
-            <span>Datasets are auto-saved when you connect any data source</span>
+            <span className="dv-footer-hint">Auto-saved when you connect a data source</span>
           </div>
 
         </div>

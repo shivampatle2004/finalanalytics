@@ -215,7 +215,7 @@ const BIConnectionConfigModal = ({ isOpen, onClose, connector, userId }) => {
       const uid = userId ?? (typeof localStorage !== 'undefined' ? localStorage.getItem('userId') : null);
       if (uid) fd.append('user_id', String(uid));
 
-      const res = await fetch('/api/files/upload', { method: 'POST', body: fd });
+      const res = await fetch('/analytics/api/files/upload', { method: 'POST', body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(uploadErrorMessage(data));
@@ -268,7 +268,7 @@ const BIConnectionConfigModal = ({ isOpen, onClose, connector, userId }) => {
         setIsTesting(false);
         return;
       }
-      const response = await fetch(`/api/connectors/${encodeURIComponent(connector.id)}/test`, {
+      const response = await fetch(`/analytics/api/connectors/${encodeURIComponent(connector.id)}/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -489,7 +489,6 @@ const BIConnectionConfigModal = ({ isOpen, onClose, connector, userId }) => {
             </div>
             <div className="bi-config-modal-header-text">
               <h2 id="bi-config-modal-title">Connect to {connector.name}</h2>
-              <p>Configure connection settings for this data source</p>
             </div>
           </div>
           <button type="button" className="bi-config-modal-close" onClick={onClose} aria-label="Close">
@@ -509,16 +508,10 @@ const BIConnectionConfigModal = ({ isOpen, onClose, connector, userId }) => {
             {Object.entries(connector.schema.properties || {}).map(([key, prop]) => renderField(key, prop))}
           </div>
 
-          <div className="bi-config-modal-note">
-            <div className="bi-config-modal-note-inner">
-              <Shield size={16} className="bi-config-modal-note-icon" />
-              <p>
-                Use <strong>Test connection</strong> to verify settings. For CSV, Excel, and JSON, use{' '}
-                <strong>Upload file</strong> (or <strong>All file types</strong> on Windows if the list looks empty).
-                After upload, your original file name appears under the path field.
-              </p>
-            </div>
-          </div>
+          <p className="bi-config-modal-hint">
+            <Shield size={13} aria-hidden />
+            Test connection before saving. File connectors: use Upload file if the path field is empty.
+          </p>
         </div>
 
         <div className="bi-config-modal-footer">

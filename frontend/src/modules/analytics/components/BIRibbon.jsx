@@ -15,6 +15,11 @@ import {
     Sparkles, Brain, AlertTriangle, Target, Lightbulb, Compass, Download, MessageCircle, FileBarChart, Moon, Sun
 } from 'lucide-react';
 import InstallVisualModal from './InstallVisualModal';
+import { isViewOnlyWriteAction } from '../constants/viewPermissions';
+import {
+    TransformDataIcon, DataSourceSettingsIcon, EditParametersIcon,
+    EditVariablesIcon,
+} from './BIDataMenuIcons';
 import './BIRibbon.css';
 
 // ── Dropdown Component (portaled so ribbon overflow does not clip menus) ─────
@@ -99,7 +104,7 @@ const RibbonBtn = ({ icon, label, onClick, disabled, tooltip, children, classNam
         title={tooltip || label}
         disabled={disabled}
     >
-        {icon}
+        <span className="bi-ribbon-tool-icon" aria-hidden>{icon}</span>
         {children ? (
             <span className="bi-ribbon-tool-text">
                 <span className="bi-ribbon-tool-label">{label}</span>
@@ -121,19 +126,40 @@ const SmallBtn = ({ icon, label, onClick, disabled, tooltip, active }) => (
         disabled={disabled}
         aria-pressed={active ? 'true' : 'false'}
     >
-        {icon}
+        <span className="bi-ribbon-tool-icon bi-ribbon-tool-icon--sm" aria-hidden>{icon}</span>
         {label}
     </button>
 );
 
-const Group = ({ label, children }) => (
-    <>
-        <div className="bi-tool-group">
-            <div className="bi-tool-row">{children}</div>
-            <div className="bi-group-label">{label}</div>
-        </div>
-        <div className="bi-group-divider" />
-    </>
+/** Inserts a faint vertical rule between ribbon groups (Power BI style). */
+const RibbonToolbarGroups = ({ children }) => {
+    const groups = React.Children.toArray(children).filter(
+        (child) => child !== null && child !== undefined && child !== false
+    );
+    return (
+        <>
+            {groups.map((child, index) => (
+                <React.Fragment key={index}>
+                    {child}
+                    {index < groups.length - 1 ? (
+                        <div
+                            className="bi-group-divider"
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-hidden
+                        />
+                    ) : null}
+                </React.Fragment>
+            ))}
+        </>
+    );
+};
+
+const Group = ({ label, children, className = '' }) => (
+    <div className={`bi-tool-group${className ? ` ${className}` : ''}`} role="group" aria-label={label}>
+        <div className="bi-tool-row">{children}</div>
+        <div className="bi-group-label">{label}</div>
+    </div>
 );
 
 // ── Main Ribbon ──────────────────────────────────────────────────────────────
@@ -142,8 +168,8 @@ const BIRibbon = ({
     activeTab, setActiveTab, onAction, reportTheme = 'theme_default', activeVisualId = null, selectedVisualPositionLocked = false, fileName, 
     activeMeasure, setActiveMeasure, activeColumn, setActiveColumn, 
     onUpdateColumn, fileId, dataset,
-    dateHierarchy, dateFilter, setDateFilter,
     hideSecurityTools = false,
+    isViewOnly = false,
     aiMode = 'ceo',
     isDarkMode = false,
     setIsDarkMode,
@@ -160,6 +186,18 @@ const BIRibbon = ({
     }
     const [openDropdown, setOpenDropdown] = useState(null);
     const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
+
+    useEffect(() => {
+        const onKeyDown = (e) => {
+            if (e.key === 'F1' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                setRibbonCollapsed((prev) => !prev);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, []);
+
     const [installModalOpen, setInstallModalOpen] = useState(false);
     const [installModalMode, setInstallModalMode] = useState('appsource');
     const [recentSourcesOptions, setRecentSourcesOptions] = useState([
@@ -179,7 +217,10 @@ const BIRibbon = ({
         }
     };
 
-    const act = (id, optionMeta) => { 
+    const act = (id, optionMeta) => {
+        if (isViewOnly && isViewOnlyWriteAction(id)) {
+            return;
+        }
         if (optionMeta?.recentAction) {
             onAction(optionMeta.recentAction, optionMeta.recentPayload || null);
             closeDropdown();
@@ -247,28 +288,29 @@ const BIRibbon = ({
     }, []);
 
     const transformDataOptions = [
-        { id: 'transform_data', icon: <FileCode size={16} />, label: 'Transform Data', sub: 'Open Power Query editor' },
-        { id: 'edit_queries', icon: <FileCode size={16} />, label: 'Edit Queries', sub: 'Edit existing query steps' },
+        { id: 'transform_data', icon: <TransformDataIcon size={16} />, label: 'Transform data', sub: 'Open Power Query editor' },
+        // { id: 'edit_queries', icon: <TransformDataIcon size={16} />, label: 'Edit queries', sub: 'Edit existing query steps' },
         null,
-        { id: 'data_src_settings', icon: <Database size={16} />, label: 'Data Source Settings' },
-        { id: 'manage_parameters', icon: <Calculator size={16} />, label: 'Manage Parameters' },
+        { id: 'data_src_settings', icon: <DataSourceSettingsIcon size={16} />, label: 'Data source settings' },
+        { id: 'manage_parameters', icon: <EditParametersIcon size={16} />, label: 'Edit parameters' },
+        { id: 'edit_variables', icon: <EditVariablesIcon size={16} />, label: 'Edit variables' },
     ];
 
-    const moreVisualsOptions = [
-        { id: 'vis_appsource', icon: <Search size={16} />, label: 'From AppSource', sub: 'Import from marketplace' },
-        { id: 'vis_file', icon: <FileText size={16} />, label: 'From file...', sub: 'Import local visual' },
-        null,
-        { id: 'vis_remove', icon: <Plus size={16} />, label: 'Remove a visual', style: { transform: 'rotate(45deg)' } },
-    ];
+    // const moreVisualsOptions = [
+    //     { id: 'vis_appsource', icon: <Search size={16} />, label: 'From AppSource', sub: 'Import from marketplace' },
+    //     { id: 'vis_file', icon: <FileText size={16} />, label: 'From file...', sub: 'Import local visual' },
+    //     null,
+    //     { id: 'vis_remove', icon: <Plus size={16} />, label: 'Remove a visual', style: { transform: 'rotate(45deg)' } },
+    // ];
 
-    const buttonsOptions = [
-        { id: 'btn_blank', label: 'Blank' },
-        { id: 'btn_back', label: 'Back' },
-        { id: 'btn_drillthrough', label: 'Drill through' },
-        { id: 'btn_page_nav', label: 'Page navigation' },
-        { id: 'btn_bookmark', label: 'Bookmark' },
-        { id: 'btn_info', label: 'Information' },
-    ];
+    // const buttonsOptions = [
+    //     { id: 'btn_blank', label: 'Blank' },
+    //     { id: 'btn_back', label: 'Back' },
+    //     { id: 'btn_drillthrough', label: 'Drill through' },
+    //     { id: 'btn_page_nav', label: 'Page navigation' },
+    //     { id: 'btn_bookmark', label: 'Bookmark' },
+    //     { id: 'btn_info', label: 'Information' },
+    // ];
 
     const shapesOptions = [
         { id: 'shp_rect', icon: <Square size={16} />, label: 'Rectangle' },
@@ -352,19 +394,19 @@ const BIRibbon = ({
     // ];
 
     const renderHomeToolbar = () => (
-        <>
+        <RibbonToolbarGroups>
             {/* ── Clipboard ── */}
             <Group label="Clipboard">
                 <RibbonBtn
-                    icon={<Clipboard size={32} />}
+                    icon={<Clipboard size={20} />}
                     label="Paste"
                     onClick={() => act('paste')}
                     tooltip="Paste (Ctrl+V)"
                 />
                 <div className="bi-tool-column">
-                    <SmallBtn icon={<Scissors size={13} />} label="Cut" onClick={() => act('cut')} tooltip="Cut (Ctrl+X)" />
-                    <SmallBtn icon={<Copy size={13} />} label="Copy" onClick={() => act('copy')} tooltip="Copy (Ctrl+C)" />
-                    <SmallBtn icon={<Paintbrush size={13} />} label="Format Painter" onClick={() => act('format_painter')} tooltip="Copy formatting and apply to another visual" />
+                    <SmallBtn icon={<Scissors size={11} />} label="Cut" onClick={() => act('cut')} tooltip="Cut (Ctrl+X)" />
+                    <SmallBtn icon={<Copy size={11} />} label="Copy" onClick={() => act('copy')} tooltip="Copy (Ctrl+C)" />
+                    <SmallBtn icon={<Paintbrush size={11} />} label="Format Painter" onClick={() => act('format_painter')} tooltip="Copy formatting and apply to another visual" />
                 </div>
             </Group>
 
@@ -373,7 +415,7 @@ const BIRibbon = ({
                 {/* Get Data with dropdown */}
                 <div className="bi-dropdown-wrapper" data-ribbon-dropdown="get_data">
                     <RibbonBtn
-                        icon={<Database size={32} />}
+                        icon={<Database size={20} />}
                         label="Get data"
                         onClick={() => toggleDropdown('get_data')}
                         tooltip="Connect to a data source"
@@ -386,14 +428,14 @@ const BIRibbon = ({
                 </div>
 
                 <RibbonBtn
-                    icon={<FileSpreadsheet size={32} />}
+                    icon={<FileSpreadsheet size={20} />}
                     label="Excel workbook"
                     onClick={() => act('excel')}
                     tooltip="Import an Excel workbook (.xlsx)"
                 />
 
                 <RibbonBtn
-                    icon={<Plus size={32} />}
+                    icon={<Plus size={20} />}
                     label="Enter data"
                     onClick={() => act('enter_data')}
                     tooltip="Manually enter data into a table"
@@ -402,7 +444,7 @@ const BIRibbon = ({
                 {/* Recent Sources with dropdown */}
                 <div className="bi-dropdown-wrapper" data-ribbon-dropdown="recent_sources">
                     <RibbonBtn
-                        icon={<Clock size={32} />}
+                        icon={<Clock size={20} />}
                         label="Recent sources"
                         onClick={() => toggleDropdown('recent_sources')}
                         tooltip="Reconnect to a recent data source"
@@ -417,9 +459,9 @@ const BIRibbon = ({
 
             {/* ── Queries ── */}
             <Group label="Queries">
-                {/* <div className="bi-dropdown-wrapper">
+                <div className="bi-dropdown-wrapper" data-ribbon-dropdown="transform_data">
                     <RibbonBtn
-                        icon={<FileCode size={32} />}
+                        icon={<TransformDataIcon size={20} />}
                         label="Transform data"
                         onClick={() => toggleDropdown('transform_data')}
                         tooltip="Open the data transformation editor"
@@ -427,12 +469,12 @@ const BIRibbon = ({
                         <ChevronDown size={11} style={{ marginLeft: 2 }} />
                     </RibbonBtn>
                     {openDropdown === 'transform_data' && (
-                        <Dropdown options={transformDataOptions} onClose={closeDropdown} onSelect={act} />
+                        <Dropdown dropdownKey="transform_data" options={transformDataOptions} onClose={closeDropdown} onSelect={act} />
                     )}
-                </div> */}
+                </div>
 
                 <RibbonBtn
-                    icon={<RotateCcw size={32} />}
+                    icon={<RotateCcw size={20} />}
                     label="Refresh"
                     onClick={() => act('refresh')}
                     tooltip="Reload all connected data sources and refresh visuals"
@@ -442,22 +484,22 @@ const BIRibbon = ({
             {/* ── Insert ── */}
             <Group label="Insert">
                 <RibbonBtn
-                    icon={<BarChart2 size={32} />}
+                    icon={<BarChart2 size={20} />}
                     label="New visual"
                     onClick={() => act('new_visual')}
                     tooltip="Add a blank visual container to the report canvas"
                 />
 
                 <RibbonBtn
-                    icon={<Type size={32} />}
+                    icon={<Type size={20} />}
                     label="Text box"
                     onClick={() => act('text_box')}
                     tooltip="Insert an editable text element into the report"
                 />
 
-                <div className="bi-dropdown-wrapper" data-ribbon-dropdown="more_visuals">
+                {/* <div className="bi-dropdown-wrapper" data-ribbon-dropdown="more_visuals">
                     <RibbonBtn
-                        icon={<MoreHorizontal size={32} />}
+                        icon={<MoreHorizontal size={20} />}
                         label="More visuals"
                         onClick={() => toggleDropdown('more_visuals')}
                         tooltip="Open the visual library"
@@ -467,10 +509,10 @@ const BIRibbon = ({
                     {openDropdown === 'more_visuals' && (
                         <Dropdown dropdownKey="more_visuals" options={moreVisualsOptions} onClose={closeDropdown} onSelect={act} />
                     )}
-                </div>
+                </div> */}
 
                 <RibbonBtn
-                    icon={<FileTextIcon size={32} />}
+                    icon={<FileTextIcon size={20} />}
                     label="Paginated Report"
                     onClick={() => act('paginated_report')}
                     disabled={!fileId}
@@ -482,7 +524,7 @@ const BIRibbon = ({
             <Group label="Calculations">
                 <div className="bi-dropdown-wrapper" data-ribbon-dropdown="new_calc">
                     <RibbonBtn
-                        icon={<Calculator size={32} />}
+                        icon={<Calculator size={20} />}
                         label="New visual calculation"
                         onClick={() => toggleDropdown('new_calc')}
                         tooltip="Create a new visual calculation"
@@ -495,14 +537,14 @@ const BIRibbon = ({
                 </div>
 
                 <RibbonBtn
-                    icon={<Calculator size={32} />}
+                    icon={<Calculator size={20} />}
                     label="New measure"
                     onClick={() => act('new_measure')}
                     tooltip="Open the formula editor to create a dynamic measure"
                 />
 
                 <RibbonBtn
-                    icon={<Zap size={32} />}
+                    icon={<Zap size={20} />}
                     label="Quick measure"
                     onClick={() => act('quick_measures')}
                     tooltip="Guided calculation templates for common use cases"
@@ -513,7 +555,7 @@ const BIRibbon = ({
             {/* <Group label="Sensitivity">
                 <div className="bi-dropdown-wrapper">
                     <RibbonBtn
-                        icon={<Shield size={32} />}
+                        icon={<Shield size={20} />}
                         label="Sensitivity"
                         onClick={() => toggleDropdown('sensitivity')}
                         tooltip="Apply a sensitivity classification label to this report"
@@ -529,21 +571,21 @@ const BIRibbon = ({
             {/* ── Share ── */}
             <Group label="Share">
                 <RibbonBtn
-                    icon={<Share2 size={32} />}
+                    icon={<Share2 size={20} />}
                     label="Publish"
                     onClick={() => act('publish')}
                     tooltip="Publish this report to a cloud workspace"
                 />
             </Group>
-        </>
+        </RibbonToolbarGroups>
     );
 
     const renderInsertToolbar = () => (
-        <>
+        <RibbonToolbarGroups>
             {/* ── Pages ── */}
             <Group label="Pages">
                 <RibbonBtn
-                    icon={<FilePlus size={32} />}
+                    icon={<FilePlus size={20} />}
                     label="New page"
                     onClick={() => act('new_page')}
                     tooltip="Add a new page to this report"
@@ -553,14 +595,14 @@ const BIRibbon = ({
             {/* ── Visuals ── */}
             <Group label="Visuals">
                 <RibbonBtn
-                    icon={<Layout size={32} />}
+                    icon={<Layout size={20} />}
                     label="New visual"
                     onClick={() => act('new_visual')}
                     tooltip="Add a blank visual container to the report canvas"
                 />
-                <div className="bi-dropdown-wrapper" data-ribbon-dropdown="more_visuals">
+                {/* <div className="bi-dropdown-wrapper" data-ribbon-dropdown="more_visuals">
                     <RibbonBtn
-                        icon={<MoreHorizontal size={32} />}
+                        icon={<MoreHorizontal size={20} />}
                         label="More visuals"
                         onClick={() => toggleDropdown('more_visuals')}
                         tooltip="Open the visual library or AppSource"
@@ -570,48 +612,49 @@ const BIRibbon = ({
                     {openDropdown === 'more_visuals' && (
                         <Dropdown dropdownKey="more_visuals" options={moreVisualsOptions} onClose={closeDropdown} onSelect={act} />
                     )}
-                </div>
+                </div> */}
             </Group>
 
             {/* ── AI Visuals ── */}
             <Group label="AI Visuals">
                 <RibbonBtn
-                    icon={<MessageSquare size={32} />}
+                    icon={<MessageSquare size={20} />}
                     label="Q&A"
                     onClick={() => act('ai_qna')}
                     tooltip="Ask a question about your data in natural language"
                 />
                 <RibbonBtn
-                    icon={<Activity size={32} />}
+                    icon={<Activity size={20} />}
                     label="Key influencers"
                     onClick={() => act('ai_influencers')}
                     tooltip="Identify factors that influence a specific metric"
                 />
                 <RibbonBtn
-                    icon={<GitBranch size={32} />}
+                    icon={<GitBranch size={20} />}
                     label="Decomposition tree"
                     onClick={() => act('ai_decomp_tree')}
                     tooltip="Break down a measure to understand contributors"
                 />
                 <RibbonBtn
-                    icon={<FileText size={32} />}
+                    icon={<FileText size={20} />}
                     label="Smart narrative"
                     onClick={() => act('ai_smart_narrative')}
                     tooltip="Add a summarized text description of your data"
                 />
             </Group>
 
-            {/* ── Elements ── */}
-            <Group label="Elements">
+            {/* ── Power Platform ── */}
+            <Group label="Power Platform">
                 <RibbonBtn
-                    icon={<Type size={32} />}
+                    icon={<Type size={20} />}
                     label="Text box"
                     onClick={() => act('text_box')}
                     tooltip="Insert a text box with static or dynamic text"
                 />
+                {/* Buttons dropdown — hidden for now
                 <div className="bi-dropdown-wrapper" data-ribbon-dropdown="buttons">
                     <RibbonBtn
-                        icon={<MousePointer2 size={32} />}
+                        icon={<MousePointer2 size={20} />}
                         label="Buttons"
                         onClick={() => toggleDropdown('buttons')}
                         tooltip="Insert a button for navigation or actions"
@@ -622,9 +665,10 @@ const BIRibbon = ({
                         <Dropdown dropdownKey="buttons" options={buttonsOptions} onClose={closeDropdown} onSelect={act} />
                     )}
                 </div>
+                */}
                 <div className="bi-dropdown-wrapper" data-ribbon-dropdown="shapes">
                     <RibbonBtn
-                        icon={<Square size={32} />}
+                        icon={<Square size={20} />}
                         label="Shapes"
                         onClick={() => toggleDropdown('shapes')}
                         tooltip="Insert a basic geometric shape"
@@ -636,7 +680,7 @@ const BIRibbon = ({
                     )}
                 </div>
                 <RibbonBtn
-                    icon={<Image size={32} />}
+                    icon={<Image size={20} />}
                     label="Image"
                     onClick={() => act('insert_image')}
                     tooltip="Upload and insert an image"
@@ -646,40 +690,39 @@ const BIRibbon = ({
             {/* ── Sparklines ── */}
             <Group label="Sparklines">
                 <RibbonBtn
-                    icon={<Activity size={32} />}
+                    icon={<Activity size={20} />}
                     label="Area sparkline"
                     onClick={() => act('add_sparkline_area')}
                     tooltip="Compact area chart — filled trend under the line (ideal for dashboards)"
                 />
                 <RibbonBtn
-                    icon={<TrendingUp size={32} />}
+                    icon={<TrendingUp size={20} />}
                     label="Line sparkline"
                     onClick={() => act('add_sparkline_line')}
                     tooltip="Compact line chart — trend only, no fill"
                 />
                 <RibbonBtn
-                    icon={<BarChart2 size={32} />}
+                    icon={<BarChart2 size={20} />}
                     label="Column sparkline"
                     onClick={() => act('add_sparkline_column')}
                     tooltip="Compact vertical columns — compare values at a glance"
                 />
                 <RibbonBtn
-                    icon={<BarChartHorizontal size={32} />}
+                    icon={<BarChartHorizontal size={20} />}
                     label="Bar sparkline"
                     onClick={() => act('add_sparkline_bar')}
                     tooltip="Compact horizontal bars — each category as % of the maximum"
                 />
             </Group>
-        </>
+        </RibbonToolbarGroups>
     );
 
     const renderModelingToolbar = () => (
-        <>
-
+        <RibbonToolbarGroups>
             {/* ── Calendars ── */}
             <Group label="Calendars">
                 <RibbonBtn
-                    icon={<Calendar size={32} />}
+                    icon={<Calendar size={20} />}
                     label="Mark as date table"
                     onClick={() => act('mark_date_table')}
                     tooltip="Enable time-intelligence features for this table"
@@ -689,7 +732,13 @@ const BIRibbon = ({
             {/* ── Page Refresh ── */}
             <Group label="Page refresh">
                 <RibbonBtn
-                    icon={<RefreshCw size={32} />}
+                    icon={<RefreshCw size={20} />}
+                    label="Refresh settings"
+                    onClick={() => act('refresh_settings')}
+                    tooltip="Configure automatic report refresh schedule"
+                />
+                <RibbonBtn
+                    icon={<Timer size={20} />}
                     label="Change detection"
                     onClick={() => act('change_detection')}
                     tooltip="Configure automatic page refresh based on data changes"
@@ -699,7 +748,13 @@ const BIRibbon = ({
             {/* ── Calculations ── */}
             <Group label="Calculations">
                 <RibbonBtn
-                    icon={<Zap size={32} />}
+                    icon={<Table size={20} color="#8c2546" />}
+                    label="New table"
+                    onClick={() => act('new_calculated_table')}
+                    tooltip="Create a calculated table using formulas, query builder, or manual entry"
+                />
+                <RibbonBtn
+                    icon={<Zap size={20} />}
                     label="Quick measure"
                     onClick={() => act('quick_measures')}
                     tooltip="Create powerful DAX-like measures using guided templates"
@@ -710,61 +765,20 @@ const BIRibbon = ({
             {!hideSecurityTools && (
             <Group label="Security">
                 <RibbonBtn
-                    icon={<Lock size={32} />}
+                    icon={<Lock size={20} />}
                     label="Manage roles"
                     onClick={() => act('manage_roles')}
                     tooltip="Define security roles and filters for row-level security"
                 />
                 <RibbonBtn
-                    icon={<UserCheck size={32} />}
+                    icon={<UserCheck size={20} />}
                     label="View as"
                     onClick={() => act('view_as')}
                     tooltip="Test your report as different security roles"
                 />
             </Group>
             )}
-
-            {/* ── Time Slicer (Added) ── */}
-            {dateHierarchy && (
-                <Group label="Time Slicer">
-                    <div className="bi-tool-column">
-                        <select 
-                            className="bi-ribbon-select"
-                            value={dateFilter.year || ""} 
-                            onChange={(e) => setDateFilter(prev => ({ ...prev, year: e.target.value ? parseInt(e.target.value) : null }))}
-                        >
-                            <option value="">All Years</option>
-                            {dateHierarchy.years.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
-                        <select 
-                            className="bi-ribbon-select"
-                            value={dateFilter.quarter || ""} 
-                            onChange={(e) => setDateFilter(prev => ({ ...prev, quarter: e.target.value ? parseInt(e.target.value) : null }))}
-                        >
-                            <option value="">All Quarters</option>
-                            {dateHierarchy.quarters.map(q => <option key={q} value={q}>Q{q}</option>)}
-                        </select>
-                    </div>
-                    <div className="bi-tool-column">
-                        <select 
-                            className="bi-ribbon-select"
-                            value={dateFilter.month || ""} 
-                            onChange={(e) => setDateFilter(prev => ({ ...prev, month: e.target.value ? parseInt(e.target.value) : null }))}
-                        >
-                            <option value="">All Months</option>
-                            {dateHierarchy.months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                        </select>
-                        <button 
-                            className="bi-ribbon-tool-small osa-ribbon-reset"
-                            onClick={() => setDateFilter({ year: null, month: null, quarter: null })}
-                        >
-                            <X size={12} color="#ef4444" />
-                            <span style={{ color: '#ef4444' }}>Reset Filters</span>
-                        </button>
-                    </div>
-                </Group>
-            )}
-        </>
+        </RibbonToolbarGroups>
     );
 
     const renderViewToolbar = () => {
@@ -775,39 +789,41 @@ const BIRibbon = ({
         ];
 
         return (
-            <>
+            <RibbonToolbarGroups>
                 {/* ── Themes ── */}
-                <Group label="Themes">
-                    <div className="bi-theme-gallery">
-                        {themes.map(t => (
-                            <div
-                                key={t.id}
-                                className={`bi-theme-thumbnail${reportTheme === t.id ? ' active' : ''}`}
-                                onClick={() => act(t.id)}
-                                title={t.name}
-                                role="button"
-                                aria-pressed={reportTheme === t.id}
-                            >
-                                {t.colors.map((c, i) => (
-                                    <span
-                                        key={i}
-                                        className="bi-theme-thumbnail-stripe"
-                                        style={{ backgroundColor: c }}
-                                    />
-                                ))}
-                            </div>
-                        ))}
-                    </div>
-                    <div className="bi-dropdown-wrapper" data-ribbon-dropdown="themes">
-                        <SmallBtn
-                            icon={<ChevronDown size={14} />}
-                            label="More themes"
-                            onClick={() => toggleDropdown('themes')}
-                            tooltip="Browse or import themes"
-                        />
-                        {openDropdown === 'themes' && (
-                            <Dropdown dropdownKey="themes" options={themesOptions} onClose={closeDropdown} onSelect={act} />
-                        )}
+                <Group label="Themes" className="bi-tool-group--themes">
+                    <div className="bi-theme-stack">
+                        <div className="bi-theme-gallery">
+                            {themes.map(t => (
+                                <div
+                                    key={t.id}
+                                    className={`bi-theme-thumbnail${reportTheme === t.id ? ' active' : ''}`}
+                                    onClick={() => act(t.id)}
+                                    title={t.name}
+                                    role="button"
+                                    aria-pressed={reportTheme === t.id}
+                                >
+                                    {t.colors.map((c, i) => (
+                                        <span
+                                            key={i}
+                                            className="bi-theme-thumbnail-stripe"
+                                            style={{ backgroundColor: c }}
+                                        />
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="bi-dropdown-wrapper" data-ribbon-dropdown="themes">
+                            <SmallBtn
+                                icon={<ChevronDown size={14} />}
+                                label="More themes"
+                                onClick={() => toggleDropdown('themes')}
+                                tooltip="Browse or import themes"
+                            />
+                            {openDropdown === 'themes' && (
+                                <Dropdown dropdownKey="themes" options={themesOptions} onClose={closeDropdown} onSelect={act} />
+                            )}
+                        </div>
                     </div>
                 </Group>
 
@@ -815,7 +831,7 @@ const BIRibbon = ({
                 <Group label="Scale to fit">
                     <div className="bi-dropdown-wrapper" data-ribbon-dropdown="page_view" style={{ height: 'auto' }}>
                         <RibbonBtn
-                            icon={<Monitor size={32} />}
+                            icon={<Monitor size={20} />}
                             label="Page view"
                             onClick={() => toggleDropdown('page_view')}
                             tooltip="Adjust how the page fits the screen"
@@ -827,22 +843,23 @@ const BIRibbon = ({
                         )}
                     </div>
                     <RibbonBtn
-                        icon={<Play size={32} />}
+                        icon={<Play size={20} />}
                         label="Present"
                         onClick={() => act('view_present')}
                         tooltip="Present report in fullscreen mode"
                     />
                 </Group>
 
-                {/* ── Mobile ── */}
+                {/* Mobile layout — hidden for now
                 <Group label="Mobile">
                     <RibbonBtn
-                        icon={<Smartphone size={32} />}
+                        icon={<Smartphone size={20} />}
                         label="Mobile layout"
                         onClick={() => act('mobile_layout')}
                         tooltip="Switch to mobile report design mode"
                     />
                 </Group>
+                */}
 
                 {/* ── Page Options ── */}
                 <Group label="Page options">
@@ -880,17 +897,15 @@ const BIRibbon = ({
 
                 {/* ── Show Panes ── */}
                 <Group label="Show panes">
-                    <div className="bi-tool-column">
+                    <div className="bi-tool-grid">
                         <SmallBtn icon={<Filter size={12} />} label="Filters" onClick={() => act('toggle_filters')} />
+                        <SmallBtn icon={<Timer size={12} />} label="Performance analyzer" onClick={() => act('toggle_perf')} />
                         <SmallBtn icon={<Bookmark size={12} />} label="Bookmarks" onClick={() => act('toggle_bookmarks')} />
+                        <SmallBtn icon={<Link2 size={12} />} label="Sync slicers" onClick={() => act('toggle_sync_slicers')} />
                         <SmallBtn icon={<Layers size={12} />} label="Selection" onClick={() => act('toggle_selection')} />
                     </div>
-                    <div className="bi-tool-column">
-                        <SmallBtn icon={<Timer size={12} />} label="Performance analyzer" onClick={() => act('toggle_perf')} />
-                        <SmallBtn icon={<Link2 size={12} />} label="Sync slicers" onClick={() => act('toggle_sync_slicers')} />
-                    </div>
                 </Group>
-            </>
+            </RibbonToolbarGroups>
         );
     };
 
@@ -898,14 +913,14 @@ const BIRibbon = ({
     const renderHelpToolbar = () => (
         <>
             <Group label="Help">
-                <RibbonBtn icon={<Info size={32} />} label="About" onClick={() => act('about')} />
-                <RibbonBtn icon={<BookOpen size={32} />} label="Documentation" onClick={() => act('help_docs')} />
-                <RibbonBtn icon={<Play size={32} />} label="Guided learning" onClick={() => act('guided_learning')} />
-                <RibbonBtn icon={<Users size={32} />} label="Community" onClick={() => act('community')} />
+                <RibbonBtn icon={<Info size={20} />} label="About" onClick={() => act('about')} />
+                <RibbonBtn icon={<BookOpen size={20} />} label="Documentation" onClick={() => act('help_docs')} />
+                <RibbonBtn icon={<Play size={20} />} label="Guided learning" onClick={() => act('guided_learning')} />
+                <RibbonBtn icon={<Users size={20} />} label="Community" onClick={() => act('community')} />
             </Group>
             <Group label="Support">
-                <RibbonBtn icon={<MessageSquare size={32} />} label="Submit an idea" onClick={() => act('submit_idea')} />
-                <RibbonBtn icon={<Settings size={32} />} label="Check for updates" onClick={() => act('check_updates')} />
+                <RibbonBtn icon={<MessageSquare size={20} />} label="Submit an idea" onClick={() => act('submit_idea')} />
+                <RibbonBtn icon={<Settings size={20} />} label="Check for updates" onClick={() => act('check_updates')} />
             </Group>
         </>
     );
@@ -914,19 +929,19 @@ const BIRibbon = ({
         <>
             <Group label="External Tools">
                 <RibbonBtn
-                    icon={<Terminal size={32} />}
+                    icon={<Terminal size={20} />}
                     label="DAX Studio"
                     onClick={() => act('ext_dax_studio')}
                     tooltip="External tool for DAX authoring"
                 />
                 <RibbonBtn
-                    icon={<Settings size={32} />}
+                    icon={<Settings size={20} />}
                     label="Tabular Editor"
                     onClick={() => act('ext_tabular_editor')}
                     tooltip="External tool for model metadata editing"
                 />
                 <RibbonBtn
-                    icon={<Cpu size={32} />}
+                    icon={<Cpu size={20} />}
                     label="ALM Toolkit"
                     onClick={() => act('ext_alm_toolkit')}
                     tooltip="External tool for dataset comparison"
@@ -937,16 +952,16 @@ const BIRibbon = ({
     */
 
     const renderMeasureToolsToolbar = () => (
-        <>
+        <RibbonToolbarGroups>
             <Group label="Structure">
                 <div className="bi-tool-column">
                     <div className="bi-ribbon-field-item">
                         <span className="bi-ribbon-field-label">Name</span>
-                        <input type="text" className="bi-dropdown-select" defaultValue="Measure" readOnly style={{ width: 140, height: 22 }} />
+                        <input type="text" className="bi-dropdown-select" defaultValue="Measure" readOnly style={{ width: 140, height: 20 }} />
                     </div>
                     <div className="bi-ribbon-field-item">
                         <span className="bi-ribbon-field-label">Home table</span>
-                        <select className="bi-dropdown-select" style={{ width: 140, height: 22 }} disabled>
+                        <select className="bi-dropdown-select" style={{ width: 140, height: 20 }} disabled>
                             <option>{fileName || 'Dataset'}</option>
                         </select>
                     </div>
@@ -957,7 +972,7 @@ const BIRibbon = ({
                 <div className="bi-tool-column">
                     <div className="bi-ribbon-field-item">
                         <span className="bi-ribbon-field-label">Format</span>
-                        <select className="bi-dropdown-select" style={{ width: 140, height: 22 }}>
+                        <select className="bi-dropdown-select" style={{ width: 140, height: 20 }}>
                             <option>General</option>
                             <option>Currency</option>
                             <option>Decimal number</option>
@@ -986,7 +1001,7 @@ const BIRibbon = ({
                 <div className="bi-tool-column">
                     <div className="bi-ribbon-field-item">
                         <span className="bi-ribbon-field-label">Data category</span>
-                        <select className="bi-dropdown-select" style={{ width: 140, height: 22 }} defaultValue="Uncategorized">
+                        <select className="bi-dropdown-select" style={{ width: 140, height: 20 }} defaultValue="Uncategorized">
                             <option>Uncategorized</option>
                             <option>Address</option>
                             <option>City</option>
@@ -1004,42 +1019,42 @@ const BIRibbon = ({
 
             <Group label="Calculations">
                 <RibbonBtn
-                    icon={<Calculator size={32} />}
+                    icon={<Calculator size={20} />}
                     label="New measure"
                     onClick={() => act('new_measure')}
                 />
                 <RibbonBtn
-                    icon={<Zap size={32} />}
+                    icon={<Zap size={20} />}
                     label="Quick measure"
                     onClick={() => act('quick_measures')}
                 />
             </Group>
-        </>
+        </RibbonToolbarGroups>
     );
 
     const renderColumnToolsToolbar = () => (
-        <>
+        <RibbonToolbarGroups>
             <Group label="Structure">
-                <div className="bi-tool-column" style={{ gap: '8px' }}>
+                <div className="bi-tool-column" style={{ gap: '2px' }}>
                     <div className="bi-ribbon-field-item">
-                        <div className="bi-ribbon-field-label">
+                        <span className="bi-ribbon-field-label">
                             <Type size={12} className="bi-ribbon-field-icon" /> Name
-                        </div>
+                        </span>
                         <input
                             type="text"
                             className="bi-dropdown-select"
                             value={activeColumn?.column_name || ''}
                             onChange={(e) => onUpdateColumn(activeColumn.column_name, { column_name: e.target.value })}
-                            style={{ width: 140, height: 22 }}
+                            style={{ width: 140, height: 20 }}
                         />
                     </div>
                     <div className="bi-ribbon-field-item">
-                        <div className="bi-ribbon-field-label">
+                        <span className="bi-ribbon-field-label">
                             <Clock size={12} className="bi-ribbon-field-icon" /> Data type
-                        </div>
+                        </span>
                         <select
                             className="bi-dropdown-select"
-                            style={{ width: 140, height: 22 }}
+                            style={{ width: 140, height: 20 }}
                             value={activeColumn?.data_type || 'numeric'}
                             onChange={(e) => onUpdateColumn(activeColumn.column_name, { data_type: e.target.value })}
                         >
@@ -1054,14 +1069,14 @@ const BIRibbon = ({
             </Group>
 
             <Group label="Formatting">
-                <div className="bi-tool-column" style={{ gap: '8px' }}>
+                <div className="bi-tool-column" style={{ gap: '2px' }}>
                     <div className="bi-ribbon-field-item">
-                        <div className="bi-ribbon-field-label">
+                        <span className="bi-ribbon-field-label">
                             <Palette size={12} className="bi-ribbon-field-icon" /> Format
-                        </div>
+                        </span>
                         <select
                             className="bi-dropdown-select"
-                            style={{ width: 140, height: 22 }}
+                            style={{ width: 140, height: 20 }}
                             value={activeColumn?.format || 'General'}
                             onChange={(e) => onUpdateColumn(activeColumn.column_name, { format: e.target.value })}
                         >
@@ -1079,7 +1094,7 @@ const BIRibbon = ({
                         <button className="bi-icon-btn-small" title="Comma style" onClick={() => onUpdateColumn(activeColumn.column_name, { format: 'Decimal number' })}>,</button>
                         <div style={{ width: 1, height: 16, background: '#e2e8f0', margin: '0 4px' }} />
                         <div className="bi-ribbon-field-item" style={{ padding: 0 }}>
-                            <select className="bi-dropdown-select" style={{ width: 50, height: 22 }} defaultValue="Auto">
+                            <select className="bi-dropdown-select" style={{ width: 50, height: 20 }} defaultValue="Auto">
                                 <option>Auto</option>
                                 <option>0</option>
                                 <option>1</option>
@@ -1092,14 +1107,14 @@ const BIRibbon = ({
             </Group>
 
             <Group label="Properties">
-                <div className="bi-tool-column" style={{ gap: '8px' }}>
+                <div className="bi-tool-column" style={{ gap: '2px' }}>
                     <div className="bi-ribbon-field-item">
-                        <div className="bi-ribbon-field-label">
+                        <span className="bi-ribbon-field-label">
                             <Activity size={12} className="bi-ribbon-field-icon" /> Summarization
-                        </div>
+                        </span>
                         <select
                             className="bi-dropdown-select"
-                            style={{ width: 140, height: 22 }}
+                            style={{ width: 140, height: 20 }}
                             value={activeColumn?.summarization || 'Sum'}
                             onChange={(e) => onUpdateColumn(activeColumn.column_name, { summarization: e.target.value })}
                         >
@@ -1112,12 +1127,12 @@ const BIRibbon = ({
                         </select>
                     </div>
                     <div className="bi-ribbon-field-item">
-                        <div className="bi-ribbon-field-label">
+                        <span className="bi-ribbon-field-label">
                             <Info size={12} className="bi-ribbon-field-icon" /> Data category
-                        </div>
+                        </span>
                         <select
                             className="bi-dropdown-select"
-                            style={{ width: 140, height: 22 }}
+                            style={{ width: 140, height: 20 }}
                             value={activeColumn?.data_category || 'Uncategorized'}
                             onChange={(e) => onUpdateColumn(activeColumn.column_name, { data_category: e.target.value })}
                         >
@@ -1135,7 +1150,7 @@ const BIRibbon = ({
 
             <Group label="Sort">
                 <RibbonBtn
-                    icon={<TrendingUp size={32} color="#7a1e3a" />}
+                    icon={<TrendingUp size={20} color="#7a1e3a" />}
                     label="Sort by column"
                 >
                     <ChevronDown size={14} style={{ marginLeft: 4 }} />
@@ -1144,13 +1159,13 @@ const BIRibbon = ({
 
             <Group label="Groups">
                 <RibbonBtn
-                    icon={<Layers size={32} color="#7a1e3a" />}
+                    icon={<Layers size={20} color="#7a1e3a" />}
                     label="Data groups"
                 >
                     <ChevronDown size={14} style={{ marginLeft: 4 }} />
                 </RibbonBtn>
             </Group>
-        </>
+        </RibbonToolbarGroups>
     );
 
     /*
@@ -1184,21 +1199,21 @@ const BIRibbon = ({
 
             <Group label="Calculations">
                 <RibbonBtn
-                    icon={<BarChart2 size={32} />}
+                    icon={<BarChart2 size={20} />}
                     label="New visual calculation"
                     onClick={() => act('new_visual_calc')}
                 >
                     <ChevronDown size={11} style={{ marginLeft: 2 }} />
                 </RibbonBtn>
-                <RibbonBtn icon={<Calculator size={32} />} label="New measure" onClick={() => act('new_measure')} />
-                <RibbonBtn icon={<Zap size={32} />} label="Quick measure" onClick={() => act('quick_measures')} />
-                <RibbonBtn icon={<Table size={32} color="#8c2546" />} label="New column" onClick={() => act('new_column')} />
-                <RibbonBtn icon={<Database size={32} />} label="New table" onClick={() => act('new_table')} />
+                <RibbonBtn icon={<Calculator size={20} />} label="New measure" onClick={() => act('new_measure')} />
+                <RibbonBtn icon={<Zap size={20} />} label="Quick measure" onClick={() => act('quick_measures')} />
+                <RibbonBtn icon={<Table size={20} color="#8c2546" />} label="New column" onClick={() => act('new_column')} />
+                <RibbonBtn icon={<Database size={20} />} label="New table" onClick={() => act('new_table')} />
             </Group>
 
             <Group label="Calendars">
                 <RibbonBtn
-                    icon={<Calendar size={32} color="#64748b" />}
+                    icon={<Calendar size={20} color="#64748b" />}
                     label="Mark as date table"
                     onClick={() => act('mark_date_table')}
                 />
@@ -1227,29 +1242,29 @@ const BIRibbon = ({
     };
 
     const renderAIInsightsToolbar = () => (
-        <>
+        <RibbonToolbarGroups>
             {/* ── Explain ── */}
             <Group label="Explain">
                 <RibbonBtn
-                    icon={<Sparkles size={32} color="#7a1e3a" />}
+                    icon={<Sparkles size={20} color="#7a1e3a" />}
                     label="Explain this chart"
                     onClick={() => act('ai_explain')}
                     tooltip="Generate an AI explanation of the currently selected visual"
                 />
                 <RibbonBtn
-                    icon={<TrendingUp size={32} color="#0ea5e9" />}
+                    icon={<TrendingUp size={20} color="#0ea5e9" />}
                     label="Explain trend"
                     onClick={() => act('ai_trend')}
                     tooltip="Compare current vs previous, growth/decline with percentages"
                 />
                 <RibbonBtn
-                    icon={<AlertTriangle size={32} color="#f59e0b" />}
+                    icon={<AlertTriangle size={20} color="#f59e0b" />}
                     label="Detect anomalies"
                     onClick={() => act('ai_anomalies')}
                     tooltip="Flag abnormal spikes or dips in the chart data"
                 />
                 <RibbonBtn
-                    icon={<Target size={32} color="#ef4444" />}
+                    icon={<Target size={20} color="#ef4444" />}
                     label="Root cause"
                     onClick={() => act('ai_root_cause')}
                     tooltip="Identify which dimension members are driving the result"
@@ -1260,7 +1275,7 @@ const BIRibbon = ({
             <Group label="AI mode">
                 <div className="bi-dropdown-wrapper" data-ribbon-dropdown="ai_modes" style={{ height: 'auto' }}>
                     <RibbonBtn
-                        icon={<Brain size={32} color="#5e172c" />}
+                        icon={<Brain size={20} color="#5e172c" />}
                         label={AI_MODE_LABELS[aiMode] ? `Mode: ${AI_MODE_LABELS[aiMode]}` : 'AI mode'}
                         onClick={() => toggleDropdown('ai_modes')}
                         tooltip="Switch the persona / tone of the AI explanations"
@@ -1276,25 +1291,25 @@ const BIRibbon = ({
             {/* ── Actions ── */}
             <Group label="Actions">
                 <RibbonBtn
-                    icon={<Compass size={32} color="#14b8a6" />}
+                    icon={<Compass size={20} color="#14b8a6" />}
                     label="Generate summary"
                     onClick={() => act('ai_summary')}
                     tooltip="Produce a tight executive summary of the visual"
                 />
                 <RibbonBtn
-                    icon={<Lightbulb size={32} color="#22c55e" />}
+                    icon={<Lightbulb size={20} color="#22c55e" />}
                     label="Next steps"
                     onClick={() => act('ai_next_steps')}
                     tooltip="Suggested actions and follow-ups based on the analysis"
                 />
                 <RibbonBtn
-                    icon={<BookOpen size={32} color="#a855f7" />}
+                    icon={<BookOpen size={20} color="#a855f7" />}
                     label="Create AI story"
                     onClick={() => act('ai_story')}
                     tooltip="Generate a narrative, presentation-style story for this chart"
                 />
                 <RibbonBtn
-                    icon={<Download size={32} color="#475569" />}
+                    icon={<Download size={20} color="#475569" />}
                     label="Export AI report"
                     onClick={() => act('ai_export')}
                     tooltip="Download the current AI insights as a Markdown report"
@@ -1304,19 +1319,19 @@ const BIRibbon = ({
             {/* ── AI Assistant ── */}
             <Group label="AI assistant">
                 <RibbonBtn
-                    icon={<MessageSquare size={32} color="#8c2546" />}
+                    icon={<MessageSquare size={20} color="#8c2546" />}
                     label="Ask this visual"
                     onClick={() => act('ai_ask')}
                     tooltip="Open a Q&A composer focused on the selected visual"
                 />
                 <RibbonBtn
-                    icon={<MessageCircle size={32} color="#8c2546" />}
+                    icon={<MessageCircle size={20} color="#8c2546" />}
                     label="Chat with chart"
                     onClick={() => act('ai_chat')}
                     tooltip="Have a back-and-forth conversation about this chart"
                 />
             </Group>
-        </>
+        </RibbonToolbarGroups>
     );
 
     const renderToolbar = () => {
@@ -1337,7 +1352,7 @@ const BIRibbon = ({
     };
 
     return (
-        <div className="bi-ribbon">
+        <div className={`bi-ribbon${isViewOnly ? ' bi-ribbon--view-only' : ''}`}>
             {/* Title Bar */}
             {/* <div className="bi-title-bar">
                 <div className="bi-title-left">
@@ -1374,8 +1389,10 @@ const BIRibbon = ({
                     )
                 })}
                 <button
+                    type="button"
                     className="bi-ribbon-collapse-btn"
                     onClick={() => setRibbonCollapsed(prev => !prev)}
+                    aria-expanded={!ribbonCollapsed}
                     title={ribbonCollapsed ? 'Expand ribbon (Ctrl+F1)' : 'Collapse ribbon (Ctrl+F1)'}
                 >
                     {ribbonCollapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}

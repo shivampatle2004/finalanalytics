@@ -1,350 +1,466 @@
 """
-Query Service — Phase 3
-=======================
-Paginated, filtered, sorted, and aggregated reads from worksheet_data.
-
-All queries operate on the data_json JSONB column using SQLAlchemy text()
-constructs for PostgreSQL-native operators, with a graceful fallback for
-SQLite (used in local dev without PostgreSQL).
+Power Query service — query CRUD, step management, and execution engine.
 """
 
-from __future__ import annotations
+import copy
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
-import math
-from typing import Any, Dict, List, Optional
-
-from sqlalchemy import func, text
+import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
-from models import Worksheet, WorksheetColumn, WorksheetData, WorksheetPermission
-
-# ── Permission helper ──────────────────────────────────────────────────────────
-
-def check_permission(
-    db: Session,
-    worksheet_id: str,
-    user_id: Optional[int],
-    require_level: str = "view",
-) -> bool:
-    """
-    Returns True if user can access the worksheet.
-    Owners always have access. Anonymous users (user_id=None) may access
-    public worksheets.
-    """
-    ws = db.query(Worksheet).filter(Worksheet.id == worksheet_id).first()
-    if not ws:
-        return False
-
-    # Owner always has full access
-    if user_id and ws.owner_id == user_id:
-        return True
-
-    # Public worksheets are viewable by anyone
-    if ws.sharing_type == "public":
-        return True
-
-    # Check explicit permission record
-    if user_id:
-        perm = (
-            db.query(WorksheetPermission)
-            .filter(
-                WorksheetPermission.worksheet_id == worksheet_id,
-                WorksheetPermission.user_id == user_id,
-            )
-            .first()
-        )
-        if perm:
-            hierarchy = {"view": 0, "edit": 1, "admin": 2}
-            return hierarchy.get(perm.permission_level, 0) >= hierarchy.get(require_level, 0)
-
-    return False
+import models
+from services.transformation_engine import (
+    apply_pipeline, load_source_dataframe, dataframe_to_preview,
+    describe_step, make_step, SUPPORTED_STEPS,
+)
+from routers.files import resolve_stored_file_path
 
 
-# ── Dialect detection ─────────────────────────────────────────────────────────
-
-def _is_postgres(db: Session) -> bool:
-    return db.bind.dialect.name == "postgresql"  # type: ignore[union-attr]
-
-
-# ── Filter builder ─────────────────────────────────────────────────────────────
-
-_OPERATOR_MAP = {
-    "=": "eq",
-    "!=": "neq",
-    ">": "gt",
-    "<": "lt",
-    ">=": "gte",
-    "<=": "lte",
-    "contains": "contains",
-    "in": "in",
-    "not_in": "not_in",
-    "starts_with": "starts_with",
-    "ends_with": "ends_with",
-}
-
-
-def _build_pg_filter_clause(filters: List[Dict]) -> tuple[str, dict]:
-    """
-    Build a PostgreSQL WHERE fragment that operates on data_json JSONB.
-    Returns (sql_fragment, params_dict).
-    """
-    clauses = []
-    params: Dict[str, Any] = {}
-
-    for i, f in enumerate(filters):
-        col = f.get("column", "")
-        op = _OPERATOR_MAP.get(str(f.get("operator", "=")).lower(), "eq")
-        val = f.get("value", "")
-        param_key = f"fv_{i}"
-
-        json_extract = f"data_json->>'{ col }'"
-
-        if op == "eq":
-            clauses.append(f"{json_extract} = :{param_key}")
-            params[param_key] = str(val)
-        elif op == "neq":
-            clauses.append(f"{json_extract} != :{param_key}")
-            params[param_key] = str(val)
-        elif op == "gt":
-            clauses.append(f"({json_extract})::numeric > :{param_key}")
-            params[param_key] = float(val)
-        elif op == "lt":
-            clauses.append(f"({json_extract})::numeric < :{param_key}")
-            params[param_key] = float(val)
-        elif op == "gte":
-            clauses.append(f"({json_extract})::numeric >= :{param_key}")
-            params[param_key] = float(val)
-        elif op == "lte":
-            clauses.append(f"({json_extract})::numeric <= :{param_key}")
-            params[param_key] = float(val)
-        elif op == "contains":
-            clauses.append(f"lower({json_extract}) LIKE lower(:{param_key})")
-            params[param_key] = f"%{val}%"
-        elif op == "starts_with":
-            clauses.append(f"lower({json_extract}) LIKE lower(:{param_key})")
-            params[param_key] = f"{val}%"
-        elif op == "ends_with":
-            clauses.append(f"lower({json_extract}) LIKE lower(:{param_key})")
-            params[param_key] = f"%{val}"
-        elif op == "in":
-            vals = [v.strip() for v in str(val).split(",")]
-            placeholders = ", ".join(f":{param_key}_{j}" for j in range(len(vals)))
-            clauses.append(f"{json_extract} IN ({placeholders})")
-            for j, v in enumerate(vals):
-                params[f"{param_key}_{j}"] = v
-        elif op == "not_in":
-            vals = [v.strip() for v in str(val).split(",")]
-            placeholders = ", ".join(f":{param_key}_{j}" for j in range(len(vals)))
-            clauses.append(f"{json_extract} NOT IN ({placeholders})")
-            for j, v in enumerate(vals):
-                params[f"{param_key}_{j}"] = v
-
-    return " AND ".join(clauses) if clauses else "1=1", params
-
-
-# ── Core query functions ───────────────────────────────────────────────────────
-
-
-def get_worksheet_data(
-    db: Session,
-    worksheet_id: str,
-    user_id: Optional[int] = None,
-    offset: int = 0,
-    limit: int = 500,
-    filters: Optional[List[Dict]] = None,
-    sort_by: Optional[str] = None,
-    sort_order: str = "asc",
-) -> Dict[str, Any]:
-    """
-    Return paginated rows from worksheet_data.
-
-    Response shape:
-    {
-      "worksheet_id": str,
-      "columns": [{"name": str, "type": str, "order": int}, ...],
-      "rows": [{col: value, ...}, ...],
-      "pagination": {"total": int, "offset": int, "limit": int, "has_more": bool}
-    }
-    """
-    ws = db.query(Worksheet).filter(Worksheet.id == worksheet_id).first()
-    if not ws:
-        raise ValueError(f"Worksheet {worksheet_id} not found")
-
-    # Permission check — skip for owner / public
-    if user_id and ws.owner_id != user_id and ws.sharing_type != "public":
-        if not check_permission(db, worksheet_id, user_id):
-            raise PermissionError("Access denied to this worksheet")
-
-    # Column schema
-    col_records = (
-        db.query(WorksheetColumn)
-        .filter(WorksheetColumn.worksheet_id == worksheet_id)
-        .order_by(WorksheetColumn.column_order)
-        .all()
-    )
-    columns = [
-        {"name": c.column_name, "type": c.data_type or "unknown", "order": c.column_order}
-        for c in col_records
-    ]
-
-    is_postgres = _is_postgres(db)
-
-    if is_postgres and filters:
-        where_clause, params = _build_pg_filter_clause(filters)
-    else:
-        where_clause, params = "1=1", {}
-
-    # Sort expression
-    if sort_by and is_postgres:
-        order_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
-        order_expr = f"data_json->>'{sort_by}' {order_dir}"
-    else:
-        order_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
-        order_expr = f"row_number {order_dir}"
-
-    # Count
-    count_sql = text(
-        f"SELECT COUNT(*) FROM worksheet_data WHERE worksheet_id = :ws_id AND ({where_clause})"
-    )
-    total = db.execute(count_sql, {"ws_id": worksheet_id, **params}).scalar() or 0
-
-    # Data rows
-    data_sql = text(
-        f"""
-        SELECT data_json, row_number
-        FROM worksheet_data
-        WHERE worksheet_id = :ws_id AND ({where_clause})
-        ORDER BY {order_expr}
-        LIMIT :limit OFFSET :offset
-        """
-    )
-    result = db.execute(
-        data_sql,
-        {"ws_id": worksheet_id, "limit": limit, "offset": offset, **params},
-    ).fetchall()
-
-    rows = [dict(r[0]) if r[0] else {} for r in result]
-
+def _serialize_query(q: models.QueryMaster, step_count: int = 0) -> Dict[str, Any]:
     return {
-        "worksheet_id": worksheet_id,
-        "worksheet_name": ws.name,
-        "columns": columns,
-        "rows": rows,
-        "pagination": {
-            "total": int(total),
-            "offset": offset,
-            "limit": limit,
-            "has_more": (offset + len(rows)) < int(total),
-        },
+        "id": q.id,
+        "report_id": q.report_id,
+        "query_name": q.query_name,
+        "source_type": q.source_type,
+        "source_config": q.source_config or {},
+        "created_by": q.created_by,
+        "is_active": q.is_active,
+        "step_count": step_count,
+        "created_at": q.created_at.isoformat() if q.created_at else None,
+        "updated_at": q.updated_at.isoformat() if q.updated_at else None,
     }
 
 
-def aggregate_worksheet_data(
-    db: Session,
-    worksheet_id: str,
-    group_by: str,
-    measure: str,
-    agg_type: str = "sum",
-    user_id: Optional[int] = None,
-    filters: Optional[List[Dict]] = None,
-    top_n: int = 50,
-) -> Dict[str, Any]:
-    """
-    Server-side aggregation on worksheet_data JSONB.
-    agg_type: sum | count | avg | min | max
-    Returns { labels: [...], values: [...] }
-    """
-    ws = db.query(Worksheet).filter(Worksheet.id == worksheet_id).first()
-    if not ws:
-        raise ValueError(f"Worksheet {worksheet_id} not found")
-
-    is_postgres = _is_postgres(db)
-    if not is_postgres:
-        raise NotImplementedError("Aggregation requires PostgreSQL")
-
-    where_clause, params = _build_pg_filter_clause(filters or [])
-
-    agg_func_map = {
-        "sum": "SUM",
-        "count": "COUNT",
-        "avg": "AVG",
-        "min": "MIN",
-        "max": "MAX",
+def _serialize_step(s: models.QueryStep) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "query_id": s.query_id,
+        "step_order": s.step_order,
+        "operation_type": s.operation_type,
+        "operation_config": s.operation_config or {},
+        "enabled": s.enabled,
+        "description": describe_step({
+            "type": s.operation_type,
+            "config": s.operation_config or {},
+        }),
+        "created_at": s.created_at.isoformat() if s.created_at else None,
     }
-    agg_func = agg_func_map.get(agg_type.lower(), "SUM")
-
-    if agg_type.lower() == "count":
-        agg_expr = f"COUNT(data_json->>'{measure}')"
-    else:
-        agg_expr = f"{agg_func}((data_json->>'{measure}')::numeric)"
-
-    sql = text(
-        f"""
-        SELECT
-            data_json->>'{group_by}' AS label,
-            {agg_expr} AS value
-        FROM worksheet_data
-        WHERE worksheet_id = :ws_id AND ({where_clause})
-        GROUP BY label
-        ORDER BY value DESC NULLS LAST
-        LIMIT :top_n
-        """
-    )
-    rows = db.execute(sql, {"ws_id": worksheet_id, "top_n": top_n, **params}).fetchall()
-
-    labels = [str(r[0]) if r[0] is not None else "null" for r in rows]
-    values = [float(r[1]) if r[1] is not None else 0 for r in rows]
-
-    return {"labels": labels, "values": values, "agg_type": agg_type, "group_by": group_by}
 
 
-def export_worksheet_to_csv(
-    db: Session,
-    worksheet_id: str,
-    user_id: Optional[int] = None,
-):
-    """
-    Generator that yields CSV lines for streaming export.
-    Usage: StreamingResponse(export_worksheet_to_csv(db, ws_id), media_type='text/csv')
-    """
-    import csv
-    import io
+def _steps_to_pipeline(step_rows: List[models.QueryStep]) -> List[Dict]:
+    return [{
+        "id": s.id,
+        "type": s.operation_type,
+        "config": s.operation_config or {},
+        "enabled": s.enabled,
+    } for s in sorted(step_rows, key=lambda x: x.step_order)]
 
-    ws = db.query(Worksheet).filter(Worksheet.id == worksheet_id).first()
-    if not ws:
-        raise ValueError(f"Worksheet {worksheet_id} not found")
 
-    col_records = (
-        db.query(WorksheetColumn)
-        .filter(WorksheetColumn.worksheet_id == worksheet_id)
-        .order_by(WorksheetColumn.column_order)
-        .all()
-    )
-    col_names = [c.column_name for c in col_records]
-
-    # Header
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(col_names)
-    yield buf.getvalue()
-    buf.seek(0)
-    buf.truncate(0)
-
-    # Rows in pages to avoid loading everything into memory at once
-    page_size = 1000
-    offset = 0
-    while True:
-        batch_sql = text(
-            "SELECT data_json FROM worksheet_data WHERE worksheet_id = :ws_id "
-            "ORDER BY row_number ASC LIMIT :lim OFFSET :off"
+def _migrate_legacy_steps(db: Session, report_id: str, query: models.QueryMaster):
+    """Import steps from bi_dataset_transformations if query has none."""
+    if db.query(models.QueryStep).filter(models.QueryStep.query_id == query.id).count() > 0:
+        return
+    dataset = db.query(models.BIDataset).filter(
+        models.BIDataset.file_id == report_id,
+        models.BIDataset.is_active == True,
+    ).first()
+    if not dataset:
+        return
+    transform = db.query(models.BIDatasetTransformation).filter(
+        models.BIDatasetTransformation.dataset_id == dataset.id
+    ).order_by(models.BIDatasetTransformation.updated_at.desc()).first()
+    if not transform or not transform.steps:
+        return
+    for i, step in enumerate(transform.steps or []):
+        row = models.QueryStep(
+            id=str(uuid.uuid4()),
+            query_id=query.id,
+            step_order=i,
+            operation_type=step.get("type", "unknown"),
+            operation_config=step.get("config") or {},
+            enabled=step.get("enabled", True),
         )
-        rows = db.execute(batch_sql, {"ws_id": worksheet_id, "lim": page_size, "off": offset}).fetchall()
-        if not rows:
-            break
-        for row in rows:
-            data = row[0] or {}
-            writer.writerow([data.get(c, "") for c in col_names])
-        yield buf.getvalue()
-        buf.seek(0)
-        buf.truncate(0)
-        offset += page_size
+        db.add(row)
+    db.commit()
+
+
+def ensure_primary_query(db: Session, report_id: str, user_id: Optional[int] = None) -> models.QueryMaster:
+    """Ensure at least one query exists for the report."""
+    existing = db.query(models.QueryMaster).filter(
+        models.QueryMaster.report_id == report_id,
+        models.QueryMaster.is_active == True,
+    ).order_by(models.QueryMaster.created_at).first()
+    if existing:
+        _migrate_legacy_steps(db, report_id, existing)
+        return existing
+
+    file_row = db.query(models.UploadedFile).filter(models.UploadedFile.id == report_id).first()
+    if not file_row:
+        raise ValueError("Report not found")
+
+    path = resolve_stored_file_path(file_row)
+    ext = (file_row.file_name or "").rsplit(".", 1)[-1].lower() if file_row.file_name else "csv"
+    source_type = ext if ext in ("csv", "xlsx", "xls", "json") else "csv"
+
+    query = models.QueryMaster(
+        id=str(uuid.uuid4()),
+        report_id=report_id,
+        query_name=file_row.file_name or "Primary Query",
+        source_type=source_type,
+        source_config={"file_path": path, "file_name": file_row.file_name},
+        created_by=user_id,
+    )
+    db.add(query)
+    db.commit()
+    db.refresh(query)
+    _migrate_legacy_steps(db, report_id, query)
+    return query
+
+
+def list_queries(db: Session, report_id: str) -> List[Dict]:
+    ensure_primary_query(db, report_id)
+    rows = db.query(models.QueryMaster).filter(
+        models.QueryMaster.report_id == report_id,
+        models.QueryMaster.is_active == True,
+    ).order_by(models.QueryMaster.created_at).all()
+    result = []
+    for q in rows:
+        cnt = db.query(models.QueryStep).filter(models.QueryStep.query_id == q.id).count()
+        result.append(_serialize_query(q, cnt))
+    return result
+
+
+def create_query(
+    db: Session,
+    report_id: str,
+    query_name: str,
+    source_type: str = "csv",
+    source_config: Optional[Dict] = None,
+    user_id: Optional[int] = None,
+) -> Dict:
+    primary = ensure_primary_query(db, report_id)
+    query = models.QueryMaster(
+        id=str(uuid.uuid4()),
+        report_id=report_id,
+        query_name=query_name,
+        source_type=source_type,
+        source_config=source_config or copy.deepcopy(primary.source_config or {}),
+        created_by=user_id,
+    )
+    db.add(query)
+    db.commit()
+    db.refresh(query)
+    return _serialize_query(query, 0)
+
+
+def duplicate_query(db: Session, query_id: str) -> Dict:
+    src = db.query(models.QueryMaster).filter(models.QueryMaster.id == query_id).first()
+    if not src:
+        raise ValueError("Query not found")
+    dup = models.QueryMaster(
+        id=str(uuid.uuid4()),
+        report_id=src.report_id,
+        query_name=f"{src.query_name} (Copy)",
+        source_type=src.source_type,
+        source_config=copy.deepcopy(src.source_config or {}),
+        created_by=src.created_by,
+    )
+    db.add(dup)
+    db.flush()
+    steps = db.query(models.QueryStep).filter(models.QueryStep.query_id == query_id).order_by(models.QueryStep.step_order).all()
+    for s in steps:
+        db.add(models.QueryStep(
+            id=str(uuid.uuid4()),
+            query_id=dup.id,
+            step_order=s.step_order,
+            operation_type=s.operation_type,
+            operation_config=copy.deepcopy(s.operation_config or {}),
+            enabled=s.enabled,
+        ))
+    db.commit()
+    db.refresh(dup)
+    return _serialize_query(dup, len(steps))
+
+
+def rename_query(db: Session, query_id: str, query_name: str) -> Dict:
+    q = db.query(models.QueryMaster).filter(models.QueryMaster.id == query_id).first()
+    if not q:
+        raise ValueError("Query not found")
+    q.query_name = query_name
+    q.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    cnt = db.query(models.QueryStep).filter(models.QueryStep.query_id == query_id).count()
+    return _serialize_query(q, cnt)
+
+
+def delete_query(db: Session, query_id: str):
+    q = db.query(models.QueryMaster).filter(models.QueryMaster.id == query_id).first()
+    if not q:
+        raise ValueError("Query not found")
+    active_count = db.query(models.QueryMaster).filter(
+        models.QueryMaster.report_id == q.report_id,
+        models.QueryMaster.is_active == True,
+    ).count()
+    if active_count <= 1:
+        raise ValueError("Cannot delete the only query")
+    q.is_active = False
+    db.commit()
+
+
+def get_query_steps(db: Session, query_id: str) -> List[Dict]:
+    rows = db.query(models.QueryStep).filter(
+        models.QueryStep.query_id == query_id
+    ).order_by(models.QueryStep.step_order).all()
+    return [_serialize_step(s) for s in rows]
+
+
+def _next_step_order(db: Session, query_id: str) -> int:
+    last = db.query(models.QueryStep).filter(
+        models.QueryStep.query_id == query_id
+    ).order_by(models.QueryStep.step_order.desc()).first()
+    return (last.step_order + 1) if last else 0
+
+
+def add_step(
+    db: Session,
+    query_id: str,
+    operation_type: str,
+    config: Dict,
+    *,
+    clear_redo: bool = True,
+) -> Dict:
+    if operation_type not in SUPPORTED_STEPS:
+        raise ValueError(f"Unsupported operation: {operation_type}")
+    q = db.query(models.QueryMaster).filter(models.QueryMaster.id == query_id).first()
+    if not q:
+        raise ValueError("Query not found")
+    if operation_type == "merge_join":
+        other_id = config.get("query_id")
+        join_col = config.get("on") or config.get("keys")
+        if not other_id:
+            raise ValueError("Select a second query to merge with")
+        if other_id == query_id:
+            raise ValueError("Cannot merge a query with itself — duplicate the query or add another data source")
+        if not join_col:
+            raise ValueError("Select a join column shared by both queries")
+        other = db.query(models.QueryMaster).filter(
+            models.QueryMaster.id == other_id,
+            models.QueryMaster.is_active == True,
+        ).first()
+        if not other:
+            raise ValueError("Second query not found")
+    elif operation_type == "append":
+        other_id = config.get("query_id")
+        if not other_id:
+            raise ValueError("Select a query to append")
+        if other_id == query_id:
+            raise ValueError("Cannot append a query to itself")
+        other = db.query(models.QueryMaster).filter(
+            models.QueryMaster.id == other_id,
+            models.QueryMaster.is_active == True,
+        ).first()
+        if not other:
+            raise ValueError("Second query not found")
+    step = models.QueryStep(
+        id=str(uuid.uuid4()),
+        query_id=query_id,
+        step_order=_next_step_order(db, query_id),
+        operation_type=operation_type,
+        operation_config=config,
+        enabled=True,
+    )
+    db.add(step)
+    q.updated_at = datetime.now(timezone.utc)
+    if clear_redo:
+        _clear_redo_stack(query_id)
+    db.commit()
+    db.refresh(step)
+    return _serialize_step(step)
+
+
+def delete_step(db: Session, step_id: str):
+    step = db.query(models.QueryStep).filter(models.QueryStep.id == step_id).first()
+    if not step:
+        raise ValueError("Step not found")
+    query_id = step.query_id
+    db.delete(step)
+    db.commit()
+    _reindex_steps(db, query_id)
+
+
+def toggle_step(db: Session, step_id: str, enabled: bool) -> Dict:
+    step = db.query(models.QueryStep).filter(models.QueryStep.id == step_id).first()
+    if not step:
+        raise ValueError("Step not found")
+    step.enabled = enabled
+    db.commit()
+    db.refresh(step)
+    return _serialize_step(step)
+
+
+def update_step_config(db: Session, step_id: str, config: Dict) -> Dict:
+    step = db.query(models.QueryStep).filter(models.QueryStep.id == step_id).first()
+    if not step:
+        raise ValueError("Step not found")
+    step.operation_config = config
+    db.commit()
+    db.refresh(step)
+    return _serialize_step(step)
+
+
+def reorder_steps(db: Session, query_id: str, step_ids: List[str]) -> List[Dict]:
+    steps = db.query(models.QueryStep).filter(models.QueryStep.query_id == query_id).all()
+    by_id = {s.id: s for s in steps}
+    for order, sid in enumerate(step_ids):
+        if sid in by_id:
+            by_id[sid].step_order = order
+    db.commit()
+    return get_query_steps(db, query_id)
+
+
+def _reindex_steps(db: Session, query_id: str):
+    steps = db.query(models.QueryStep).filter(
+        models.QueryStep.query_id == query_id
+    ).order_by(models.QueryStep.step_order).all()
+    for i, s in enumerate(steps):
+        s.step_order = i
+    db.commit()
+
+
+def load_query_source(db: Session, query: models.QueryMaster, skip_cache: bool = False) -> pd.DataFrame:
+    cfg = query.source_config or {}
+    path = cfg.get("file_path")
+    if not path and query.report_id:
+        file_row = db.query(models.UploadedFile).filter(models.UploadedFile.id == query.report_id).first()
+        if file_row:
+            path = resolve_stored_file_path(file_row)
+    if not path:
+        raise ValueError("No source data found for query")
+    return load_source_dataframe(path, skip_cache=skip_cache)
+
+
+def _resolve_join_data(db: Session, config: Dict) -> List[Dict]:
+    """Load rows from another query for merge/append operations."""
+    other_query_id = config.get("query_id")
+    if not other_query_id:
+        return config.get("data", [])
+    other_df = execute_query(db, other_query_id, skip_cache=True)
+    return other_df.to_dict(orient="records")
+
+
+def execute_query(db: Session, query_id: str, up_to_step: Optional[int] = None, skip_cache: bool = False) -> pd.DataFrame:
+    """Execute all steps for a query in sequence."""
+    query = db.query(models.QueryMaster).filter(models.QueryMaster.id == query_id).first()
+    if not query:
+        raise ValueError("Query not found")
+    df = load_query_source(db, query, skip_cache=skip_cache)
+    step_rows = db.query(models.QueryStep).filter(
+        models.QueryStep.query_id == query_id
+    ).order_by(models.QueryStep.step_order).all()
+    pipeline = _steps_to_pipeline(step_rows)
+
+    enriched = []
+    for step in pipeline:
+        s = dict(step)
+        if s["type"] in ("merge_join", "append") and s.get("config", {}).get("query_id"):
+            cfg = dict(s["config"])
+            cfg["data"] = _resolve_join_data(db, cfg)
+            s["config"] = cfg
+        enriched.append(s)
+
+    return apply_pipeline(df, enriched, up_to_index=up_to_step)
+
+
+def preview_query(
+    db: Session,
+    query_id: str,
+    offset: int = 0,
+    limit: int = 100,
+    up_to_step: Optional[int] = None,
+) -> Dict[str, Any]:
+    df = execute_query(db, query_id, up_to_step=up_to_step)
+    return dataframe_to_preview(df, offset=offset, limit=limit)
+
+
+def execute_report_queries(db: Session, report_id: str) -> Dict[str, Any]:
+    """Run all active queries for a report (used during refresh)."""
+    queries = db.query(models.QueryMaster).filter(
+        models.QueryMaster.report_id == report_id,
+        models.QueryMaster.is_active == True,
+    ).all()
+    results = []
+    for q in queries:
+        try:
+            df = execute_query(db, q.id, skip_cache=True)
+            results.append({
+                "query_id": q.id,
+                "query_name": q.query_name,
+                "row_count": len(df),
+                "success": True,
+            })
+        except Exception as e:
+            results.append({
+                "query_id": q.id,
+                "query_name": q.query_name,
+                "success": False,
+                "error": str(e),
+            })
+    return {"queries": results}
+
+
+# In-memory redo stack stores removed step payloads per query
+_redo_stacks: Dict[str, List[Dict]] = {}
+
+
+def _clear_redo_stack(query_id: str) -> None:
+    _redo_stacks.pop(query_id, None)
+
+
+def query_history_state(db: Session, query_id: str) -> Dict[str, Any]:
+    steps = get_query_steps(db, query_id)
+    return {
+        "steps": steps,
+        "can_undo": len(steps) > 0,
+        "can_redo": bool(_redo_stacks.get(query_id)),
+    }
+
+
+def undo_last_step(db: Session, query_id: str) -> Tuple[List[Dict], Optional[str], bool]:
+    """Remove the last transformation step. Source is implicit and never stored."""
+    steps = db.query(models.QueryStep).filter(
+        models.QueryStep.query_id == query_id
+    ).order_by(models.QueryStep.step_order).all()
+    if not steps:
+        return get_query_steps(db, query_id), None, False
+    removed = steps[-1]
+    desc = describe_step({"type": removed.operation_type, "config": removed.operation_config or {}})
+    _redo_stacks.setdefault(query_id, []).append({
+        "operation_type": removed.operation_type,
+        "operation_config": copy.deepcopy(removed.operation_config or {}),
+        "enabled": removed.enabled,
+    })
+    db.delete(removed)
+    db.commit()
+    _reindex_steps(db, query_id)
+    return get_query_steps(db, query_id), desc, True
+
+
+def redo_last_undo(db: Session, query_id: str) -> Tuple[List[Dict], Optional[Dict], bool]:
+    stack = _redo_stacks.get(query_id, [])
+    if not stack:
+        return get_query_steps(db, query_id), None, False
+    payload = stack.pop()
+    step = add_step(
+        db,
+        query_id,
+        payload["operation_type"],
+        payload["operation_config"],
+        clear_redo=False,
+    )
+    if not payload.get("enabled", True):
+        toggle_step(db, step["id"], False)
+        step = _serialize_step(db.query(models.QueryStep).filter(models.QueryStep.id == step["id"]).first())
+    return get_query_steps(db, query_id), step, True

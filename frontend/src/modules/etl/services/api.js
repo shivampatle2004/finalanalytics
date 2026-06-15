@@ -29,11 +29,15 @@ apiClient.interceptors.response.use(
       window.dispatchEvent(new CustomEvent('arithflow-api-status', { detail: { online: true } }));
     }
 
-    console.group(`OneStopAnalytics API ${isNetworkError ? 'Connectivity' : 'Application'} Error`);
-    console.error(`Status: ${status || 'Network Failure'}`);
-    console.error(`Message: ${msg}`);
-    console.error(`Endpoint: ${error.config?.url}`);
-    console.groupEnd();
+    const url = error.config?.url || '';
+    const isOptionalProbe = ['/system/alerts', '/system/google-credentials'].some((p) => url.includes(p));
+    if (!isOptionalProbe) {
+      console.group(`OneStopAnalytics API ${isNetworkError ? 'Connectivity' : 'Application'} Error`);
+      console.error(`Status: ${status || 'Network Failure'}`);
+      console.error(`Message: ${msg}`);
+      console.error(`Endpoint: ${url}`);
+      console.groupEnd();
+    }
 
     return Promise.reject(error);
   }

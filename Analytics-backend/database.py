@@ -98,6 +98,87 @@ def _ensure_quick_measures_table():
         print(f"Note: could not ensure quick_measures table: {ex}")
 
 
+def _ensure_data_management_tables():
+    """Create Power BI data management tables if missing."""
+    try:
+        insp = inspect(engine)
+        if "bi_datasources" not in insp.get_table_names():
+            from models import (
+                BIDatasource, BIDataset, BIDatasetTransformation, BIDatasetTransformationVersion,
+                BIDatasetRefreshSchedule, BIDatasetRefreshLog, BIReportParameter,
+                BIReportVariable, BIDataAuditLog, QueryMaster, QueryStep,
+            )
+            for model in (
+                BIDatasource, BIDataset, BIDatasetTransformation, BIDatasetTransformationVersion,
+                BIDatasetRefreshSchedule, BIDatasetRefreshLog, BIReportParameter,
+                BIReportVariable, BIDataAuditLog, QueryMaster, QueryStep,
+            ):
+                model.__table__.create(bind=engine, checkfirst=True)
+            print("Data management tables created successfully.")
+        else:
+            print("Data management tables already exist.")
+    except Exception as ex:
+        print(f"Note: could not ensure data management tables: {ex}")
+
+
+def _ensure_calculated_tables():
+    """Create calculated_tables tables if missing."""
+    try:
+        insp = inspect(engine)
+        if "calculated_tables" not in insp.get_table_names():
+            from models import CalculatedTable, CalculatedTableColumn
+            CalculatedTable.__table__.create(bind=engine, checkfirst=True)
+            CalculatedTableColumn.__table__.create(bind=engine, checkfirst=True)
+            print("calculated_tables tables created successfully.")
+    except Exception as ex:
+        print(f"Note: could not ensure calculated_tables: {ex}")
+
+
+def _ensure_semantic_measures_columns():
+    """Ensure all semantic_measures columns exist for the governance & metadata system."""
+    try:
+        insp = inspect(engine)
+        if "semantic_measures" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("semantic_measures")}
+        dialect = engine.dialect.name
+        
+        new_cols = {
+            "uuid": ("VARCHAR(50)", "NULL"),
+            "version": ("INTEGER", "DEFAULT 1"),
+            "status": ("VARCHAR(50)", "DEFAULT 'Active'"),
+            "created_by": ("VARCHAR(100)", "NULL"),
+            "modified_by": ("VARCHAR(100)", "NULL"),
+            "business_definition": ("TEXT", "NULL"),
+            "tags": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+            "referenced_measures": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+            "referenced_columns": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+            "currency": ("VARCHAR(10)", "NULL"),
+            "decimal_places": ("INTEGER", "DEFAULT 2"),
+            "color_rules": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+            "display_units": ("VARCHAR(20)", "DEFAULT 'None'"),
+            "owner": ("VARCHAR(100)", "NULL"),
+            "steward": ("VARCHAR(100)", "NULL"),
+            "certification_status": ("VARCHAR(50)", "DEFAULT 'Uncertified'"),
+            "approval_status": ("VARCHAR(50)", "DEFAULT 'Draft'"),
+            "usage_count": ("INTEGER", "DEFAULT 0"),
+            "last_used_at": ("TIMESTAMP", "NULL"),
+            "dashboards_using": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+            "reports_using": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+            "visuals_using": ("JSON" if dialect != "sqlite" else "TEXT", "NULL"),
+        }
+        
+        with engine.begin() as conn:
+            for col_name, (col_type, col_default) in new_cols.items():
+                if col_name not in cols:
+                    query = f"ALTER TABLE semantic_measures ADD COLUMN {col_name} {col_type} {col_default}"
+                    conn.execute(text(query))
+                    print(f"semantic_measures column added: {col_name}")
+        print("semantic_measures columns verified.")
+    except Exception as ex:
+        print(f"Note: could not migrate semantic_measures columns: {ex}")
+
+
 def _ensure_api_schema_tables():
     """Add schema_config column and api_connector_data table for REST API normalization."""
     try:
@@ -122,6 +203,20 @@ def _ensure_api_schema_tables():
         print(f"Note: could not migrate API schema tables: {ex}")
 
 
+def _ensure_semantic_measure_versions_table():
+    """Create semantic_measure_versions table if it doesn't exist (safety net for existing DBs)."""
+    try:
+        insp = inspect(engine)
+        if "semantic_measure_versions" not in insp.get_table_names():
+            from models import SemanticMeasureVersion
+            SemanticMeasureVersion.__table__.create(bind=engine, checkfirst=True)
+            print("semantic_measure_versions table created successfully.")
+        else:
+            print("semantic_measure_versions table already exists.")
+    except Exception as ex:
+        print(f"Note: could not ensure semantic_measure_versions table: {ex}")
+
+
 def init_db():
     if _HAS_PSYCOPG2:
         create_database_if_not_exists()
@@ -130,7 +225,8 @@ def init_db():
                         UserDatabaseConnection, RemoteConnectionProfile, ETLConnection, ETLPipeline, ETLPipelineVersion,
                         ETLWorkflowNode, ETLWorkflowEdge, ETLTransformRule, ETLSchedule,
                         ETLJob, ETLJobStep, ETLJobLog, ETLDataQualityCheck, AuditLog, UserRole, ConnectorCatalog,
-                        PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig, RLSRole, RLSRule)
+                        PaginatedReport, AutomateWorkflow, AutomateAction, DateTable, ChangeDetectionConfig, RLSRole, RLSRule,
+                        SemanticMeasure, SemanticMeasureVersion)
 
     try:
         Base.metadata.create_all(bind=engine)
@@ -138,6 +234,10 @@ def init_db():
         _ensure_remote_connection_profile_columns()
         _ensure_quick_measures_table()
         _ensure_api_schema_tables()
+        _ensure_data_management_tables()
+        _ensure_calculated_tables()
+        _ensure_semantic_measures_columns()
+        _ensure_semantic_measure_versions_table()
         try:
             import asyncio
             from connectors.registry import seed_connectors

@@ -11,7 +11,6 @@ import polars as pl
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from connectors.base import BaseConnector, LoadResult
-from connectors.exceptions import ConnectorConnectionError
 from utils.logger import get_logger
 
 logger = get_logger("connectors.postgres")
@@ -43,7 +42,7 @@ class PostgresConnector(BaseConnector):
             return True
         except Exception as e:
             logger.error(f"PostgreSQL connection failed: {e}")
-            raise ConnectorConnectionError(f"PostgreSQL connection failed: {e}") from e
+            return False
 
     async def extract(self) -> AsyncGenerator[list[dict[str, Any]], None]:
         """
