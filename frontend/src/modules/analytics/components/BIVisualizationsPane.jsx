@@ -5,12 +5,13 @@ import {
     LayoutGrid, ScatterChart, ArrowDownRight, Filter, Radar, Aperture, Compass,
     Hash, Grid, Circle, Sliders, Share2, Map as MapIcon, Sun, Boxes, Layout, Table, BarChart, CreditCard,
     Gauge, GitCommit, GitCompare, Copy, ChevronDown, Palette, Settings2, Code,
-    AlertTriangle, SlidersHorizontal, Maximize2, Plus, Trash2, RotateCcw, Tag, BookOpen
+    AlertTriangle, SlidersHorizontal, Maximize2, Plus, Trash2, RotateCcw, Tag, BookOpen, Undo2, Redo2
 } from 'lucide-react';
 import { formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 import useVisualRegistryStore from '../store/visualRegistryStore';
 import BIVisualGeneralPane from './BIVisualGeneralPane';
 import BITableFormatSection from './BITableFormatSection';
+import DrillDownPanel from './DrillDownPanel';
 import { VIBRANT_PALETTE } from '../constants/chartPalette';
 import { DEFAULT_TABLE_STYLE, mergeTableStyle } from '../utils/tableStyleUtils';
 
@@ -38,7 +39,12 @@ const BIVisualizationsPane = ({
     onApplyReportBackgroundReset,
     isViewOnly = false,
     measures = [],
-    onAddToStory
+    onAddToStory,
+    canDashboardUndo = false,
+    canDashboardRedo = false,
+    onDashboardUndo,
+    onDashboardRedo,
+    dashboardUndoRevision = 0,
 }) => {
     const [viewMode, setViewMode] = useState('build'); // 'build', 'format', 'general'
     const [isSelectorCollapsed, setIsSelectorCollapsed] = useState(false);
@@ -417,6 +423,94 @@ const BIVisualizationsPane = ({
     const { dimensions: selectedDimensions, measures: selectedMeasures } = getFieldWellState();
     const validationErrors = getValidationErrors(selectedDimensions, selectedMeasures);
     const firstSelectedDimension = (selectedDimensions || []).find((d) => d && isDimensionColumn(d)) || null;
+    const drillDimensionFields = (selectedDimensions || []).filter((d) => d && isDimensionColumn(d));
+    const showDrillOptions = viewMode === 'build'
+        && drillDimensionFields.length > 1
+        && selectedVisual?.graph_type !== 'table';
+
+    const patchDrillOptions = (patch) => {
+        if (!selectedVisual || isViewOnly || !onUpdateVisual) return;
+        onUpdateVisual(selectedVisual.id, {
+            options: {
+                ...(selectedVisual.options || {}),
+                ...patch,
+            },
+            cached_data: null,
+        });
+    };
+
+    const handleDrillUp = () => {
+        if (!selectedVisual) return;
+        const opts = selectedVisual.options || {};
+        const drillLevelIndex = opts.drillLevelIndex ?? 0;
+        const drillPath = Array.isArray(opts.drillPath) ? opts.drillPath : [];
+        const expandModeActive = opts.expandModeActive ?? false;
+        const drillHistory = Array.isArray(opts.drillHistory) ? opts.drillHistory : [];
+
+        if (drillHistory.length > 0) {
+            const prevState = drillHistory[drillHistory.length - 1] || {};
+            patchDrillOptions({
+                drillHistory: drillHistory.slice(0, -1),
+                drillPath: Array.isArray(prevState.drillPath) ? prevState.drillPath : [],
+                drillLevelIndex: Number.isFinite(prevState.drillLevelIndex) ? prevState.drillLevelIndex : 0,
+                expandModeActive: Boolean(prevState.expandModeActive),
+                drillModeActive: Boolean(prevState.drillModeActive),
+            });
+            return;
+        }
+
+        const hasStateToRewind = drillPath.length > 0 || drillLevelIndex > 0 || expandModeActive;
+        if (!hasStateToRewind) return;
+
+        const nextPath = drillPath.length > 0 ? drillPath.slice(0, -1) : drillPath;
+        const nextLevelIndex = Math.max(0, drillLevelIndex - 1);
+        const nextExpandMode = nextPath.length > 0 || nextLevelIndex > 0;
+
+        patchDrillOptions({
+            drillPath: nextPath,
+            drillLevelIndex: nextLevelIndex,
+            expandModeActive: nextExpandMode,
+        });
+    };
+
+    const handleDrillDown = () => {
+        if (!selectedVisual) return;
+        const opts = selectedVisual.options || {};
+        const drillLevelIndex = opts.drillLevelIndex ?? 0;
+        const drillPath = Array.isArray(opts.drillPath) ? opts.drillPath : [];
+        const expandModeActive = opts.expandModeActive ?? false;
+        const drillModeActive = opts.drillModeActive ?? false;
+        const drillHistory = Array.isArray(opts.drillHistory) ? opts.drillHistory : [];
+
+        if (drillLevelIndex >= drillDimensionFields.length - 1) return;
+
+        patchDrillOptions({
+            drillHistory: [...drillHistory, {
+                drillPath,
+                drillLevelIndex,
+                expandModeActive,
+                drillModeActive,
+            }].slice(-30),
+            drillLevelIndex: drillLevelIndex + 1,
+            expandModeActive: true,
+        });
+    };
+
+    const handleDrillModeToggle = () => {
+        if (!selectedVisual) return;
+        const drillModeActive = selectedVisual.options?.drillModeActive ?? false;
+        patchDrillOptions({ drillModeActive: !drillModeActive });
+    };
+
+    const handleResetDrill = () => {
+        patchDrillOptions({
+            drillLevelIndex: 0,
+            drillPath: [],
+            drillHistory: [],
+            expandModeActive: false,
+            drillModeActive: false,
+        });
+    };
     const firstSelectedMeasure = (selectedMeasures || []).find((m) => m?.column && isNumericColumn(m.column)) || null;
 
     const handleOptionUpdate = (key, value) => {
@@ -522,6 +616,30 @@ const BIVisualizationsPane = ({
             <div className="bi-viz-pane-top">
                 <div className="bi-pane-header bi-pane-header--viz">
                     <span className="bi-pane-title">Visualizations</span>
+                    {!isViewOnly && (onDashboardUndo || onDashboardRedo) && (
+                        <div className="bi-dashboard-undo-redo" key={`undo-${dashboardUndoRevision}`}>
+                            <button
+                                type="button"
+                                className="bi-dashboard-undo-redo__btn"
+                                onClick={onDashboardUndo}
+                                disabled={!canDashboardUndo}
+                                title="Undo last dashboard change"
+                                aria-label="Undo"
+                            >
+                                <Undo2 size={15} strokeWidth={2} />
+                            </button>
+                            <button
+                                type="button"
+                                className="bi-dashboard-undo-redo__btn"
+                                onClick={onDashboardRedo}
+                                disabled={!canDashboardRedo}
+                                title="Redo"
+                                aria-label="Redo"
+                            >
+                                <Redo2 size={15} strokeWidth={2} />
+                            </button>
+                        </div>
+                    )}
                     <button
                         type="button"
                         className={`bi-pane-toggle-btn ${isSelectorCollapsed ? 'collapsed' : ''}`}
@@ -898,6 +1016,22 @@ const BIVisualizationsPane = ({
                                 </div>
                             )}
                         </section>
+                        {showDrillOptions && (
+                            <section className="bi-viz-section bi-drill-options" aria-label="Drill hierarchy">
+                                <DrillDownPanel
+                                    variant="sidebar"
+                                    dimensionFields={drillDimensionFields}
+                                    activeLevelIndex={selectedVisual?.options?.drillLevelIndex ?? 0}
+                                    drillPath={Array.isArray(selectedVisual?.options?.drillPath) ? selectedVisual.options.drillPath : []}
+                                    drillModeActive={selectedVisual?.options?.drillModeActive ?? false}
+                                    expandModeActive={selectedVisual?.options?.expandModeActive ?? false}
+                                    onDrillUp={handleDrillUp}
+                                    onDrillDown={handleDrillDown}
+                                    onDrillModeToggle={handleDrillModeToggle}
+                                    onResetDrill={handleResetDrill}
+                                />
+                            </section>
+                        )}
                         <section className="bi-axis-mapping-card" aria-label="Axis mapping">
                             <div className="bi-axis-mapping-title">Axis Mapping</div>
                             <div className="bi-axis-mapping-rows">

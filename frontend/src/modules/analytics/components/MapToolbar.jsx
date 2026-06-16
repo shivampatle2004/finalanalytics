@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Search, Download, Layers, RotateCcw, Map } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Search, Download, RotateCcw } from 'lucide-react';
 
 export const MapToolbar = ({
   visualType = 'bubble',
@@ -10,10 +10,12 @@ export const MapToolbar = ({
   onFitBounds,
   onSearch,
   onExport,
-  isViewOnly = false
+  variant = 'sidebar',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const isSidebar = variant === 'sidebar';
+  const isCompact = variant === 'compact';
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -22,147 +24,133 @@ export const MapToolbar = ({
     }
   };
 
+  const visualTypes = [
+    { id: 'bubble', label: 'Bubble' },
+    { id: 'category', label: 'Category' },
+    { id: 'cluster', label: 'Cluster' },
+    { id: 'heat', label: 'Heat' },
+    { id: 'filled', label: 'Filled' },
+  ];
+
+  if (isCompact) {
+    return (
+      <div className="map-zoom-control" aria-label="Map zoom controls">
+        <button type="button" className="map-zoom-control-btn" onClick={onZoomIn} title="Zoom in" aria-label="Zoom in">
+          <ZoomIn size={15} />
+        </button>
+        <button type="button" className="map-zoom-control-btn" onClick={onZoomOut} title="Zoom out" aria-label="Zoom out">
+          <ZoomOut size={15} />
+        </button>
+        <button type="button" className="map-zoom-control-btn" onClick={onFitBounds} title="Fit bounds" aria-label="Fit bounds">
+          <Maximize2 size={14} />
+        </button>
+        <button type="button" className="map-zoom-control-btn" onClick={onResetView} title="Reset view" aria-label="Reset view">
+          <RotateCcw size={14} />
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="map-toolbar">
-      <div className="map-toolbar-left">
-        {/* Visual Type Switcher */}
-        <div className="map-btn-group" role="group" aria-label="Map visual types">
-          {[
-            { id: 'bubble', label: 'Bubble' },
-            { id: 'category', label: 'Category' },
-            { id: 'cluster', label: 'Cluster' },
-            { id: 'heat', label: 'Heat' },
-            { id: 'filled', label: 'Filled' }
-          ].map(type => (
+    <div className={`map-toolbar${isSidebar ? ' map-toolbar--sidebar' : ''}`}>
+      <section className="map-panel-section">
+        <h4 className="map-panel-label">Map style</h4>
+        <div className="map-style-pills" role="group" aria-label="Map visual types">
+          {visualTypes.map((type) => (
             <button
               key={type.id}
               type="button"
-              className={`map-group-btn ${visualType === type.id ? 'active' : ''}`}
+              className={`map-style-pill${visualType === type.id ? ' active' : ''}`}
               onClick={() => onVisualTypeChange(type.id)}
             >
               {type.label}
             </button>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="map-toolbar-right">
-        {/* Search Bar */}
-        <form onSubmit={handleSearchSubmit} className="map-search-wrapper">
+      <section className="map-panel-section">
+        <h4 className="map-panel-label">Search</h4>
+        <form onSubmit={handleSearchSubmit} className="map-panel-search">
+          <Search size={14} className="map-panel-search-icon" aria-hidden="true" />
           <input
             type="text"
-            className="map-search-input"
+            className="map-panel-search-input"
             placeholder="Search location..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <button type="submit" className="map-search-btn" aria-label="Search">
-            <Search size={14} />
-          </button>
         </form>
+      </section>
 
-        {/* View Controls */}
-        <button type="button" className="map-btn" onClick={onZoomIn} title="Zoom In" aria-label="Zoom In">
-          <ZoomIn size={14} />
-        </button>
-        <button type="button" className="map-btn" onClick={onZoomOut} title="Zoom Out" aria-label="Zoom Out">
-          <ZoomOut size={14} />
-        </button>
-        <button type="button" className="map-btn" onClick={onFitBounds} title="Auto-Fit Bounds" aria-label="Auto-Fit Bounds">
-          <Maximize2 size={14} />
-        </button>
-        <button type="button" className="map-btn" onClick={onResetView} title="Reset View" aria-label="Reset View">
-          <RotateCcw size={14} />
-        </button>
+      <section className="map-panel-section">
+        <h4 className="map-panel-label">View</h4>
+        <div className="map-view-strip" role="group" aria-label="Map view controls">
+          <button type="button" className="map-view-strip-btn" onClick={onZoomIn} title="Zoom in" aria-label="Zoom in">
+            <ZoomIn size={15} />
+          </button>
+          <button type="button" className="map-view-strip-btn" onClick={onZoomOut} title="Zoom out" aria-label="Zoom out">
+            <ZoomOut size={15} />
+          </button>
+          <button type="button" className="map-view-strip-btn" onClick={onFitBounds} title="Fit bounds" aria-label="Fit bounds">
+            <Maximize2 size={14} />
+          </button>
+          <button type="button" className="map-view-strip-btn" onClick={onResetView} title="Reset view" aria-label="Reset view">
+            <RotateCcw size={14} />
+          </button>
+        </div>
+      </section>
 
-        {/* Export Dropdown */}
-        <div style={{ position: 'relative' }}>
+      <section className="map-panel-section map-panel-section--footer">
+        <div className="map-export-wrap">
           <button
             type="button"
-            className="map-btn"
+            className="map-export-trigger"
             onClick={() => setShowExportMenu(!showExportMenu)}
-            title="Export Options"
-            aria-label="Export Data"
+            title="Export options"
+            aria-label="Export data"
+            aria-expanded={showExportMenu}
           >
             <Download size={14} />
-            <span>Export</span>
+            <span>Export data</span>
           </button>
-          
+
           {showExportMenu && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '36px',
-                right: 0,
-                background: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: '4px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                zIndex: 2000,
-                width: '120px',
-                display: 'flex',
-                flexDirection: 'column',
-                padding: '4px 0'
-              }}
-            >
+            <div className="map-export-menu map-export-menu--panel">
               <button
                 type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '11px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  color: '#334155'
-                }}
+                className="map-export-menu-item"
                 onClick={() => {
                   if (onExport) onExport('csv');
                   setShowExportMenu(false);
                 }}
               >
-                Export CSV
+                CSV
               </button>
               <button
                 type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '11px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  color: '#334155'
-                }}
+                className="map-export-menu-item"
                 onClick={() => {
                   if (onExport) onExport('json');
                   setShowExportMenu(false);
                 }}
               >
-                Export JSON
+                JSON
               </button>
               <button
                 type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '8px 12px',
-                  fontSize: '11px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  color: '#334155'
-                }}
+                className="map-export-menu-item"
                 onClick={() => {
                   window.print();
                   setShowExportMenu(false);
                 }}
               >
-                Print Map
+                Print
               </button>
             </div>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 };

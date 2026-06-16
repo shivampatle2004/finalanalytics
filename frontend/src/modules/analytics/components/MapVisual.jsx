@@ -20,7 +20,7 @@ import MapLegend from './MapLegend';
 import MapFilters from './MapFilters';
 import MapSettings from './MapSettings';
 
-import { Settings, Filter, Sliders, MapPin } from 'lucide-react';
+import { Settings, Filter, Sliders, MapPin, Layers, X } from 'lucide-react';
 
 // Tile providers configuration
 const TILE_PROVIDERS = {
@@ -28,13 +28,6 @@ const TILE_PROVIDERS = {
   dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
   osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   hot: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'
-};
-
-const TILE_ATTRIBUTIONS = {
-  light: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  dark: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  osm: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  hot: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Tiles style by Humanitarian OpenStreetMap Team'
 };
 
 // React-Leaflet Map Controller Sub-component
@@ -160,8 +153,8 @@ export const MapVisual = ({
 
   const [visualType, setVisualType] = useState(initialVisualType);
   const [settings, setSettings] = useState(initialSettings);
-  const [activeTab, setActiveTab] = useState('fields'); // fields | filters | settings
-  const [isSidebarOpen, setIsSidebarOpen] = useState(!isViewOnly);
+  const [activeTab, setActiveTab] = useState('controls'); // controls | fields | filters | settings
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Leaflet map instance state
   const [mapInstance, setMapInstance] = useState(null);
@@ -461,53 +454,60 @@ export const MapVisual = ({
     return mapData.filter(item => !disabledCategories.includes(item.category));
   }, [mapData, disabledCategories, visualType]);
 
+  const handleToggleSidebar = () => {
+    setIsSidebarOpen((open) => {
+      const next = !open;
+      if (next) setActiveTab('controls');
+      return next;
+    });
+  };
+
+  const mapToolbarProps = {
+    visualType,
+    onVisualTypeChange: (type) => {
+      setVisualType(type);
+      saveVisualConfig(settings, fieldMapping, type);
+    },
+    onZoomIn: () => {
+      if (mapInstance) {
+        mapInstance.zoomIn();
+      } else {
+        setMapZoom((prev) => Math.min(18, prev + 1));
+      }
+    },
+    onZoomOut: () => {
+      if (mapInstance) {
+        mapInstance.zoomOut();
+      } else {
+        setMapZoom((prev) => Math.max(1, prev - 1));
+      }
+    },
+    onResetView: handleReset,
+    onFitBounds: handleFitBounds,
+    onSearch: handleLocationSearch,
+    onExport: handleExport,
+  };
+
   return (
     <div className={`map-visual-container ${settings.mapTheme === 'dark' ? 'dark' : ''}`}>
-      {/* Settings toggle button for edit mode */}
-      {!isViewOnly && (
-        <button
-          type="button"
-          className={`map-settings-toggle-btn ${isSidebarOpen ? 'active' : ''}`}
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          title="Field Mapping and Settings Panels"
-          aria-label="Toggle configurations sidebar"
-        >
-          <Settings size={16} />
-        </button>
-      )}
-
-      {/* Main Map Viewport */}
       <div className="map-main-pane">
-        {/* Floating Controls Toolbar */}
-        <MapToolbar
-          visualType={visualType}
-          onVisualTypeChange={(type) => {
-            setVisualType(type);
-            saveVisualConfig(settings, fieldMapping, type);
-          }}
-          onZoomIn={() => {
-            if (mapInstance) {
-              mapInstance.zoomIn();
-            } else {
-              setMapZoom(prev => Math.min(18, prev + 1));
-            }
-          }}
-          onZoomOut={() => {
-            if (mapInstance) {
-              mapInstance.zoomOut();
-            } else {
-              setMapZoom(prev => Math.max(1, prev - 1));
-            }
-          }}
-          onResetView={handleReset}
-          onFitBounds={handleFitBounds}
-          onSearch={handleLocationSearch}
-          onExport={handleExport}
-          isViewOnly={isViewOnly}
-        />
+        {!isViewOnly && !isSidebarOpen && (
+          <button
+            type="button"
+            className="map-settings-toggle-btn"
+            onClick={handleToggleSidebar}
+            title="Map controls and settings"
+            aria-label="Open map controls and settings"
+          >
+            <Settings size={16} />
+          </button>
+        )}
 
-        {/* Bounding breadcrumbs representing Drilldowns hierarchy */}
-        <div style={{ position: 'absolute', top: '60px', left: '16px', zIndex: 1000 }}>
+        {isViewOnly && (
+          <MapToolbar variant="compact" {...mapToolbarProps} />
+        )}
+
+        <div style={{ position: 'absolute', top: '12px', left: '12px', zIndex: 1000 }}>
           <div className="map-drill-breadcrumbs">
             <span
               className={`map-drill-crumb ${drillLevel === 'country' ? 'active' : ''}`}
@@ -550,11 +550,11 @@ export const MapVisual = ({
               center={mapCenter}
               zoom={mapZoom}
               scrollWheelZoom={true}
-              zoomControl={false} // Override zoom controls with custom toolbar buttons
+              zoomControl={false}
+              attributionControl={false}
             >
               <MapInstanceCapture setMapInstance={setMapInstance} />
               <TileLayer
-                attribution={TILE_ATTRIBUTIONS[settings.mapTheme] || TILE_ATTRIBUTIONS.osm}
                 url={TILE_PROVIDERS[settings.mapTheme] || TILE_PROVIDERS.osm}
               />
               
@@ -706,34 +706,61 @@ export const MapVisual = ({
       {/* Editing configurations panel */}
       {isSidebarOpen && !isViewOnly && (
         <div className="map-sidebar-pane">
-          <div className="map-sidebar-tabs">
+          <div className="map-sidebar-header">
+            <div className="map-sidebar-tabs">
+            <button
+              type="button"
+              className={`map-tab-btn ${activeTab === 'controls' ? 'active' : ''}`}
+              onClick={() => setActiveTab('controls')}
+              title="Controls"
+            >
+              <Layers size={13} />
+              <span>Controls</span>
+            </button>
             <button
               type="button"
               className={`map-tab-btn ${activeTab === 'fields' ? 'active' : ''}`}
               onClick={() => setActiveTab('fields')}
+              title="Fields"
             >
-              <MapPin size={12} style={{ display: 'inline', marginRight: 4 }} />
-              Fields
+              <MapPin size={13} />
+              <span>Fields</span>
             </button>
             <button
               type="button"
               className={`map-tab-btn ${activeTab === 'filters' ? 'active' : ''}`}
               onClick={() => setActiveTab('filters')}
+              title="Filters"
             >
-              <Filter size={12} style={{ display: 'inline', marginRight: 4 }} />
-              Filters
+              <Filter size={13} />
+              <span>Filters</span>
             </button>
             <button
               type="button"
               className={`map-tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
+              title="Format"
             >
-              <Sliders size={12} style={{ display: 'inline', marginRight: 4 }} />
-              Format
+              <Sliders size={13} />
+              <span>Format</span>
+            </button>
+            </div>
+            <button
+              type="button"
+              className="map-sidebar-close-btn"
+              onClick={() => setIsSidebarOpen(false)}
+              title="Close panel"
+              aria-label="Close map controls panel"
+            >
+              <X size={12} />
             </button>
           </div>
 
           <div className="map-sidebar-content">
+            {activeTab === 'controls' && (
+              <MapToolbar variant="sidebar" {...mapToolbarProps} />
+            )}
+
             {activeTab === 'fields' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>

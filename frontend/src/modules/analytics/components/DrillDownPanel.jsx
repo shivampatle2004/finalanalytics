@@ -5,6 +5,7 @@ import Legend from './Legend';
 import './Legend.css';
 
 export const DrillDownPanel = ({
+    variant = 'chart',
     dimensionFields = [],
     activeLevelIndex = 0,
     drillPath = [],
@@ -74,7 +75,172 @@ export const DrillDownPanel = ({
 
     const showInlineFilter = showLegendFilter
         && legendFilterDimension
-        && legendFilterValues.length > 0;
+        && legendFilterValues.length > 0
+        && variant !== 'sidebar';
+
+    const isSidebar = variant === 'sidebar';
+
+    const drillActions = (
+        <div className="drill-down-actions">
+            <button
+                type="button"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDrillUp?.();
+                }}
+                disabled={!canDrillUp}
+                title="Drill up — remove one hierarchy level"
+                className={`bi-drill-btn${canDrillUp ? '' : ' is-disabled'}`}
+                style={canDrillUp ? btnBase : btnDisabled}
+            >
+                ↑
+            </button>
+            <button
+                type="button"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDrillDown?.();
+                }}
+                disabled={!canDrillDown}
+                title={canDrillDown ? `Drill down — add ${nextDimension || 'next level'}` : 'Deepest level'}
+                className={`bi-drill-btn${canDrillDown ? '' : ' is-disabled'}`}
+                style={canDrillDown ? btnBase : btnDisabled}
+            >
+                ↓
+            </button>
+            <button
+                type="button"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDrillModeToggle?.();
+                }}
+                title={drillModeActive ? 'Click-to-drill ON' : 'Enable click-to-drill on chart'}
+                className="bi-drill-btn"
+                style={drillModeActive ? btnActive : btnBase}
+            >
+                <span style={{ fontSize: 9 }}>⊞</span>
+            </button>
+            <button
+                type="button"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }}
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onResetDrill?.();
+                }}
+                disabled={!canReset}
+                title="Reset hierarchy"
+                className={`bi-drill-btn${canReset ? ' is-reset' : ' is-disabled'}`}
+                style={canReset ? { ...btnBase, color: '#ef4444' } : btnDisabled}
+            >
+                ↺
+            </button>
+        </div>
+    );
+
+    const drillPathContent = (
+        <>
+            {!showInlineFilter && (
+                <span className="drill-down-dim">{currentDimension}</span>
+            )}
+            <span className="drill-down-sep" aria-hidden>|</span>
+
+            <span className="drill-down-path">
+                <span
+                    className={`drill-down-crumb${activeLevelIndex === 0 && !drillPath.length ? ' is-current' : ''}`}
+                    style={{ cursor: canReset ? 'pointer' : 'default' }}
+                    onClick={() => canReset && onResetDrill()}
+                    title={canReset ? 'Reset to top level' : dimensionFields[0]}
+                >
+                    {dimensionFields[0]}
+                </span>
+
+                {expandModeActive && !compositePathLabel && activeLevelIndex > 0 && (
+                    <>
+                        <span className="drill-down-sep">›</span>
+                        <span className="drill-down-dim">{currentDimension}</span>
+                    </>
+                )}
+
+                {compositePathLabel && (
+                    <>
+                        <span className="drill-down-sep">›</span>
+                        <span className="drill-down-value" title={compositePathLabel}>
+                            {compositePathLabel.length > 18 ? `${compositePathLabel.slice(0, 16)}…` : compositePathLabel}
+                        </span>
+                    </>
+                )}
+
+                {!expandModeActive && drillPath.map((step, idx) => (
+                    <React.Fragment key={idx}>
+                        <span className="drill-down-sep">›</span>
+                        <span
+                            className="drill-down-value is-clickable"
+                            onClick={() => {
+                                if (step.field && step.value) toggleFilter(step.field, step.value);
+                            }}
+                            title={`Filter: ${step.field} = ${step.value}`}
+                        >
+                            {String(step.value).length > 14 ? `${String(step.value).slice(0, 12)}…` : step.value}
+                        </span>
+                        {idx === drillPath.length - 1 && dimensionFields[idx + 1] && (
+                            <>
+                                <span className="drill-down-sep">›</span>
+                                <span className="drill-down-dim">{dimensionFields[idx + 1]}</span>
+                            </>
+                        )}
+                    </React.Fragment>
+                ))}
+            </span>
+
+            {!isSidebar && (
+                <span className="drill-down-hint" title={hint}>{hint}</span>
+            )}
+        </>
+    );
+
+    if (isSidebar) {
+        return (
+            <div className="drill-down-bar drill-down-bar--sidebar">
+                <div className="drill-down-sidebar-header">
+                    <span className="drill-down-label">Drill hierarchy</span>
+                    {drillActions}
+                </div>
+                <div className="drill-down-bar-left drill-down-bar-left--sidebar">
+                    <span className="drill-down-label">Level</span>
+                    {showInlineFilter && (
+                        <>
+                            <span className="drill-down-sep" aria-hidden>|</span>
+                            <Legend
+                                dimension={legendFilterDimension}
+                                values={legendFilterValues}
+                                variant="inline"
+                            />
+                        </>
+                    )}
+                    {drillPathContent}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="drill-down-bar">
@@ -90,135 +256,10 @@ export const DrillDownPanel = ({
                         />
                     </>
                 )}
-                {!showInlineFilter && (
-                    <span className="drill-down-dim">{currentDimension}</span>
-                )}
-                <span className="drill-down-sep" aria-hidden>|</span>
-
-                <span className="drill-down-path">
-                    <span
-                        className={`drill-down-crumb${activeLevelIndex === 0 && !drillPath.length ? ' is-current' : ''}`}
-                        style={{ cursor: canReset ? 'pointer' : 'default' }}
-                        onClick={() => canReset && onResetDrill()}
-                        title={canReset ? 'Reset to top level' : dimensionFields[0]}
-                    >
-                        {dimensionFields[0]}
-                    </span>
-
-                    {expandModeActive && !compositePathLabel && activeLevelIndex > 0 && (
-                        <>
-                            <span className="drill-down-sep">›</span>
-                            <span className="drill-down-dim">{currentDimension}</span>
-                        </>
-                    )}
-
-                    {compositePathLabel && (
-                        <>
-                            <span className="drill-down-sep">›</span>
-                            <span className="drill-down-value" title={compositePathLabel}>
-                                {compositePathLabel.length > 18 ? `${compositePathLabel.slice(0, 16)}…` : compositePathLabel}
-                            </span>
-                        </>
-                    )}
-
-                    {!expandModeActive && drillPath.map((step, idx) => (
-                        <React.Fragment key={idx}>
-                            <span className="drill-down-sep">›</span>
-                            <span
-                                className="drill-down-value is-clickable"
-                                onClick={() => {
-                                    if (step.field && step.value) toggleFilter(step.field, step.value);
-                                }}
-                                title={`Filter: ${step.field} = ${step.value}`}
-                            >
-                                {String(step.value).length > 14 ? `${String(step.value).slice(0, 12)}…` : step.value}
-                            </span>
-                            {idx === drillPath.length - 1 && dimensionFields[idx + 1] && (
-                                <>
-                                    <span className="drill-down-sep">›</span>
-                                    <span className="drill-down-dim">{dimensionFields[idx + 1]}</span>
-                                </>
-                            )}
-                        </React.Fragment>
-                    ))}
-                </span>
-
-                <span className="drill-down-hint" title={hint}>{hint}</span>
+                {drillPathContent}
             </div>
 
-            <div className="drill-down-actions">
-                <button
-                    type="button"
-                    onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onDrillUp?.();
-                    }}
-                    disabled={!canDrillUp}
-                    title="Drill up — remove one hierarchy level"
-                    className={`bi-drill-btn${canDrillUp ? '' : ' is-disabled'}`}
-                    style={canDrillUp ? btnBase : btnDisabled}
-                >
-                    ↑
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onDrillDown?.();
-                    }}
-                    disabled={!canDrillDown}
-                    title={canDrillDown ? `Drill down — add ${nextDimension || 'next level'}` : 'Deepest level'}
-                    className={`bi-drill-btn${canDrillDown ? '' : ' is-disabled'}`}
-                    style={canDrillDown ? btnBase : btnDisabled}
-                >
-                    ↓
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onDrillModeToggle?.();
-                    }}
-                    title={drillModeActive ? 'Click-to-drill ON' : 'Enable click-to-drill on chart'}
-                    className="bi-drill-btn"
-                    style={drillModeActive ? btnActive : btnBase}
-                >
-                    <span style={{ fontSize: 9 }}>⊞</span>
-                </button>
-                <button
-                    type="button"
-                    onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onResetDrill?.();
-                    }}
-                    disabled={!canReset}
-                    title="Reset hierarchy"
-                    className={`bi-drill-btn${canReset ? ' is-reset' : ' is-disabled'}`}
-                    style={canReset ? { ...btnBase, color: '#ef4444' } : btnDisabled}
-                >
-                    ↺
-                </button>
-            </div>
+            {drillActions}
         </div>
     );
 };

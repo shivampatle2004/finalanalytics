@@ -40,21 +40,79 @@ export default function StoryPointEditor({ point, onUpdate }) {
     try {
       const containerEl = document.querySelector('.bi-report-surface');
       if (containerEl) {
+        // Temporarily deselect visual to hide outline in snapshot
+        const selectedEl = containerEl.querySelector('.bi-visual-card.selected');
+        if (selectedEl) selectedEl.classList.remove('selected');
+
         const handles = containerEl.querySelectorAll('.bi-resize-handle');
         handles.forEach(h => h.style.display = 'none');
+
+        const headers = containerEl.querySelectorAll('.bi-header-right');
+        headers.forEach(h => h.style.display = 'none');
+
+        // Wait a tiny bit for layout adjustment to complete
+        await new Promise(resolve => setTimeout(resolve, 80));
+
+        // Find the canvas element inside the container
+        const canvasEl = containerEl.querySelector('.bi-canvas');
         
-        // Wait a tiny bit for the handles display change to lay out
-        await new Promise(resolve => setTimeout(resolve, 100));
+        let originalCanvasStyle = '';
+        let originalContainerStyle = '';
+        let scrollWidth = containerEl.scrollWidth || containerEl.offsetWidth;
+        let scrollHeight = containerEl.scrollHeight || containerEl.offsetHeight;
+
+        if (canvasEl) {
+          originalCanvasStyle = canvasEl.getAttribute('style') || '';
+          originalContainerStyle = containerEl.getAttribute('style') || '';
+
+          const canvasGrid = canvasEl.querySelector('.bi-visuals-grid');
+          const gridWidth = canvasGrid ? (canvasGrid.scrollWidth || canvasGrid.offsetWidth) : canvasEl.scrollWidth;
+          const gridHeight = canvasGrid ? (canvasGrid.scrollHeight || canvasGrid.offsetHeight) : canvasEl.scrollHeight;
+          const headerHeight = canvasEl.querySelector('.bi-report-header-banner')?.offsetHeight || 60;
+          
+          scrollWidth = Math.max(canvasEl.scrollWidth, gridWidth, canvasEl.offsetWidth);
+          scrollHeight = Math.max(canvasEl.scrollHeight, gridHeight + headerHeight, canvasEl.offsetHeight);
+
+          // Force containerEl and canvasEl to fully expand without scroll clipping
+          canvasEl.style.setProperty('width', `${scrollWidth}px`, 'important');
+          canvasEl.style.setProperty('height', `${scrollHeight}px`, 'important');
+          canvasEl.style.setProperty('overflow', 'visible', 'important');
+          canvasEl.style.setProperty('overflow-y', 'visible', 'important');
+          canvasEl.style.setProperty('overflow-x', 'visible', 'important');
+
+          containerEl.style.setProperty('width', `${scrollWidth}px`, 'important');
+          containerEl.style.setProperty('height', `${scrollHeight}px`, 'important');
+          containerEl.style.setProperty('overflow', 'visible', 'important');
+        }
+
+        // Wait a tiny bit for layout to settle with full dimensions
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         const canvas = await html2canvas(containerEl, {
           backgroundColor: '#ffffff',
           scale: 2,
           logging: false,
-          useCORS: true
+          useCORS: true,
+          scrollX: 0,
+          scrollY: 0,
+          width: scrollWidth,
+          height: scrollHeight,
+          windowWidth: scrollWidth,
+          windowHeight: scrollHeight
         });
-        const snapshotUrl = canvas.toDataURL('image/png');
+
+        // Restore styles
+        if (canvasEl) {
+          canvasEl.setAttribute('style', originalCanvasStyle);
+          containerEl.setAttribute('style', originalContainerStyle);
+        }
+
+        // Restore layout styles
+        if (selectedEl) selectedEl.classList.add('selected');
         handles.forEach(h => h.style.display = '');
-        
+        headers.forEach(h => h.style.display = '');
+
+        const snapshotUrl = canvas.toDataURL('image/png');
         onUpdate('snapshot_url', snapshotUrl);
       } else {
         alert('Could not find dashboard container to capture.');
@@ -80,7 +138,7 @@ export default function StoryPointEditor({ point, onUpdate }) {
       {/* Premium Dashboard Snapshot Preview */}
       <div className="spe-preview-container" style={{
         background: '#fff',
-        border: '1.5px solid #ede',
+        border: '1px solid #e2e8f0',
         borderRadius: '12px',
         padding: '16px',
         display: 'flex',
@@ -92,7 +150,7 @@ export default function StoryPointEditor({ point, onUpdate }) {
           fontSize: '11px',
           fontWeight: 700,
           textTransform: 'uppercase',
-          color: '#666',
+          color: '#475569',
           letterSpacing: '0.5px',
           display: 'flex',
           alignItems: 'center',
@@ -107,10 +165,10 @@ export default function StoryPointEditor({ point, onUpdate }) {
             position: 'relative',
             borderRadius: '8px',
             overflow: 'hidden',
-            border: '1px solid #e2d2e2',
+            border: '1px solid #cbd5e1',
             boxShadow: '0 4px 16px rgba(0,0,0,0.05)',
             maxHeight: '260px',
-            background: '#faf6f8',
+            background: '#f8fafc',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center'
@@ -155,11 +213,11 @@ export default function StoryPointEditor({ point, onUpdate }) {
           <div style={{
             padding: '36px 16px',
             textAlign: 'center',
-            border: '1.5px dashed #d2c2d2',
+            border: '1.5px dashed #cbd5e1',
             borderRadius: '8px',
-            color: '#999',
+            color: '#64748b',
             fontSize: '13px',
-            background: '#faf6f8',
+            background: '#f8fafc',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -167,7 +225,7 @@ export default function StoryPointEditor({ point, onUpdate }) {
             gap: '8px'
           }}>
             <p style={{ margin: '0 0 4px 0', fontWeight: 600 }}>No dashboard snapshot captured</p>
-            <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#bbb' }}>
+            <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#94a3b8' }}>
               Add visuals directly from the workspace or capture the entire current view.
             </p>
             <button

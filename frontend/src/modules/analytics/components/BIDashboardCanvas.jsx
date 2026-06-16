@@ -1,68 +1,10 @@
 import React, { useMemo } from 'react';
-import html2canvas from 'html2canvas';
 import DynamicChart from './DynamicChart';
 import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE, PIE_DONUT_DEFAULT_SIZE, TEXT_BOX_DEFAULT_SIZE } from '../constants/visualDefaults';
 import { useGlobalFilters } from '../context/FilterContext';
 import { filterMapHasValues } from '../utils/filterUtils';
 import { formatVisualDisplayTitle } from '../utils/visualTitleUtils';
 import './BIDashboardCanvas.css';
-
-const QUICK_MEASURE_FIELD_LABELS = {
-    value_field: 'Value',
-    total_field: 'Total',
-    current_field: 'Current',
-    prior_field: 'Prior',
-    actual_field: 'Actual',
-    target_field: 'Target',
-    numerator: 'Numerator',
-    denominator: 'Denominator',
-    part_field: 'Part',
-    whole_field: 'Whole',
-    field: 'Field',
-    field_a: 'Field A',
-    field_b: 'Field B',
-    date_field: 'Date',
-    category_field: 'Category',
-    condition_field: 'Condition',
-    weight_field: 'Weight',
-    top_n: 'Top N',
-    periods: 'Periods',
-};
-
-const formatQuickMeasureFieldLabel = (key) => {
-    const raw = String(key || '').trim();
-    if (!raw) return 'Field';
-    if (QUICK_MEASURE_FIELD_LABELS[raw]) return QUICK_MEASURE_FIELD_LABELS[raw];
-    return raw
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (ch) => ch.toUpperCase());
-};
-
-const getQuickMeasureInfo = (graph) => {
-    const measureField = Array.isArray(graph?.options?.measure_fields)
-        ? graph.options.measure_fields.find((m) => m?.template_id)
-        : null;
-    if (!measureField) return null;
-    const mappings = measureField.field_mappings || measureField.config || {};
-    const fields = mappings && typeof mappings === 'object' && !Array.isArray(mappings)
-        ? Object.entries(mappings)
-            .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
-            .map(([key, value]) => ({
-                key,
-                label: formatQuickMeasureFieldLabel(key),
-                value: String(value),
-            }))
-        : [];
-    return {
-        name: graph?.options?.measureName || graph?.options?.title || measureField.template_id,
-        fields,
-    };
-};
-
-const truncateFocusValue = (value, max = 24) => {
-    const text = String(value ?? '');
-    return text.length > max ? `${text.slice(0, max - 1)}...` : text;
-};
 
 const BIDashboardCanvas = ({
     graphs,
@@ -94,7 +36,7 @@ const BIDashboardCanvas = ({
     focusedGraphId: focusedGraphIdProp,
     onFocusGraph,
     onCloseFocusGraph,
-    onAddToStory,
+    previewRows = null,
 }) => {
     const [internalFocusedGraphId, setInternalFocusedGraphId] = React.useState(null);
     const focusedGraphId = focusedGraphIdProp !== undefined ? focusedGraphIdProp : internalFocusedGraphId;
@@ -107,44 +49,6 @@ const BIDashboardCanvas = ({
         }
     }, [onFocusGraph, onCloseFocusGraph]);
 
-    const [capturingGraphId, setCapturingGraphId] = React.useState(null);
-
-    const handleAddToStoryClick = async (e, graph) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (capturingGraphId) return;
-        
-        setCapturingGraphId(graph.id);
-        let snapshotUrl = null;
-        try {
-            const cardEl = document.querySelector(`[data-visual-id="${graph.id}"]`);
-            if (cardEl) {
-                const handles = cardEl.querySelectorAll('.bi-resize-handle');
-                handles.forEach(h => h.style.display = 'none');
-                
-                // Wait for any animations to finish (e.g., 800ms)
-                await new Promise(resolve => setTimeout(resolve, 800));
-
-                const canvas = await html2canvas(cardEl, {
-                    backgroundColor: null,
-                    scale: 2,
-                    logging: false,
-                    useCORS: true
-                });
-                snapshotUrl = canvas.toDataURL('image/png');
-                
-                handles.forEach(h => h.style.display = '');
-            }
-        } catch (err) {
-            console.error('Failed to capture snapshot:', err);
-        } finally {
-            setCapturingGraphId(null);
-        }
-        
-        if (onAddToStory) {
-            onAddToStory(graph, snapshotUrl);
-        }
-    };
     const [focusZoomToolbarHost, setFocusZoomToolbarHost] = React.useState(null);
     const [isDraggingOverCanvas, setIsDraggingOverCanvas] = React.useState(false);
     const dragCounterRef = React.useRef(0);
@@ -239,21 +143,6 @@ const BIDashboardCanvas = ({
         return (graphs || []).find(g => g?.id === focusedGraphId) || null;
     }, [focusedGraphId, graphs]);
 
-    const quickMeasureInfo = React.useMemo(
-        () => getQuickMeasureInfo(focusedGraph),
-        [focusedGraph]
-    );
-
-    const focusStats = React.useMemo(() => {
-        if (quickMeasureInfo) return null;
-        const values = focusedGraph?.cached_data?.values;
-        if (!values || !Array.isArray(values)) return null;
-        const nums = values.map(v => parseFloat(String(v).replace(/,/g, ''))).filter(v => !isNaN(v));
-        if (nums.length === 0) return null;
-        const total = nums.reduce((a, b) => a + b, 0);
-        return { total, avg: total / nums.length, max: Math.max(...nums), min: Math.min(...nums) };
-    }, [focusedGraph?.cached_data, quickMeasureInfo]);
-
     // --- Viz-type drag-and-drop (HTML5 DnD — kept as bonus, but click-to-add is primary) ---
     const handleCanvasDragEnter = (e) => {
         e.preventDefault();
@@ -305,37 +194,12 @@ const BIDashboardCanvas = ({
 
     const CARD_DRAG_THRESHOLD = 5;
 
-    const CHART_FILTER_CLICK_SELECTOR = [
-        '.chart-category-clickable',
-        '.sc-chart-area',
-        '.chart-wrapper',
-        '.recharts-wrapper',
-        '.recharts-surface',
-        '.recharts-pie-sector',
-        '.pie-donut-slice-sector',
-        '.pie-donut-slice-cell',
-        '.recharts-bar-rectangle',
-        '.chart-bar-marks',
-        '.chart-bar-cell',
-        '.recharts-rectangle',
-        '.recharts-line-curve',
-        '.recharts-area-area',
-        '.recharts-scatter-symbol',
-        '.recharts-active-dot',
-        '.recharts-active-bar',
-    ].join(', ');
-
-    const isChartFilterClickTarget = (target) => {
-        if (!target?.closest) return false;
-        return Boolean(target.closest(CHART_FILTER_CLICK_SELECTOR));
-    };
-
     const isInteractiveDragTarget = (target) => {
         if (!target?.closest) return false;
-        if (isChartFilterClickTarget(target)) return true;
         return Boolean(target.closest(
             '.bi-resize-handle, button, a, input, textarea, select, option, [contenteditable="true"], ' +
-            '.legend-filter-inline-wrap, .legend-filter-inline-menu, .sc-controls-bar, .sc-toggle, .sc-slider-label'
+            '.legend-filter-inline-wrap, .legend-filter-inline-menu, .sc-controls-bar, .sc-toggle, .sc-slider-label, ' +
+            '.sc-legend-panel, .chart-crossfilter-btn'
         ));
     };
 
@@ -701,14 +565,6 @@ const BIDashboardCanvas = ({
                                     {formatVisualDisplayTitle(focusedGraph.options?.title, focusedGraph.graph_type)}
                                 </h2>
                             </div>
-                            {focusStats && (
-                                <div className="bi-focus-kpi-bar">
-                                    <div className="bi-focus-kpi-item"><span className="bi-focus-kpi-label">TOTAL</span><span className="bi-focus-kpi-value">{Math.round(focusStats.total).toLocaleString()}</span></div>
-                                    <div className="bi-focus-kpi-item"><span className="bi-focus-kpi-label">AVG</span><span className="bi-focus-kpi-value">{focusStats.avg.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1})}</span></div>
-                                    <div className="bi-focus-kpi-item"><span className="bi-focus-kpi-label">MAX</span><span className="bi-focus-kpi-value">{focusStats.max.toLocaleString()}</span></div>
-                                    <div className="bi-focus-kpi-item"><span className="bi-focus-kpi-label">MIN</span><span className="bi-focus-kpi-value">{focusStats.min.toLocaleString()}</span></div>
-                                </div>
-                            )}
                             <div className="bi-focus-header-right">
                                 <div ref={setFocusZoomToolbarHost} className="bi-focus-zoom-slot" />
                                 <span className="bi-focus-toolbar-divider" aria-hidden="true" />
@@ -735,6 +591,7 @@ const BIDashboardCanvas = ({
                                 onApplyCrossFilter={onApplyCrossFilter}
                                 onClearCrossFilter={onClearCrossFilter}
                                 onUpdate={(u) => handleUpdate(focusedGraph.id, u)}
+                                previewRows={previewRows}
                             />
                         </div>
                     </div>
@@ -869,11 +726,9 @@ const BIDashboardCanvas = ({
                             }}
                             onMouseDownCapture={(e) => {
                                 if (e.button !== 0) return;
-                                if (e.target?.closest?.('.sc-controls-bar, .sc-toggle, .sc-slider-label, input[type="checkbox"], input[type="range"]')) {
+                                if (e.target?.closest?.('.sc-controls-bar, .sc-toggle, .sc-slider-label, input[type="checkbox"], input[type="range"], button, a, .bi-resize-handle')) {
                                     return;
                                 }
-                                // Let bar/slice/path clicks apply cross-filter on the first click; selection runs inside DynamicChart.
-                                if (isChartFilterClickTarget(e.target)) return;
                                 if (onSelectVisual) onSelectVisual(graph.id);
                                 bringGraphToFront(graph.id);
                             }}
@@ -921,46 +776,6 @@ const BIDashboardCanvas = ({
                                             />
                                         </div>
                                     )}
-                                    <div className="bi-header-right" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', zIndex: 10 }}>
-                                        <button
-                                            type="button"
-                                            onClick={(e) => handleAddToStoryClick(e, graph)}
-                                            disabled={capturingGraphId === graph.id}
-                                            style={{
-                                                background: 'transparent',
-                                                border: 'none',
-                                                cursor: capturingGraphId === graph.id ? 'not-allowed' : 'pointer',
-                                                padding: '4px',
-                                                borderRadius: '4px',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                color: '#7a1e3a',
-                                                transition: 'background 0.15s, color 0.15s',
-                                                opacity: capturingGraphId === graph.id ? 0.6 : 1
-                                            }}
-                                            onMouseEnter={(e) => { if (capturingGraphId !== graph.id) e.currentTarget.style.background = '#f5e6ec'; }}
-                                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                                            title={capturingGraphId === graph.id ? "Capturing..." : "Add to Story"}
-                                        >
-                                            {capturingGraphId === graph.id ? (
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', animation: 'bi-spin 1s linear infinite' }}>
-                                                    <line x1="12" y1="2" x2="12" y2="6"></line>
-                                                    <line x1="12" y1="18" x2="12" y2="22"></line>
-                                                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
-                                                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
-                                                    <line x1="2" y1="12" x2="6" y2="12"></line>
-                                                    <line x1="18" y1="12" x2="22" y2="12"></line>
-                                                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
-                                                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
-                                                </svg>
-                                            ) : (
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5V5A2.5 2.5 0 0 1 6.5 2.5H20v14H6.5M12 6v6m-3-3h6"/>
-                                                </svg>
-                                            )}
-                                        </button>
-                                    </div>
                                 </div>
                             )}
                             <div
@@ -987,6 +802,7 @@ const BIDashboardCanvas = ({
                                     onApplyCrossFilter={onApplyCrossFilter}
                                     onClearCrossFilter={onClearCrossFilter}
                                     onUpdate={(u) => handleUpdate(graph.id, u)}
+                                    previewRows={previewRows}
                                     onClick={(payload) => {
                                         if (graph.graph_type === 'button') {
                                             if (onButtonAction) onButtonAction(graph, payload);

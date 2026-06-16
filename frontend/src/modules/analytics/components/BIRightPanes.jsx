@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Filter, BarChart3, Database, ChevronLeft, ChevronRight, Minimize2, Maximize2, Camera } from 'lucide-react';
+import { Filter, BarChart3, Database, ChevronLeft, ChevronRight, Minimize2, Maximize2 } from 'lucide-react';
 import BIFiltersPane from './BIFiltersPane';
 import BIVisualizationsPane from './BIVisualizationsPane';
 import BIFieldsPane from './BIFieldsPane';
@@ -37,6 +37,11 @@ const BIRightPanes = ({
     onResetVisualColors,
     onAddToStory,
     onCaptureDashboard,
+    canDashboardUndo = false,
+    canDashboardRedo = false,
+    onDashboardUndo,
+    onDashboardRedo,
+    dashboardUndoRevision = 0,
 }) => {
     const [activeTab, setActiveTab] = useState('visualizations'); // 'filters', 'visualizations', 'fields'
     const currentTab = forcedActiveTab || activeTab;
@@ -53,16 +58,7 @@ const BIRightPanes = ({
                 <div className="bi-collapse-toggle" onClick={onToggleCollapse} title="Expand">
                     <Maximize2 size={16} />
                 </div>
-                {onCaptureDashboard && (
-                    <div 
-                        className="bi-collapse-toggle bi-dashboard-snap-toggle" 
-                        onClick={onCaptureDashboard} 
-                        title="Capture Dashboard Snapshot (Edge-to-Edge)"
-                        style={{ marginTop: '8px', color: '#7a1e3a' }}
-                    >
-                        <Camera size={16} />
-                    </div>
-                )}
+
                 <div className="bi-collapsed-tabs">
                     {tabs.map(tab => (
                         <div
@@ -89,16 +85,7 @@ const BIRightPanes = ({
                 <div className="bi-collapse-toggle" onClick={onToggleCollapse} title="Minimize">
                     <Minimize2 size={16} />
                 </div>
-                {onCaptureDashboard && (
-                    <div 
-                        className="bi-collapse-toggle bi-dashboard-snap-toggle" 
-                        onClick={onCaptureDashboard} 
-                        title="Capture Dashboard Snapshot (Edge-to-Edge)"
-                        style={{ marginTop: '8px', color: '#7a1e3a' }}
-                    >
-                        <Camera size={16} />
-                    </div>
-                )}
+
                 <div className="bi-pane-tabs">
                     {tabs.map(tab => (
                         <div
@@ -146,6 +133,11 @@ const BIRightPanes = ({
                         onApplyReportBackgroundFill={onApplyReportBackgroundFill}
                         onApplyReportBackgroundReset={onApplyReportBackgroundReset}
                         measures={measures}
+                        canDashboardUndo={canDashboardUndo}
+                        canDashboardRedo={canDashboardRedo}
+                        onDashboardUndo={onDashboardUndo}
+                        onDashboardRedo={onDashboardRedo}
+                        dashboardUndoRevision={dashboardUndoRevision}
                     />
                 )}
                 {currentTab === 'fields' && (

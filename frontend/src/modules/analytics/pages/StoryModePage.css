@@ -3,7 +3,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #faf3ff;
+  background: #f8fafc;
   overflow: hidden;
 }
 
@@ -14,13 +14,13 @@
   justify-content: space-between;
   padding: 16px 24px;
   background: #fff;
-  border-bottom: 1px solid #ede;
+  border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
 }
 .smp-header-left { display: flex; align-items: center; gap: 12px; }
-.smp-header-icon { color: #7a1e3a; }
-.smp-title { font-size: 18px; font-weight: 700; color: #333; margin: 0; }
-.smp-subtitle { font-size: 12px; color: #888; margin: 0; }
+.smp-header-icon { color: #64748b; }
+.smp-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0; }
+.smp-subtitle { font-size: 12px; color: #64748b; margin: 0; }
 .smp-header-actions { display: flex; gap: 8px; }
 
 /* Buttons */
@@ -38,8 +38,8 @@
 }
 .smp-btn-primary { background: #7a1e3a; color: #fff; }
 .smp-btn-primary:hover { background: #5e172c; }
-.smp-btn-ghost { background: #f5f5f5; color: #555; }
-.smp-btn-ghost:hover { background: #eee; }
+.smp-btn-ghost { background: #f1f5f9; color: #475569; }
+.smp-btn-ghost:hover { background: #e2e8f0; }
 .smp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Create form */
@@ -48,15 +48,15 @@
   align-items: center;
   gap: 8px;
   padding: 10px 24px;
-  background: #fff7fd;
-  border-bottom: 1px solid #ede;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
 }
 .smp-create-input {
   flex: 1;
   max-width: 400px;
   padding: 8px 12px;
-  border: 1.5px solid #c07;
+  border: 1.5px solid #cbd5e1;
   border-radius: 8px;
   font-size: 13px;
   outline: none;
@@ -72,10 +72,10 @@
 .smp-loading, .smp-error {
   text-align: center;
   padding: 40px;
-  color: #888;
+  color: #64748b;
   font-size: 14px;
 }
-.smp-error { color: #c0392b; }
+.smp-error { color: #dc2626; }
 
 /* Empty state */
 .smp-empty {
@@ -85,10 +85,10 @@
   justify-content: center;
   gap: 10px;
   padding: 60px 20px;
-  color: #999;
+  color: #94a3b8;
   font-size: 15px;
 }
-.smp-empty-icon { color: #ccc; }
+.smp-empty-icon { color: #cbd5e1; }
 .smp-empty-sub { font-size: 13px; }
 
 /* Card grid */
@@ -101,7 +101,7 @@
 .smp-card {
   background: #fff;
   border-radius: 12px;
-  border: 1.5px solid #ede;
+  border: 1px solid #e2e8f0;
   display: flex;
   align-items: stretch;
   cursor: pointer;
@@ -109,7 +109,7 @@
   overflow: visible;
   position: relative;
 }
-.smp-card:hover { border-color: #c07; box-shadow: 0 4px 16px rgba(122,30,58,.1); }
+.smp-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,.05); }
 
 .smp-card-body {
   flex: 1;
@@ -121,18 +121,18 @@
 .smp-card-icon {
   width: 42px;
   height: 42px;
-  background: linear-gradient(135deg, #fce4ec, #f8bbd0);
+  background: #f1f5f9;
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #7a1e3a;
+  color: #475569;
   flex-shrink: 0;
 }
 .smp-card-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.smp-card-name { font-size: 14px; font-weight: 600; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.smp-card-desc { font-size: 12px; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.smp-card-meta { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #aaa; }
+.smp-card-name { font-size: 14px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.smp-card-desc { font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.smp-card-meta { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; }
 .smp-card-dot { margin: 0 1px; }
 .smp-card-count { font-weight: 600; color: #7a1e3a; }
 
@@ -144,7 +144,7 @@
   justify-content: center;
   gap: 4px;
   padding: 8px;
-  border-left: 1px solid #f0e0e8;
+  border-left: 1px solid #e2e8f0;
 }
 .smp-card-btn {
   width: 28px;
@@ -155,12 +155,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: #64748b;
   cursor: pointer;
   transition: all 0.15s;
   padding: 0;
 }
-.smp-card-btn:hover { background: #f5e6ec; color: #7a1e3a; }
+.smp-card-btn:hover { background: #f1f5f9; color: #7a1e3a; }
 .smp-present-btn:hover { background: #7a1e3a; color: #fff; }
 
 /* Context menu */
@@ -170,9 +170,9 @@
   top: 100%;
   right: 0;
   background: #fff;
-  border: 1.5px solid #ede;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
   z-index: 1000;
   min-width: 160px;
   padding: 4px;
@@ -190,12 +190,12 @@
   background: transparent;
   border-radius: 7px;
   font-size: 13px;
-  color: #333;
+  color: #334155;
   cursor: pointer;
   text-align: left;
   transition: background 0.15s;
 }
-.smp-context-menu button:hover { background: #faf0f4; }
-.smp-menu-danger { color: #c0392b !important; }
-.smp-menu-danger:hover { background: #ffeaea !important; }
-.smp-menu-divider { height: 1px; background: #f0e0e8; margin: 3px 0; }
+.smp-context-menu button:hover { background: #f1f5f9; }
+.smp-menu-danger { color: #dc2626 !important; }
+.smp-menu-danger:hover { background: #fef2f2 !important; }
+.smp-menu-divider { height: 1px; background: #e2e8f0; margin: 3px 0; }

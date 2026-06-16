@@ -4,6 +4,38 @@ class GraphEngine:
     MAX_CHART_POINTS = 300
 
     @staticmethod
+    def _filter_rows_with_values(df: Any, cols: List[str]) -> Any:
+        """Vectorized row filter — replaces slow DataFrame.apply(axis=1) on large datasets."""
+        import pandas as pd
+
+        if df is None or df.empty or not cols:
+            return df
+        relevant = [c for c in cols if c in df.columns]
+        if not relevant:
+            return df.iloc[0:0]
+
+        mask = pd.Series(False, index=df.index)
+        for col in relevant:
+            series = df[col]
+            if series.dtype == object or str(series.dtype).startswith("string"):
+                as_str = series.astype(str).str.strip()
+                col_mask = series.notna() & (as_str != "") & (as_str.str.lower() != "nan")
+            else:
+                col_mask = series.notna()
+            mask = mask | col_mask
+        return df[mask]
+
+    @staticmethod
+    def _grouped_dimension_labels(grouped: Any, dimensions: List[str]) -> List[str]:
+        import pandas as pd
+
+        if grouped is None or grouped.empty or not dimensions:
+            return []
+        if len(dimensions) == 1:
+            return grouped[dimensions[0]].astype(str).tolist()
+        return grouped[dimensions].astype(str).agg(" | ".join, axis=1).tolist()
+
+    @staticmethod
     def _cap_points(
         labels: List[Any],
         values: List[Any],
@@ -114,10 +146,7 @@ class GraphEngine:
         # Graceful fallback: if no measure is provided, default to COUNT(*) by dimension.
         if not measures:
             if dimensions:
-                keep_mask = work_df[dimensions].apply(
-                    lambda r: any(not _is_blank(v) for v in r.values), axis=1
-                )
-                work_df = work_df[keep_mask].copy()
+                work_df = GraphEngine._filter_rows_with_values(work_df, dimensions).copy()
             if work_df.empty:
                 return {"labels": [], "values": []}
 
@@ -132,10 +161,7 @@ class GraphEngine:
                 .sort_values(by="COUNT", ascending=False)
             )
 
-            labels = [
-                " | ".join(str(row[d]) for d in dimensions)
-                for _, row in grouped.iterrows()
-            ]
+            labels = GraphEngine._grouped_dimension_labels(grouped, dimensions)
             values = grouped["COUNT"].tolist()
             rows = grouped.to_dict("records")
             if graph_type in {"pie", "donut"}:
@@ -168,10 +194,7 @@ class GraphEngine:
             if isinstance(m, dict)
         )
         if has_none_agg and dimensions:
-            keep_mask = work_df[dimensions].apply(
-                lambda r: any(not _is_blank(v) for v in r.values), axis=1
-            )
-            work_df = work_df[keep_mask].copy()
+            work_df = GraphEngine._filter_rows_with_values(work_df, dimensions).copy()
             if work_df.empty:
                 return {"labels": [], "values": []}
 
@@ -186,10 +209,7 @@ class GraphEngine:
                 .sort_values(by="RECORD_COUNT", ascending=False)
             )
 
-            labels = [
-                " | ".join(str(row[d]) for d in dimensions)
-                for _, row in grouped.iterrows()
-            ]
+            labels = GraphEngine._grouped_dimension_labels(grouped, dimensions)
             values = grouped["RECORD_COUNT"].tolist()
             rows = grouped.to_dict("records")
             if graph_type not in {"pie", "donut"}:
@@ -285,10 +305,7 @@ class GraphEngine:
         measure_cols = [m.get("column") for m in measures if isinstance(m, dict) and m.get("column") in work_df.columns]
         relevant_cols = [c for c in [*dimensions, *measure_cols] if c in work_df.columns]
         if relevant_cols:
-            keep_mask = work_df[relevant_cols].apply(
-                lambda r: any(not _is_blank(v) for v in r.values), axis=1
-            )
-            work_df = work_df[keep_mask].copy()
+            work_df = GraphEngine._filter_rows_with_values(work_df, relevant_cols).copy()
         if work_df.empty:
             return {"labels": [], "values": []}
 
@@ -393,10 +410,7 @@ class GraphEngine:
                 ascending=(first_measure_agg == "MIN")
             ).drop(columns=["__sort_value"])
 
-        labels = [
-            " | ".join(str(row[d]) for d in dimensions)
-            for _, row in grouped.iterrows()
-        ]
+        labels = GraphEngine._grouped_dimension_labels(grouped, dimensions)
         values = grouped[first_measure_alias].tolist()
         rows = grouped.to_dict("records")
         if graph_type not in {"pie", "donut"}:

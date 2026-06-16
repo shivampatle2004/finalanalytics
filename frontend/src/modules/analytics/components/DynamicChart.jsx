@@ -20,6 +20,7 @@ import {
     getXAxisTitle,
     getYAxisTitle,
 } from '../utils/chartAxisUtils';
+import { aggregateChartPreview, previewRowsToChartData } from '../utils/clientChartAggregate';
 import {
     getHierarchyDimensions,
     getHierarchyXAxisLabel,
@@ -249,6 +250,102 @@ const formatXAxisTick = (val, fullLabels = false, _tickMaxLen = 12, _charsPerSlo
     return `${str.slice(0, slotChars - 1)}…`;
 };
 
+/** Renders chart hover tooltips in a body portal so they are not clipped by overflow containers. */
+function ChartPortalTooltip({
+    active,
+    payload,
+    label,
+    coordinate,
+    formatter,
+    labelFormatter,
+    containerRef,
+    children,
+}) {
+    const tipRef = useRef(null);
+
+    useLayoutEffect(() => {
+        const tip = tipRef.current;
+        if (!active || !coordinate || !tip) return undefined;
+
+        const position = () => {
+            const el = tipRef.current;
+            if (!el) return;
+
+            const chartRoot = containerRef?.current;
+            const svgWrap = chartRoot?.querySelector('.recharts-wrapper') || chartRoot;
+            const base = svgWrap?.getBoundingClientRect();
+            if (!base) return;
+
+            const pad = 10;
+            const offset = 14;
+            const tw = el.offsetWidth;
+            const th = el.offsetHeight;
+
+            let x = base.left + coordinate.x + offset;
+            let y = base.top + coordinate.y - th / 2;
+
+            if (x + tw + pad > window.innerWidth) {
+                x = base.left + coordinate.x - tw - offset;
+            }
+            if (x < pad) x = pad;
+
+            if (y + th + pad > window.innerHeight) {
+                y = window.innerHeight - th - pad;
+            }
+            if (y < pad) y = pad;
+
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            el.style.visibility = 'visible';
+        };
+
+        tip.style.visibility = 'hidden';
+        tip.style.left = '-9999px';
+        tip.style.top = '-9999px';
+        const frame = requestAnimationFrame(position);
+        return () => cancelAnimationFrame(frame);
+    }, [active, coordinate, payload, label, containerRef, children, formatter]);
+
+    if (!active || !payload?.length) return null;
+
+    let body = children;
+    if (!body) {
+        if (formatter) {
+            const item = payload[0];
+            const formatted = formatter(item?.value, item?.name, { payload: item?.payload });
+            if (Array.isArray(formatted) && React.isValidElement(formatted[0])) {
+                body = formatted[0];
+            } else if (Array.isArray(formatted)) {
+                body = (
+                    <div className="chart-portal-tooltip__stack">
+                        {formatted[1] ? <div className="chart-portal-tooltip__label">{formatted[1]}</div> : null}
+                        <div className="chart-portal-tooltip__value">{formatted[0]}</div>
+                    </div>
+                );
+            } else {
+                body = <div className="chart-portal-tooltip__value">{formatted}</div>;
+            }
+        } else {
+            body = <div className="chart-portal-tooltip__value">{payload[0]?.value}</div>;
+        }
+    }
+
+    const heading = labelFormatter ? labelFormatter(label) : null;
+    const isBareShell = Boolean(children);
+
+    return createPortal(
+        <div
+            ref={tipRef}
+            className={`chart-portal-tooltip${isBareShell ? ' chart-portal-tooltip--bare' : ''}`}
+            role="tooltip"
+        >
+            {heading ? <div className="chart-portal-tooltip__heading">{heading}</div> : null}
+            {body}
+        </div>,
+        document.body,
+    );
+}
+
 const QUICK_MEASURE_FIELD_LABELS = {
     value_field: 'Value',
     total_field: 'Total',
@@ -356,9 +453,90 @@ const buildYAxisTitleLabel = (title) => {
     };
 };
 
+/** Layout for multi-value KPI comparison grids (dimension breakdown). */
+const computeKpiComparisonLayout = (itemCount, width, height, { isDashboardCanvas = false, isFocusView = false } = {}) => {
+    const count = Math.max(1, Number(itemCount) || 1);
+    const w = Math.max(Number(width) || 280, 100);
+    const h = Math.max(Number(height) || 140, 72);
+    const compact = isDashboardCanvas && !isFocusView;
+
+    const padding = compact ? 3 : 10;
+    const gap = compact ? 4 : 8;
+    const minTileW = compact ? 88 : 116;
+    const minTileH = compact ? 50 : 72;
+
+    const innerW = Math.max(60, w - padding * 2);
+    const innerH = Math.max(48, h - padding * 2);
+
+    let cols = Math.max(1, Math.floor((innerW + gap) / (minTileW + gap)));
+    cols = Math.min(cols, count, isFocusView ? 4 : 3);
+    if (compact && innerW < 280) cols = Math.min(cols, 2);
+    if (compact && count > 4 && cols < 2) cols = 2;
+
+    const rows = Math.ceil(count / cols);
+    const tileW = (innerW - gap * Math.max(0, cols - 1)) / cols;
+    const tileScale = Math.min(tileW / 110, minTileH / 64, compact ? 1 : 1.4);
+    const labelSize = Math.max(7, Math.min(compact ? 9 : 12, Math.round((compact ? 8 : 10) * tileScale)));
+    const valueSize = Math.max(compact ? 12 : 15, Math.min(isFocusView ? 28 : 22, Math.round((compact ? 14 : 18) * tileScale)));
+    const descSize = Math.max(6, Math.min(10, Math.round(8 * tileScale)));
+    const showDesc = tileScale >= 0.72 && minTileH >= 58;
+
+    return {
+        cols,
+        rows,
+        gap,
+        padding,
+        minTileH,
+        labelSize,
+        valueSize,
+        descSize,
+        showDesc,
+    };
+};
+
+
 /** Small padding below the X-axis band (tick space is reserved via XAxis `height`). */
 const computeChartBottomMargin = (isDashboardCanvas = false) => (
     isDashboardCanvas ? 2 : 4
+);
+
+/** Vertical space for Power BI-style category labels — scales with longest label, capped for very long names. */
+const computeVerticalCategoryBandHeight = (maxLabelLen, fontSize, focusView = false, { dashboardCard = false } = {}) => {
+    const len = Math.max(1, Number(maxLabelLen) || 1);
+    const charStep = fontSize * 1.05;
+    const textSpan = Math.ceil(len * charStep);
+    const padding = dashboardCard ? 4 : (focusView ? 8 : 6);
+    const needed = textSpan + padding;
+    const minBand = dashboardCard ? 18 : (focusView ? 26 : 22);
+    const maxBand = focusView ? 280 : (dashboardCard ? 132 : 168);
+    return Math.min(maxBand, Math.max(minBand, needed));
+};
+
+/** HTML category labels below the plot (Power BI style) — avoids SVG clipping on scrollable bar charts. */
+const BarCategoryLabelRail = ({ rows, slotWidth, maxBandHeight, yAxisOffset, fontSize, isDark }) => (
+    <div
+        className="chart-bar-category-rail"
+        style={{
+            paddingLeft: yAxisOffset,
+            maxHeight: maxBandHeight,
+        }}
+    >
+        {rows.map((entry, index) => (
+            <div
+                key={`${entry?.name ?? 'row'}-${index}`}
+                className="chart-bar-category-label"
+                style={{ width: slotWidth, minWidth: slotWidth }}
+                title={String(entry?.name ?? '')}
+            >
+                <span
+                    className={isDark ? 'chart-bar-category-label__text chart-bar-category-label__text--dark' : 'chart-bar-category-label__text'}
+                    style={{ fontSize }}
+                >
+                    {String(entry?.name ?? '')}
+                </span>
+            </div>
+        ))}
+    </div>
 );
 
 /**
@@ -375,8 +553,42 @@ const extractChartRows = (payload) => {
 
 /** Above this category count, x-axis labels are thinned (API / high-cardinality charts). */
 const DENSE_X_AXIS_CATEGORY_CAP = 28;
+/** Minimum pixel width per bar slot when horizontal scroll is enabled. */
+const BAR_MIN_SLOT_WIDTH_PX = 38;
+/** Maximum pixel width per bar slot (keeps columns slim like Power BI). */
+const BAR_MAX_SLOT_WIDTH_PX = 46;
+/** Max bar thickness (px) when scroll mode is active. */
+const BAR_SCROLL_MAX_BAR_SIZE_PX = 22;
+/** Enable horizontal scroll when at least this many categories are present. */
+const BAR_SCROLL_MIN_CATEGORIES = 8;
 
-const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode = false, chartWidth = 0, focusView = false, dashboardCard = false } = {}) => {
+const computeBarHorizontalScroll = (chartData, containerWidth, { isDashboardCanvas = false, isFocusView = false } = {}) => {
+    const names = (Array.isArray(chartData) ? chartData : []).map((d) => String(d?.name ?? ''));
+    const count = names.length;
+    if (count === 0) return { enabled: false };
+
+    const viewportWidth = resolveBarPlotWidth(containerWidth, { isDashboardCanvas, isFocusView });
+    const maxLen = names.reduce((m, n) => Math.max(m, n.length), 0);
+    // Vertical labels (Power BI style) — slot width is for the bar band only, not label length.
+    const slotWidth = isFocusView
+        ? Math.min(52, BAR_MAX_SLOT_WIDTH_PX + 6)
+        : Math.min(BAR_MAX_SLOT_WIDTH_PX, Math.max(BAR_MIN_SLOT_WIDTH_PX, 40));
+    const scrollWidth = Math.max(viewportWidth, count * slotWidth);
+    const cramped = count * 24 > viewportWidth * 0.9;
+    const enabled = (count >= BAR_SCROLL_MIN_CATEGORIES && scrollWidth > viewportWidth + 2)
+        || (cramped && count >= 6);
+
+    return {
+        enabled,
+        scrollWidth,
+        viewportWidth,
+        slotWidth,
+        maxLen,
+        count,
+    };
+};
+
+const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode = false, chartWidth = 0, focusView = false, dashboardCard = false, scrollable = false } = {}) => {
     const names = (Array.isArray(chartData) ? chartData : []).map((d) => String(d?.name ?? ''));
     const count = names.length;
     const emptyLayout = {
@@ -398,6 +610,35 @@ const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode =
     const maxLen = names.reduce((m, n) => Math.max(m, n.length), 0);
     const plotWidth = chartWidth > 60 ? chartWidth : 0;
     const slotWidth = plotWidth > 0 ? plotWidth / count : 0;
+
+    if (scrollable) {
+        let fontSize = focusView ? 10 : 9;
+        if (maxLen > 34) fontSize = focusView ? 9 : 8;
+        if (maxLen > 48) fontSize = 7;
+        const effectiveSlot = slotWidth || BAR_MIN_SLOT_WIDTH_PX;
+        const cappedHeight = computeVerticalCategoryBandHeight(maxLen, fontSize, focusView, { dashboardCard });
+        const tickMargin = maxLen <= 6 ? 2 : (maxLen <= 14 ? 4 : 6);
+        return {
+            fullLabels: true,
+            tickMaxLen: maxLen,
+            charsPerSlot: maxLen,
+            slotWidth: effectiveSlot,
+            useAngledDashboard: false,
+            useHtmlCategoryRail: true,
+            angle: 0,
+            height: cappedHeight,
+            bottom: cappedHeight + tickMargin,
+            interval: 0,
+            fontSize,
+            textAnchor: 'start',
+            minTickGap: 0,
+            tickMargin,
+            footerGap: 2,
+            maxBarSize: BAR_SCROLL_MAX_BAR_SIZE_PX,
+            barCategoryGap: '22%',
+        };
+    }
+
     let fontSize = computeXAxisTickFontSize(count, slotWidth, focusView, maxLen, dashboardCard);
     let charsPerSlot = measureSlotCharCapacity(slotWidth, fontSize) || maxLen;
 
@@ -445,7 +686,9 @@ const computeXAxisLayout = (chartData, { expandModeActive = false, compactMode =
         : estimateAngledTickHeight(displayLen, angle, fontSize);
     const maxHeight = focusView
         ? 64
-        : (useAngledDashboard ? 48 : (compactMode ? 40 : (hasComposite ? 64 : 52)));
+        : (useAngledDashboard
+            ? (maxLen <= 6 ? 28 : (maxLen <= 12 ? 36 : 48))
+            : (compactMode ? (maxLen <= 8 ? 28 : 40) : (hasComposite ? 64 : 52)));
     height = Math.min(maxHeight, Math.max(angle === 0 ? fontSize + (focusView ? 8 : (dashboardCard ? 7 : 6)) : 20, height));
 
     const tickMargin = angle ? Math.min(4, Math.max(1, Math.round(height * 0.04))) : (focusView ? 2 : 1);
@@ -1140,7 +1383,7 @@ const resolveMeasureMetadata = (fieldName, measuresList, forceFallback = false) 
     return null;
 };
 
-const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection = null, onClick, onUpdate, onSelectVisual, onApplyCrossFilter, onClearCrossFilter, isExporting = false, hideInternalStats = false, hideChartTitle = false, isDragging = false, showZoomControls = false, zoomToolbarContainer = null, reportTheme = 'theme_default', reportNoFill = false, isViewOnly = false, reportCrossFilterRevision = '', legendHeaderSlotId = null, measures = [], schema = [] }) => {
+const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection = null, onClick, onUpdate, onSelectVisual, onApplyCrossFilter, onClearCrossFilter, isExporting = false, hideInternalStats = false, hideChartTitle = false, isDragging = false, showZoomControls = false, zoomToolbarContainer = null, reportTheme = 'theme_default', reportNoFill = false, isViewOnly = false, reportCrossFilterRevision = '', legendHeaderSlotId = null, measures = [], schema = [], previewRows = null }) => {
     const { isDark: globalIsDark } = useTheme();
     const isFocusView = Boolean(zoomToolbarContainer);
     const isCompactLayout = Boolean(zoomToolbarContainer || hideChartTitle);
@@ -1175,6 +1418,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     const MAX_ZOOM = 10;
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [dataFetching, setDataFetching] = useState(false);
     const [crossFilterRefreshing, setCrossFilterRefreshing] = useState(false);
     const baselineChartDataRef = useRef(null);
     /** Authoritative full dataset from unfiltered API/cache loads only. */
@@ -1522,6 +1766,28 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
 
     const hasActiveChartFilter = filterMapHasValues(chartFilterMap);
     const hasNoChartRows = !Array.isArray(processedChartData) || processedChartData.length === 0;
+
+    const isVisualConfigured = useMemo(() => {
+        const noDataTypes = new Set(['text', 'shape', 'button', 'image', 'influencers', 'qna', 'paginated_report', 'power_app', 'power_automate', 'smart_narrative']);
+        if (!fileId || noDataTypes.has(graphDefinition.graph_type)) return false;
+        const dimensionFields = graphDefinition?.options?.dimension_fields || [];
+        const measureFields = graphDefinition?.options?.measure_fields || [];
+        const cleanDimensions = (Array.isArray(dimensionFields) ? dimensionFields : [])
+            .filter((d) => typeof d === 'string' ? d.trim() !== '' : Boolean(d));
+        const cleanMeasures = (Array.isArray(measureFields) ? measureFields : [])
+            .filter((m) => m && m.column && String(m.column).trim() !== '');
+        const hasDimension = Boolean(
+            (graphDefinition.x_axis && String(graphDefinition.x_axis).trim())
+            || cleanDimensions.length > 0
+        );
+        const hasMeasure = Boolean(
+            (graphDefinition.y_axis && String(graphDefinition.y_axis).trim())
+            || cleanMeasures.length > 0
+        );
+        const needsDimension = graphDefinition.graph_type !== 'kpiCard' && graphDefinition.graph_type !== 'metricCard';
+        if (graphDefinition.graph_type === 'table') return hasDimension || hasMeasure;
+        return (needsDimension ? hasDimension : true) && hasMeasure;
+    }, [fileId, graphDefinition.graph_type, graphDefinition.x_axis, graphDefinition.y_axis, graphDefinition?.options?.dimension_fields, graphDefinition?.options?.measure_fields]);
     const isCrossFilterActive =
         reportCrossFilterEnabled || hasActiveChartFilter || filterMapHasValues(effectiveCrossFilterMap);
 
@@ -1589,13 +1855,15 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (!barTypes.includes(graphDefinition.graph_type)) return null;
         if (!Array.isArray(processedChartData) || processedChartData.length === 0) return null;
         const hierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
-        const plotWidth = resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
+        const scroll = computeBarHorizontalScroll(processedChartData, dimensions.width, { isDashboardCanvas, isFocusView });
+        const plotWidth = scroll.enabled ? scroll.scrollWidth : resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
         return computeXAxisLayout(processedChartData, {
             expandModeActive,
             compactMode: hierarchyActive || isDashboardCanvas,
             chartWidth: plotWidth,
             focusView: isFocusView,
             dashboardCard: isDashboardCanvas,
+            scrollable: scroll.enabled,
         });
     }, [
         graphDefinition.graph_type,
@@ -1604,6 +1872,19 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         expandModeActive,
         drillLevelIndex,
         drillPath.length,
+        isDashboardCanvas,
+        isFocusView,
+    ]);
+
+    const barHorizontalScroll = useMemo(() => {
+        const barTypes = ['bar', 'column', 'stackedColumn', 'histogram'];
+        if (!barTypes.includes(graphDefinition.graph_type)) return { enabled: false };
+        if (!Array.isArray(processedChartData) || processedChartData.length === 0) return { enabled: false };
+        return computeBarHorizontalScroll(processedChartData, dimensions.width, { isDashboardCanvas, isFocusView });
+    }, [
+        graphDefinition.graph_type,
+        processedChartData,
+        dimensions.width,
         isDashboardCanvas,
         isFocusView,
     ]);
@@ -2382,6 +2663,29 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             }
         };
 
+        const finishCrossFilterTransition = () => {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => setCrossFilterRefreshing(false));
+            });
+        };
+
+        const applyInstantPreviewData = () => {
+            if (!Array.isArray(previewRows) || previewRows.length === 0) return false;
+            if (isDrilling || hasSlicerFilters || hasQuickMeasureField) return false;
+            const preview = aggregateChartPreview(previewRows, {
+                dimensionFields: cleanDimensionFields,
+                measureFields: cleanMeasureFields,
+                xAxis: activeXAxis,
+                yAxis: y_axis,
+                aggregation,
+            });
+            if (!preview?.labels?.length) return false;
+            const transformed = coerceChartRows(previewRowsToChartData(preview));
+            if (transformed.length === 0) return false;
+            setData(transformed);
+            return true;
+        };
+
         if (fetchAbortRef.current) {
             fetchAbortRef.current.abort();
         }
@@ -2492,16 +2796,15 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 return () => abortController.abort();
             }
 
-            const finishCrossFilterTransition = () => {
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => setCrossFilterRefreshing(false));
-                });
-            };
-
             const fetchCustomData = async () => {
                 const startedAt = Date.now();
                 if (isSilentRefetch) { /* keep current chart visible */ }
                 else if (isSoftRefresh) setCrossFilterRefreshing(true);
+                else if (isVisualConfigured) {
+                    applyInstantPreviewData();
+                    setDataFetching(true);
+                    setLoading(false);
+                }
                 else setLoading(true);
                 setError(null);
                 setConfigHint(null);
@@ -2562,7 +2865,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     if (!abortController.signal.aborted) {
                         if (isSilentRefetch) setLoading(false);
                         else if (isSoftRefresh) finishCrossFilterTransition();
-                        else await waitMinLoader(startedAt);
+                        else if (!isVisualConfigured) await waitMinLoader(startedAt);
+                        setDataFetching(false);
                         if (!isSilentRefetch) setLoading(false);
                     }
                 }
@@ -2608,17 +2912,16 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             }
         }
 
-        const finishCrossFilterTransition = () => {
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => setCrossFilterRefreshing(false));
-            });
-        };
-
         const fetchData = async () => {
             const startedAt = Date.now();
             try {
                 if (isSilentRefetch) { /* keep current chart visible */ }
                 else if (isSoftRefresh) setCrossFilterRefreshing(true);
+                else if (isVisualConfigured) {
+                    applyInstantPreviewData();
+                    setDataFetching(true);
+                    setLoading(false);
+                }
                 else setLoading(true);
                 setConfigHint(null);
                 setError(null);
@@ -2732,7 +3035,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 if (!abortController.signal.aborted) {
                     if (isSilentRefetch) setLoading(false);
                     else if (isSoftRefresh) finishCrossFilterTransition();
-                    else await waitMinLoader(startedAt);
+                    else if (!isVisualConfigured) await waitMinLoader(startedAt);
+                    setDataFetching(false);
                     if (!isSilentRefetch) setLoading(false);
                 }
             }
@@ -2754,6 +3058,8 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         isDrillingActive,
         instantRestoreUnfilteredChart,
         getUnfilteredSnapshot,
+        isVisualConfigured,
+        previewRows,
     ]);
 
     const handleClick = useCallback((state, index, e) => {
@@ -3069,22 +3375,25 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         if (opts.sort === 'asc') chartData.sort((a, b) => a.value - b.value);
         if (opts.sort === 'desc') chartData.sort((a, b) => b.value - a.value);
 
+        const barChartTypes = ['bar', 'column', 'stackedColumn', 'histogram'];
+        const isBarFamily = barChartTypes.includes(graphDefinition.graph_type);
         const isHierarchyActive = drillLevelIndex > 0 || drillPath.length > 0 || expandModeActive;
-        const plotWidth = resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
+        const viewportPlotWidth = resolveBarPlotWidth(dimensions.width, { isDashboardCanvas, isFocusView });
+        const barScroll = isBarFamily ? barHorizontalScroll : { enabled: false };
+        const plotWidth = barScroll.enabled ? barScroll.scrollWidth : viewportPlotWidth;
         const xLayout = computeXAxisLayout(chartData, {
             expandModeActive,
             compactMode: isHierarchyActive || isDashboardCanvas,
             chartWidth: plotWidth,
             focusView: isFocusView,
             dashboardCard: isDashboardCanvas,
+            scrollable: barScroll.enabled,
         });
         const yAxisDomain = chartData.length > 0 && chartData.every((d) => Number(d?.value ?? 0) >= 0)
             ? [0, 'auto']
             : undefined;
         const totalValue = chartData.reduce((sum, entry) => sum + (entry.value || 0), 0);
 
-        const barChartTypes = ['bar', 'column', 'stackedColumn', 'histogram'];
-        const isBarFamily = barChartTypes.includes(graphDefinition.graph_type);
         const showBarDataLabels = isBarFamily
             && opts.showDataLabels !== false
             && !isMicro
@@ -3107,7 +3416,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             top: showBarDataLabels ? (isDashboardCanvas ? 14 : 22) : chartPlotMargin.top,
             right: chartPlotMargin.right,
             left: chartPlotMargin.left,
-            bottom: chartBottomMargin,
+            bottom: barScroll.enabled ? 2 : chartBottomMargin,
         };
         const yAxisTickWidth = showAxisTitles && yTitleText ? (isDashboardCanvas ? 48 : 58) : (isDashboardCanvas ? 42 : 50);
 
@@ -3133,6 +3442,21 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 </div>,
                 displayTitle
             ];
+        };
+
+        const createPortalTooltip = (formatter = tooltipFormatter, labelFormatter) => (tooltipProps) => (
+            <ChartPortalTooltip
+                {...tooltipProps}
+                formatter={formatter}
+                labelFormatter={labelFormatter}
+                containerRef={containerRef}
+            />
+        );
+
+        const tooltipPortalProps = {
+            shared: false,
+            allowEscapeViewBox: { x: true, y: true },
+            isAnimationActive: false,
         };
 
         const customVisual = installedVisuals.find(v => v.id === graphDefinition.graph_type);
@@ -3510,42 +3834,55 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             case 'bar':
             case 'column':
             case 'stackedColumn':
-            case 'histogram':
-                return (
+            case 'histogram': {
+                const scrollBarLayout = barScroll.enabled && xLayout.useHtmlCategoryRail;
+                const slotW = barHorizontalScroll.slotWidth || BAR_MIN_SLOT_WIDTH_PX;
+                const barChartElement = (
                     <BarChart
                         data={chartData}
                         style={{ cursor: 'pointer' }}
                         margin={barChartMargin}
                         className="chart-category-clickable"
+                        {...(scrollBarLayout && xLayout.barCategoryGap ? { barCategoryGap: xLayout.barCategoryGap } : {})}
                     >
                         {opts.showGrid && <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={isDark ? 0.2 : 0.1} stroke={gridColor} />}
                         {opts.showXAxis !== false && (
-                            <XAxis
-                                dataKey="name"
-                                fontSize={xLayout.fontSize}
-                                tickLine={false}
-                                axisLine={{ stroke: gridColor }}
-                                interval={xLayout.interval}
-                                minTickGap={xLayout.minTickGap}
-                                angle={xLayout.angle}
-                                textAnchor={xLayout.textAnchor}
-                                height={xLayout.height}
-                                tickMargin={xLayout.tickMargin}
-                                tick={{
-                                    fill: axisTickColor,
-                                    fontSize: xLayout.fontSize,
-                                    fontWeight: (isFocusView || isDashboardCanvas) ? 500 : 400,
-                                    dy: xLayout.angle ? 2 : 0,
-                                }}
-                                tickFormatter={(val) => formatXAxisTick(
-                                    val,
-                                    xLayout.fullLabels,
-                                    xLayout.tickMaxLen,
-                                    xLayout.charsPerSlot,
-                                    xLayout.slotWidth,
-                                    xLayout.fontSize,
-                                )}
-                            />
+                            scrollBarLayout ? (
+                                <XAxis
+                                    dataKey="name"
+                                    tick={false}
+                                    tickLine={false}
+                                    axisLine={{ stroke: gridColor }}
+                                    height={4}
+                                />
+                            ) : (
+                                <XAxis
+                                    dataKey="name"
+                                    fontSize={xLayout.fontSize}
+                                    tickLine={false}
+                                    axisLine={{ stroke: gridColor }}
+                                    interval={xLayout.interval}
+                                    minTickGap={xLayout.minTickGap}
+                                    angle={xLayout.angle}
+                                    textAnchor={xLayout.textAnchor}
+                                    height={xLayout.height}
+                                    tickMargin={xLayout.tickMargin}
+                                    tick={{
+                                        fill: axisTickColor,
+                                        fontSize: xLayout.fontSize,
+                                        fontWeight: (isFocusView || isDashboardCanvas) ? 500 : 400,
+                                        dy: xLayout.angle ? 2 : 0,
+                                    }}
+                                    tickFormatter={(val) => formatXAxisTick(
+                                        val,
+                                        xLayout.fullLabels,
+                                        xLayout.tickMaxLen,
+                                        xLayout.charsPerSlot,
+                                        xLayout.slotWidth,
+                                        xLayout.fontSize,
+                                    )}
+                                />
+                            )
                         )}
                         {opts.showYAxis !== false && (
                             <YAxis
@@ -3559,13 +3896,14 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={yAxisTitleLabel}
                             />
                         )}
-                        <Tooltip shared={false} cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} cursor={{ fill: 'transparent' }} content={createPortalTooltip()} />
                         <Bar
                             dataKey="value"
                             name={yAxisDisplayTitle}
                             radius={[4, 4, 0, 0]}
                             isAnimationActive={animation}
                             fill={mainColor}
+                            {...(scrollBarLayout && xLayout.maxBarSize ? { maxBarSize: xLayout.maxBarSize } : {})}
                             stackId={graphDefinition.graph_type === 'stackedColumn' ? 'a' : undefined}
                             className="chart-bar-marks"
                             onClick={handleRechartsCategoryClick}
@@ -3592,16 +3930,42 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     </BarChart>
                 );
 
+                if (scrollBarLayout) {
+                    return (
+                        <div className="chart-bar-scroll-layout">
+                            <div className="chart-bar-scroll-plot">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    {barChartElement}
+                                </ResponsiveContainer>
+                            </div>
+                            {opts.showXAxis !== false && (
+                                <BarCategoryLabelRail
+                                    rows={chartData}
+                                    slotWidth={slotW}
+                                    maxBandHeight={xLayout.height}
+                                    yAxisOffset={yAxisTickWidth}
+                                    fontSize={xLayout.fontSize}
+                                    isDark={isDark}
+                                />
+                            )}
+                        </div>
+                    );
+                }
+
+                return barChartElement;
+            }
+
             case 'sparkline': {
                 const sparkType = opts.sparklineType || 'area';
                 const sparkMargin = { top: 6, right: 6, left: 6, bottom: 6 };
                 const sparkTooltip = (
                     <Tooltip
-                        shared={false}
+                        {...tooltipPortalProps}
                         cursor={false}
-                        contentStyle={{ fontSize: '10px', padding: '4px 8px', borderRadius: '4px' }}
-                        formatter={(val) => [formatNumber(val), yAxisDisplayTitle || '']}
-                        labelFormatter={(label) => String(label ?? '')}
+                        content={createPortalTooltip(
+                            (val) => [formatNumber(val), yAxisDisplayTitle || ''],
+                            (l) => String(l ?? ''),
+                        )}
                     />
                 );
 
@@ -3728,7 +4092,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 10, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '4px', overflow: 'visible' }} />}
                         <Line
                             type="monotone"
@@ -3789,7 +4153,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 10, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '4px', overflow: 'visible' }} />}
                         <Area
                             type="monotone"
@@ -4387,17 +4751,6 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     );
                 };
 
-
-
-                const pieSliceTooltipFormatter = (value, name, item) => {
-                    const entry = item?.payload ?? item;
-                    const rawVal = Number(entry?._rawValue ?? value) || 0;
-                    const pct = pieChartTotal > 0
-                        ? ((Math.abs(rawVal) / pieChartTotal) * 100).toFixed(1)
-                        : '0.0';
-                    return [formatNumber(rawVal), `${name ?? entry?.name ?? ''} (${pct}%)`];
-                };
-
                 // 6. Center label for donut (hover shows slice; default shows total)
                 const centerLabel = pieHoverSegment
                     ? {
@@ -4554,18 +4907,16 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 const chartPortion = (
                     <PieChart margin={pieChartMargin}>
                         <Tooltip
-                            shared={false}
-                            content={renderPieDonutTooltip}
-                            formatter={pieSliceTooltipFormatter}
-                            wrapperStyle={{ zIndex: 60, outline: 'none', pointerEvents: 'none' }}
-                            contentStyle={{
-                                background: 'transparent',
-                                border: 'none',
-                                padding: 0,
-                                boxShadow: 'none',
+                            {...tooltipPortalProps}
+                            content={(tooltipProps) => {
+                                const inner = renderPieDonutTooltip(tooltipProps);
+                                if (!inner) return null;
+                                return (
+                                    <ChartPortalTooltip {...tooltipProps} containerRef={containerRef}>
+                                        {inner}
+                                    </ChartPortalTooltip>
+                                );
                             }}
-                            itemStyle={{ color: '#e2e8f0' }}
-                            labelStyle={{ color: '#94a3b8', fontWeight: 600 }}
                         />
                         <Pie
                             key={`pie-${scShowAll ? 'all' : `top${scTopN}`}-${scGroupOthers ? 'grp' : 'flat'}-${pieChartData.length}`}
@@ -4761,7 +5112,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             dot={<CustomRadarDot hoveredName={radarHoveredName} selectedFilters={radarActiveFilters} mainColor={mainColor} formatNumber={formatNumber} />}
                             activeDot={false}
                         />
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} verticalAlign="bottom" height={36} />}
                     </RadarChart>
                 );
@@ -4784,7 +5135,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             ))}
                         </Pie>
                         <PolarGrid opacity={0.1} />
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} verticalAlign="bottom" height={36} />}
                     </PieChart>
                 );
@@ -4801,7 +5152,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         {chartData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={mainColor} fillOpacity={1 - (index / chartData.length) * 0.6} />
                         ))}
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                     </Treemap>
                 );
             case 'composed':
@@ -4833,7 +5184,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 10, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         {showEmbeddedRechartsLegend && <Legend content={renderInteractiveLegend} wrapperStyle={{ paddingTop: '4px', overflow: 'visible' }} />}
                         <Bar dataKey="value" name={yAxisDisplayTitle} barSize={20} fill={mainColor} opacity={0.4} radius={[4, 4, 0, 0]} onClick={handleRechartsCategoryClick} />
                         <Line type="monotone" dataKey="value" name={yAxisDisplayTitle} stroke={mainColor} strokeWidth={3} dot={{ r: 4 }} onClick={handleRechartsCategoryClick} />
@@ -4845,7 +5196,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.1} stroke={gridColor} />
                         <XAxis type="number" hide />
                         <YAxis dataKey="name" type="category" fontSize={8} width={60} tick={{ fill: axisTickColor, fontSize: 8 }} />
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         <Bar dataKey="value" isAnimationActive={animation} onClick={handleRechartsCategoryClick}>
                             {data.map((entry, index) => (
                                 <Cell
@@ -4871,7 +5222,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         node={{ stroke: '#fff', strokeWidth: 1, fill: mainColor }}
                         link={{ stroke: mainColor, fillOpacity: 0.2 }}
                     >
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                     </Sankey>
                 );
             case 'waterfall':
@@ -4880,7 +5231,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} stroke={gridColor} />
                         <XAxis dataKey="name" fontSize={8} tick={{ fill: axisTickColor, fontSize: 8 }} height={35} label={!isMicro ? { value: opts.xLabel || graphDefinition.x_axis, position: 'insideBottom', offset: -10, fontSize: 9, fill: axisTitleColor, fontWeight: 600 } : undefined} />
                         <YAxis tickFormatter={(v) => formatNumber(v, 'axis')} fontSize={8} tick={{ fill: axisTickColor, fontSize: 8 }} width={50} label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined} />
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         <Bar dataKey="base" stackId="a" fill="transparent" />
                         <Bar dataKey="value" stackId="a" onClick={handleRechartsCategoryClick}>
                             {chartData.map((entry, index) => (
@@ -4916,7 +5267,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 <Cell key={`cell-${index}`} fill={palette[index % palette.length]} />
                             ))}
                         </RadialBar>
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                         {showEmbeddedRechartsLegend && (
                             <Legend content={renderInteractiveLegend} layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ overflow: 'visible' }} />
                         )}
@@ -4986,7 +5337,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip shared={false} cursor={{ fill: 'transparent' }} formatter={tooltipFormatter} contentStyle={{ backgroundColor: tooltipBg, color: tooltipText, borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }} />
+                        <Tooltip {...tooltipPortalProps} cursor={{ fill: 'transparent' }} content={createPortalTooltip()} />
                         <Line type="stepBefore" dataKey="value" name={yAxisDisplayTitle} stroke={mainColor} strokeWidth={3} dot={{ r: 3, fill: mainColor, strokeWidth: 2, stroke: isDark ? 'var(--bg-elevated)' : '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={animation} />
                     </LineChart>
                 );
@@ -5014,12 +5365,16 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: opts.yLabel || graphDefinition.y_axis || 'Min-Max Range', angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip shared={false} cursor={{ fill: isDark ? 'var(--bg-tertiary)' : '#f1f5f9' }} formatter={(val) => {
-                            if (Array.isArray(val)) {
-                                return `${formatNumber(val[0])} - ${formatNumber(val[1])}`
-                            }
-                            return formatNumber(val);
-                        }} contentStyle={{ backgroundColor: tooltipBg, color: tooltipText, borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }} />
+                        <Tooltip
+                            {...tooltipPortalProps}
+                            cursor={{ fill: isDark ? 'var(--bg-tertiary)' : '#f1f5f9' }}
+                            content={createPortalTooltip((val) => {
+                                if (Array.isArray(val)) {
+                                    return `${formatNumber(val[0])} - ${formatNumber(val[1])}`;
+                                }
+                                return formatNumber(val);
+                            })}
+                        />
                         <Bar
                             dataKey="value"
                             fill={mainColor}
@@ -5062,7 +5417,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 label={!isMicro ? { value: yAxisDisplayTitle, angle: -90, position: 'insideLeft', fontSize: 9, fill: axisTitleColor, fontWeight: 600, offset: 0 } : undefined}
                             />
                         )}
-                        <Tooltip shared={false} cursor={{ fill: '#f1f5f9' }} formatter={tooltipFormatter} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Tooltip {...tooltipPortalProps} cursor={{ fill: '#f1f5f9' }} content={createPortalTooltip()} />
                         <Area type="monotone" dataKey="value" name="Volume/Area" fill={mainColor} fillOpacity={0.2} stroke="none" isAnimationActive={animation} />
                         <Line type="monotone" dataKey="value" name={opts.yLabel || graphDefinition.y_axis || 'Trend'} stroke={palette[1] || mainColor} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} isAnimationActive={animation} onClick={handleRechartsCategoryClick} />
                     </ComposedChart>
@@ -5073,86 +5428,63 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                 const scaleW = kpiWidth / 240;
                 const scaleH = kpiHeight / 130;
                 const scale = Math.min(scaleW, scaleH);
+                const kpiMeasureMeta = resolveMeasureMetadata(graphDefinition.y_axis, measures, true);
 
                 if (chartData.length > 1) {
-                    const cols = Math.min(3, chartData.length);
-                    const itemScale = scale * 0.95;
+                    const gridLayout = computeKpiComparisonLayout(chartData.length, kpiWidth, kpiHeight, {
+                        isDashboardCanvas,
+                        isFocusView,
+                    });
                     return (
-                        <div 
-                            className="kpi-comparison-grid"
+                        <div
+                            className={`kpi-comparison-grid${isDashboardCanvas ? ' kpi-comparison-grid--dashboard' : ''}${isFocusView ? ' kpi-comparison-grid--focus' : ''}`}
                             style={{
-                                display: 'grid',
-                                gridTemplateColumns: `repeat(${cols}, 1fr)`,
-                                gap: '12px',
-                                width: '100%',
-                                height: '100%',
-                                padding: '8px',
-                                boxSizing: 'border-box',
-                                overflowY: 'auto'
+                                '--kpi-grid-cols': gridLayout.cols,
+                                '--kpi-grid-gap': `${gridLayout.gap}px`,
+                                '--kpi-grid-pad': `${gridLayout.padding}px`,
+                                '--kpi-tile-min-h': `${gridLayout.minTileH}px`,
                             }}
                         >
                             {chartData.map((entry, idx) => {
-                                const solved = resolveMeasureMetadata(entry.name, measures, true);
-                                const displayVal = formatCustomMeasureValue(entry.value, solved);
-                                const entryLabel = solved.displayName || entry.name;
-                                const entryDesc = solved.description || '';
-                                
+                                const entryLabel = String(entry?.name ?? '').trim() || '—';
+                                const displayVal = formatCustomMeasureValue(
+                                    entry.value,
+                                    kpiMeasureMeta || resolveMeasureMetadata(entry.name, measures, true),
+                                );
+                                const entryDesc = kpiMeasureMeta?.description
+                                    || `Sum of ${entryLabel}`;
+
                                 return (
-                                    <div 
-                                        key={idx}
-                                        style={{
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            justifyContent: 'space-between',
-                                            padding: '12px',
-                                            boxSizing: 'border-box',
-                                            background: isDark ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)' : 'linear-gradient(135deg, rgba(248, 250, 252, 0.9) 0%, rgba(241, 245, 249, 1) 100%)',
-                                            border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-                                            borderRadius: '8px',
-                                            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.01)',
-                                            minWidth: 0,
-                                            overflow: 'hidden'
-                                        }}
+                                    <div
+                                        key={`${entryLabel}-${idx}`}
+                                        className="kpi-comparison-tile"
+                                        title={`${entryLabel}: ${displayVal}`}
                                     >
-                                        <div 
-                                            style={{
-                                                fontSize: `${Math.max(9, Math.min(13, Math.round(10 * itemScale)))}px`,
-                                                fontWeight: 600,
-                                                color: isDark ? '#94a3b8' : '#64748b',
-                                                textTransform: 'uppercase',
-                                                whiteSpace: 'nowrap',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis'
-                                            }}
+                                        <div
+                                            className="kpi-comparison-tile__label"
+                                            style={{ fontSize: `${gridLayout.labelSize}px` }}
                                             title={entryLabel}
                                         >
                                             {entryLabel}
                                         </div>
-                                        <div 
+                                        <div
+                                            className="kpi-comparison-tile__value"
                                             style={{
                                                 color: palette[idx % palette.length] || mainColor,
-                                                fontSize: `${Math.max(16, Math.min(28, Math.round(20 * itemScale)))}px`,
-                                                fontWeight: 700,
-                                                margin: '4px 0',
-                                                whiteSpace: 'nowrap',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis'
+                                                fontSize: `${gridLayout.valueSize}px`,
                                             }}
                                         >
                                             {displayVal}
                                         </div>
-                                        <div 
-                                            style={{
-                                                fontSize: `${Math.max(8, Math.min(11, Math.round(9 * itemScale)))}px`,
-                                                color: isDark ? '#64748b' : '#94a3b8',
-                                                whiteSpace: 'nowrap',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis'
-                                            }}
-                                            title={entryDesc}
-                                        >
-                                            {entryDesc}
-                                        </div>
+                                        {gridLayout.showDesc ? (
+                                            <div
+                                                className="kpi-comparison-tile__desc"
+                                                style={{ fontSize: `${gridLayout.descSize}px` }}
+                                                title={entryDesc}
+                                            >
+                                                {entryDesc}
+                                            </div>
+                                        ) : null}
                                     </div>
                                 );
                             })}
@@ -5410,7 +5742,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                             />
                         )}
                         <ZAxis type="number" range={[100, 1000]} />
-                        <Tooltip shared={false} cursor={{ strokeDasharray: '3 3' }} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} cursor={{ strokeDasharray: '3 3' }} content={createPortalTooltip()} />
                         <Scatter name={yAxisDisplayTitle} data={chartData} fill={mainColor} fillOpacity={0.6}>
                             {chartData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={mainColor} />
@@ -5455,7 +5787,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                                 <Cell key={`cell-${index}`} fill={mainColor} fillOpacity={0.6 + (index / chartData.length) * 0.4} />
                             ))}
                         </Pie>
-                        <Tooltip shared={false} formatter={tooltipFormatter} />
+                        <Tooltip {...tooltipPortalProps} content={createPortalTooltip()} />
                     </PieChart>
                 );
             case 'boxPlot':
@@ -5548,28 +5880,6 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         }
     };
 
-    const getStats = () => {
-        if (!data || !Array.isArray(data)) return null;
-        if (graphDefinition.graph_type === 'table') return null;
-        if (data.length === 0) return null;
-
-        // Use parseFloat to handle potential string formatted numbers
-        const validValues = data.map(d => {
-            const val = typeof d.value === 'string' ? parseFloat(d.value.replace(/,/g, '')) : d.value;
-            return val;
-        }).filter(v => typeof v === 'number' && !isNaN(v));
-
-        if (validValues.length === 0) return null;
-
-        const sum = validValues.reduce((a, b) => a + b, 0);
-        const avg = sum / validValues.length;
-        const max = Math.max(...validValues);
-        const min = Math.min(...validValues);
-
-        return { sum, avg, max, min };
-    };
-
-    const stats = getStats();
     const zoomableVisualTypes = new Set([
         'bar', 'column', 'stackedColumn', 'histogram',
         'line', 'area', 'pie', 'donut', 'scatter', 'radar',
@@ -5625,157 +5935,41 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
         return 'No data available for this visual configuration.';
     };
 
-    const renderChartMessage = (message, className = 'chart-empty') => {
-        const isCustomEmpty = [
-            'Add a Measure to see values',
-            'Add a Date field to view trends',
-            'Add a Dimension to compare results',
-            'No data available for this metric.'
-        ].includes(message);
-
-        if (isCustomEmpty) {
-            const activeTheme = reportTheme || graphDefinition.options?.reportTheme || 'theme_default';
-            const isDarkTheme = globalIsDark || activeTheme === 'theme_dark' || className.includes('dark');
-            let icon = null;
-            let title = message;
-            let subtitle = 'Drag a field from the Fields Pane and drop it here to visualize.';
-            let borderThemeColor = '#cbd5e1';
-            let iconBg = '#f1f5f9';
-
-            if (message === 'Add a Measure to see values') {
-                borderThemeColor = isDarkTheme ? '#1e3a8a' : '#bfdbfe';
-                iconBg = isDarkTheme ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.08)';
-                icon = (
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="4" y1="9" x2="20" y2="9"></line>
-                        <line x1="4" y1="15" x2="20" y2="15"></line>
-                        <line x1="10" y1="3" x2="8" y2="21"></line>
-                        <line x1="16" y1="3" x2="14" y2="21"></line>
-                    </svg>
-                );
-            } else if (message === 'Add a Date field to view trends') {
-                borderThemeColor = isDarkTheme ? '#831843' : '#fbcfe8';
-                iconBg = isDarkTheme ? 'rgba(236, 72, 153, 0.15)' : 'rgba(236, 72, 153, 0.08)';
-                icon = (
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ec4899" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                    </svg>
-                );
-            } else if (message === 'Add a Dimension to compare results') {
-                borderThemeColor = isDarkTheme ? '#064e3b' : '#a7f3d0';
-                iconBg = isDarkTheme ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.08)';
-                icon = (
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="20" x2="18" y2="10"></line>
-                        <line x1="12" y1="20" x2="12" y2="4"></line>
-                        <line x1="6" y1="20" x2="6" y2="14"></line>
-                    </svg>
-                );
-            } else if (message === 'No data available for this metric.') {
-                borderThemeColor = isDarkTheme ? '#475569' : '#cbd5e1';
-                iconBg = isDarkTheme ? 'rgba(148, 163, 184, 0.15)' : 'rgba(148, 163, 184, 0.08)';
-                icon = (
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="4" y1="9" x2="20" y2="9"></line>
-                        <line x1="4" y1="15" x2="20" y2="15"></line>
-                        <line x1="10" y1="3" x2="8" y2="21"></line>
-                        <line x1="16" y1="3" x2="14" y2="21"></line>
-                    </svg>
-                );
-                subtitle = 'The semantic model returned no values or failed to calculate this measure.';
-            }
-
-            return (
-                <div 
-                    className="chart-wrapper chart-wrapper--state"
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '100%',
-                        height: '100%',
-                        padding: '16px',
-                        boxSizing: 'border-box'
-                    }}
-                >
-                    <div 
-                        className="bi-smart-empty-card"
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            textAlign: 'center',
-                            width: '100%',
-                            height: '100%',
-                            border: `2px dashed ${borderThemeColor}`,
-                            borderRadius: '12px',
-                            padding: '24px 16px',
-                            backgroundColor: isDarkTheme ? 'rgba(15, 23, 42, 0.4)' : 'rgba(248, 250, 252, 0.5)',
-                            transition: 'all 0.3s ease',
-                            cursor: 'default',
-                            boxSizing: 'border-box',
-                            userSelect: 'none'
-                        }}
-                    >
-                        <div 
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: '56px',
-                                height: '56px',
-                                borderRadius: '50%',
-                                backgroundColor: iconBg,
-                                marginBottom: '16px',
-                                transition: 'transform 0.25s ease'
-                            }}
-                        >
-                            {icon}
-                        </div>
-                        <h4 
-                            style={{
-                                margin: '0 0 8px 0',
-                                fontSize: '14px',
-                                fontWeight: '600',
-                                color: isDarkTheme ? '#f1f5f9' : '#1e293b'
-                            }}
-                        >
-                            {title}
-                        </h4>
-                        <p 
-                            style={{
-                                margin: 0,
-                                fontSize: '11px',
-                                color: isDarkTheme ? '#94a3b8' : '#64748b',
-                                lineHeight: '1.4',
-                                maxWidth: '280px'
-                            }}
-                        >
-                            {subtitle}
-                        </p>
-                    </div>
-                </div>
-            );
+    const getDashboardEmptyHint = () => {
+        const hasMeasures = Boolean(graphDefinition.y_axis) || (Array.isArray(graphDefinition.options?.measure_fields) && graphDefinition.options.measure_fields.length > 0);
+        const hasDimensions = Boolean(graphDefinition.x_axis) || (Array.isArray(graphDefinition.options?.dimensions) && graphDefinition.options.dimensions.length > 0)
+            || (Array.isArray(graphDefinition.options?.dimension_fields) && graphDefinition.options.dimension_fields.length > 0);
+        if (!hasMeasures && !hasDimensions) {
+            return 'Add measures and dimensions to visualize data.';
         }
-
-        return (
-            <div className="chart-wrapper chart-wrapper--state">
-                <div className={className}>{message}</div>
-            </div>
-        );
+        if (!hasMeasures) {
+            return 'Add a measure to visualize data.';
+        }
+        if (!hasDimensions) {
+            return 'Add a dimension to visualize data.';
+        }
+        return 'Add measures and dimensions to visualize data.';
     };
 
+    const renderChartMessage = (message, className = 'chart-empty') => (
+        <div className="chart-wrapper chart-wrapper--state">
+            <div className={className}>{message}</div>
+        </div>
+    );
+
+    const renderDashboardEmptyVisual = () => renderChartMessage(getDashboardEmptyHint(), 'chart-empty chart-empty--canvas');
+
     const noDataRenderTypes = new Set(['text', 'shape', 'button', 'image', 'influencers', 'qna', 'paginated_report', 'power_app', 'power_automate', 'smart_narrative']);
+    const isFetchingChartData = loading || crossFilterRefreshing || dataFetching;
     if (!noDataRenderTypes.has(graphDefinition.graph_type)) {
-        if (loading && !data && !crossFilterRefreshing) return renderChartMessage('Loading chart...', 'chart-loading');
-        if (error && !data && !crossFilterRefreshing) return renderChartMessage(error, 'chart-empty chart-error');
-        if (configHint && !data && !crossFilterRefreshing) return renderChartMessage(configHint);
-        if (hasNoChartRows) {
-            if (loading || crossFilterRefreshing) return renderChartMessage('Loading chart...', 'chart-loading');
+        if (isDashboardCanvas && !isVisualConfigured && hasNoChartRows && !crossFilterRefreshing) {
+            return renderDashboardEmptyVisual();
+        }
+        const showBlockingLoader = isFetchingChartData && !isVisualConfigured;
+        if (showBlockingLoader && hasNoChartRows && !crossFilterRefreshing) return renderChartMessage('Loading chart...', 'chart-loading');
+        if (error && hasNoChartRows && !crossFilterRefreshing) return renderChartMessage(error, 'chart-empty chart-error');
+        if (configHint && hasNoChartRows && !crossFilterRefreshing && !isVisualConfigured) return renderChartMessage(configHint);
+        if (hasNoChartRows && !isFetchingChartData) {
             return renderChartMessage(getActionableEmptyMessage());
         }
     } else {
@@ -5789,6 +5983,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
     const isKpiCard = graphDefinition.graph_type === 'kpiCard';
     const isSparkline = graphDefinition.graph_type === 'sparkline';
     const isCardVisual = isKpiCard || isMetricCard;
+    const isKpiComparisonGrid = isKpiCard && Array.isArray(processedChartData) && processedChartData.length > 1;
     const hideTopLegendOnCard = (isMetricCard || isKpiCard) && hideInternalStats;
 
     const showCompactLegend =
@@ -5877,7 +6072,7 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
             {compactLegendPortal}
             <div
                 ref={containerRef}
-                className={`chart-wrapper ${isDark ? 'dark-theme ' : ''}${isCompactLayout ? 'chart-wrapper--compact' : ''}${isFocusView ? ' chart-wrapper--focus' : ''}${isBarChartVisual ? ' chart-wrapper--bar' : ''}${isPieDonutChart ? ' chart-wrapper--pie-donut' : ''}${isPieDonutChart && scShowLabels ? ' chart-wrapper--pie-labels-visible' : ''}${isHierarchyActive ? ' chart-wrapper--drill-active' : ''}${hasActiveChartFilter ? ' chart-wrapper--filtering' : ''}${crossFilterRefreshing ? ' chart-wrapper--crossfilter-refresh' : ''}${isMetricCard ? ' chart-wrapper--metric-card' : ''}${isKpiCard ? ' chart-wrapper--kpi-card' : ''}${isSparkline ? ' chart-wrapper--sparkline' : ''}${legendInHeader ? ' chart-wrapper--legend-in-header' : ''}${chartNoFill ? ' chart-wrapper--no-fill' : ''}`}
+                className={`chart-wrapper ${isDark ? 'dark-theme ' : ''}${isCompactLayout ? 'chart-wrapper--compact' : ''}${isFocusView ? ' chart-wrapper--focus' : ''}${isBarChartVisual ? ' chart-wrapper--bar' : ''}${barHorizontalScroll?.enabled ? ' chart-wrapper--bar-scroll' : ''}${isPieDonutChart ? ' chart-wrapper--pie-donut' : ''}${isPieDonutChart && scShowLabels ? ' chart-wrapper--pie-labels-visible' : ''}${isHierarchyActive ? ' chart-wrapper--drill-active' : ''}${hasActiveChartFilter ? ' chart-wrapper--filtering' : ''}${crossFilterRefreshing ? ' chart-wrapper--crossfilter-refresh' : ''}${dataFetching ? ' chart-wrapper--data-fetching' : ''}${isMetricCard ? ' chart-wrapper--metric-card' : ''}${isKpiCard ? ' chart-wrapper--kpi-card' : ''}${isSparkline ? ' chart-wrapper--sparkline' : ''}${legendInHeader ? ' chart-wrapper--legend-in-header' : ''}${chartNoFill ? ' chart-wrapper--no-fill' : ''}`}
                 style={{
                     position: 'relative',
                     width: '100%',
@@ -5887,14 +6082,21 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     backgroundColor: chartFillBackground,
                     padding: isMicro ? '2px' : (isCompactLayout || isCardVisual ? '0' : '4px'),
                     borderRadius: chartNoFill ? '0' : '4px',
-                    overflow: (isPieDonutChart && scShowLabels && !isDashboardCanvas) ? 'visible' : 'hidden',
+                    overflow: (isPieDonutChart && scShowLabels && !isDashboardCanvas)
+                        ? 'visible'
+                        : (isBarChartVisual ? 'visible' : 'hidden'),
                 }}>
                 {chartNotice && (
                     <div className="chart-inline-notice" role="status" aria-live="polite">
                         {chartNotice}
                     </div>
                 )}
-                {canDrill && (
+                {dataFetching && hasNoChartRows && (
+                    <div className="chart-fetch-overlay" role="status" aria-live="polite" aria-label="Loading chart data">
+                        <span className="chart-fetch-overlay__spinner" aria-hidden="true" />
+                    </div>
+                )}
+                {canDrill && !isDashboardCanvas && (
                     <DrillDownPanel
                         dimensionFields={effectiveDimFields}
                         activeLevelIndex={drillLevelIndex}
@@ -5986,26 +6188,6 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         {compactLegendElement}
                     </div>
                 )}
-                {(!hideInternalStats && stats) && (
-                    <div className="chart-kpi-row">
-                        <div className="chart-kpi-item">
-                            <span className="kpi-label">TOTAL</span>
-                            <span className="kpi-value">{Math.round(stats.sum).toLocaleString()}</span>
-                        </div>
-                        <div className="chart-kpi-item">
-                            <span className="kpi-label">AVG</span>
-                            <span className="kpi-value">{stats.avg.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
-                        </div>
-                        <div className="chart-kpi-item">
-                            <span className="kpi-label">MAX</span>
-                            <span className="kpi-value">{stats.max.toLocaleString()}</span>
-                        </div>
-                        <div className="chart-kpi-item">
-                            <span className="kpi-label">MIN</span>
-                            <span className="kpi-value">{stats.min.toLocaleString()}</span>
-                        </div>
-                    </div>
-                )}
                 <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                     {zoomToolbarNode && !zoomToolbarContainer && zoomToolbarNode}
                     {zoomToolbarNode && zoomToolbarContainer && createPortal(zoomToolbarNode, zoomToolbarContainer)}
@@ -6050,14 +6232,18 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                     )}
                     <div
                         ref={zoomViewportRef}
-                        className={`chart-zoom-viewport${isCardVisual ? ' chart-zoom-viewport--card' : ''}${crossFilterRefreshing ? ' chart-zoom-viewport--refreshing' : ''}${hasVisualCategoryFilter || hasActiveChartFilter ? ' chart-zoom-viewport--filtered' : ''}${isPieDonutChart && scShowLabels ? ' chart-zoom-viewport--pie-labels' : ''}`}
+                        className={`chart-zoom-viewport${isCardVisual ? ' chart-zoom-viewport--card' : ''}${crossFilterRefreshing ? ' chart-zoom-viewport--refreshing' : ''}${hasVisualCategoryFilter || hasActiveChartFilter ? ' chart-zoom-viewport--filtered' : ''}${isPieDonutChart && scShowLabels ? ' chart-zoom-viewport--pie-labels' : ''}${barHorizontalScroll?.enabled ? ' chart-zoom-viewport--bar-scroll' : ''}`}
                         style={{
                             flex: 1,
                             minHeight: 0,
                             width: '100%',
-                            overflow: canZoom && zoomLevel > 1
+                            overflow: (canZoom && zoomLevel > 1)
                                 ? 'auto'
-                                : (isPieDonutChart && scShowLabels && !isDashboardCanvas ? 'visible' : 'hidden'),
+                                : (isKpiComparisonGrid
+                                    ? 'auto'
+                                    : ((isPieDonutChart && scShowLabels && !isDashboardCanvas) || isBarChartVisual
+                                        ? 'visible'
+                                        : 'hidden')),
                         }}
                         onMouseDown={(e) => {
                             if (e.target?.closest?.('.sc-controls-bar, .sc-toggle, .sc-slider-label, input[type="checkbox"], input[type="range"]')) {
@@ -6077,6 +6263,27 @@ const DynamicChart = ({ fileId, graphDefinition: propGraphDefinition, selection 
                         ) : isPieDonutChart ? (
                             <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: 0 }}>
                                 {renderChart()}
+                            </div>
+                        ) : (isBarChartVisual && barHorizontalScroll?.enabled) ? (
+                            <div
+                                className="chart-bar-hscroll"
+                                style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    minHeight: 0,
+                                    overflowX: 'auto',
+                                    overflowY: 'hidden',
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        width: barHorizontalScroll.scrollWidth,
+                                        minWidth: barHorizontalScroll.scrollWidth,
+                                        height: '100%',
+                                    }}
+                                >
+                                    {renderChart()}
+                                </div>
                             </div>
                         ) : (
                             <div style={{ width: canZoom ? `${zoomLevel * 100}%` : '100%', height: canZoom ? `${zoomLevel * 100}%` : '100%', minWidth: '100%', minHeight: '100%' }}>

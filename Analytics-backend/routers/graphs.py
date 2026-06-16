@@ -19,6 +19,8 @@ _GRAPH_QUERY_CACHE = {}
 _GRAPH_QUERY_CACHE_LOCK = threading.Lock()
 _GRAPH_QUERY_CACHE_TTL_SECONDS = 600
 _GRAPH_QUERY_CACHE_MAX_SIZE = 500
+_SEMANTIC_MEASURES_CACHE = {}
+_SEMANTIC_MEASURES_CACHE_LOCK = threading.Lock()
 
 
 def clear_graph_cache_for_file(file_id: str) -> int:
@@ -263,6 +265,51 @@ def _set_cached_graph_response(cache_key: str, value):
             _GRAPH_QUERY_CACHE.pop(oldest_key, None)
         _GRAPH_QUERY_CACHE[cache_key] = (now, value)
 
+
+def _load_semantic_measures(file_id: str, db, file_record) -> list:
+    with _SEMANTIC_MEASURES_CACHE_LOCK:
+        cached = _SEMANTIC_MEASURES_CACHE.get(file_id)
+        if cached is not None:
+            return cached
+
+    from models import SemanticMeasure as SemanticMeasureModel
+    sm_records = db.query(SemanticMeasureModel).filter(SemanticMeasureModel.file_id == file_id).all()
+    if sm_records:
+        semantic_measures = [{
+            "name": m.name,
+            "expression": m.expression,
+            "format": m.format,
+            "display_name": m.display_name,
+            "description": m.description,
+            "category": m.category,
+        } for m in sm_records]
+    else:
+        semantic_measures = (file_record.model_config or {}).get("measures") or []
+
+    with _SEMANTIC_MEASURES_CACHE_LOCK:
+        _SEMANTIC_MEASURES_CACHE[file_id] = semantic_measures
+    return semantic_measures
+
+
+def _persist_graph_cache_async(graph_def_id: str, safe_result: dict) -> None:
+    if not graph_def_id or not _has_non_empty_chart_payload(safe_result):
+        return
+
+    def _worker():
+        db = SessionLocal()
+        try:
+            graph_def = db.query(GraphDefinition).filter(GraphDefinition.id == graph_def_id).first()
+            if graph_def is not None:
+                graph_def.cached_data = safe_result
+                db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 @router.get("/{file_id}/graphs")
 def get_recommended_graphs(file_id: str, db: Session = Depends(get_db)):
     graphs = db.query(GraphDefinition).filter(GraphDefinition.file_id == file_id).all()
@@ -276,6 +323,32 @@ def get_recommended_graphs(file_id: str, db: Session = Depends(get_db)):
             s["options"] = _json_safe(s["options"])
         safe.append(s)
     return safe
+
+@router.post("/{file_id}/warm-graph-cache")
+def warm_graph_cache(file_id: str, db: Session = Depends(get_db)):
+    """Pre-load the report dataframe into memory so the first chart renders quickly."""
+    file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    started = time.time()
+    rows = 0
+    try:
+        from services.model_engine import ModelEngine
+        df = ModelEngine.load_report_dataframe(file_id, db)
+        if df is not None and not df.empty:
+            rows = len(df)
+        elif file_record.file_path:
+            df = DataProcessor.read_file(file_record.file_path)
+            rows = len(df) if df is not None and not df.empty else 0
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to warm cache: {exc}")
+
+    return {
+        "status": "ok",
+        "rows": rows,
+        "elapsed_ms": int((time.time() - started) * 1000),
+    }
 
 @router.post("/{file_id}/graph-data")
 def get_graph_data(
@@ -398,17 +471,8 @@ def get_graph_data(
                     quarter=request.quarter_filter
                 )
 
-        # Load semantic measures from the dedicated SemanticMeasure table (correct source).
-        # The legacy model_config["measures"] path is no longer populated by the Measure Designer.
-        from models import SemanticMeasure as SemanticMeasureModel
-        sm_records = db.query(SemanticMeasureModel).filter(SemanticMeasureModel.file_id == file_id).all()
-        if sm_records:
-            semantic_measures = [{"name": m.name, "expression": m.expression, "format": m.format,
-                                   "display_name": m.display_name, "description": m.description,
-                                   "category": m.category} for m in sm_records]
-        else:
-            # Fallback to legacy model_config path for backwards compatibility
-            semantic_measures = (file_record.model_config or {}).get("measures") or []
+        # Load semantic measures (cached per file for fast repeat chart queries).
+        semantic_measures = _load_semantic_measures(file_id, db, file_record)
 
         from services.graph_engine import GraphEngine
         result = GraphEngine.get_aggregated_data(
@@ -444,14 +508,9 @@ def get_graph_data(
 
         # Always cache in memory (key includes all filter state)
         _set_cached_graph_response(cache_key, safe_result)
-        # Persist to DB only for unfiltered requests (DB cache = canonical view)
-        if not has_filters and not has_active_filters:
-            try:
-                if graph_def is not None and _has_non_empty_chart_payload(safe_result):
-                    graph_def.cached_data = safe_result
-                    db.commit()
-            except Exception:
-                db.rollback()
+        # Persist to DB asynchronously for unfiltered requests (don't block the response).
+        if not has_filters and not has_active_filters and graph_def is not None:
+            _persist_graph_cache_async(str(graph_def.id), safe_result)
         return safe_result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

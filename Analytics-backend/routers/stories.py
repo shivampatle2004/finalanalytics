@@ -448,6 +448,7 @@ def export_story_pdf(
                         "title": pt.title,
                         "image_bytes": img_bytes,
                         "one_per_page": False,
+                        "max_height": 5.6 * 72,  # Allow story snapshots to fill the page
                     },
                 })
 

@@ -53,6 +53,7 @@ import StoryModePage from '../pages/StoryModePage';
 import ViewAsModal, { RLSActiveBanner } from './ViewAsModal';
 import { RLSProvider, useRLS } from '../context/RLSContext';
 import { KPI_CARD_DEFAULT_SIZE, METRIC_CARD_DEFAULT_SIZE, PIE_DONUT_DEFAULT_SIZE, TEXT_BOX_DEFAULT_SIZE } from '../constants/visualDefaults';
+import { useDashboardUndoRedo, isRecordableVisualUpdate } from '../hooks/useDashboardUndoRedo';
 import { isViewOnlyWriteAction } from '../constants/viewPermissions';
 
 // Services
@@ -401,6 +402,24 @@ const BIWorkspace = ({
   // -- State: Multi-page & Transformations --
   const [pages, setPages] = useState(DEFAULT_PAGES);
   const [activePageId, setActivePageId] = useState('page-1');
+  const {
+    pushHistory: pushDashboardHistory,
+    undo: undoDashboard,
+    redo: redoDashboard,
+    clearHistory: clearDashboardHistory,
+    canUndo: canDashboardUndo,
+    canRedo: canDashboardRedo,
+    revision: dashboardUndoRevision,
+  } = useDashboardUndoRedo({
+    graphs,
+    pages,
+    activeVisualId,
+    activePageId,
+    setGraphs,
+    setPages,
+    setActiveVisualId,
+    setActivePageId,
+  });
   const [showMeasureBar, setShowMeasureBar] = useState(false);
   const [measureFormula, setMeasureFormula] = useState('Measure = ');
   const [measures, setMeasures] = useState([]);
@@ -439,12 +458,59 @@ const BIWorkspace = ({
         // Wait a tiny bit for layout adjustment to complete
         await new Promise(resolve => setTimeout(resolve, 80));
 
+        // Find the canvas element inside the container
+        const canvasEl = containerEl.querySelector('.bi-canvas');
+        
+        let originalCanvasStyle = '';
+        let originalContainerStyle = '';
+        let scrollWidth = containerEl.scrollWidth || containerEl.offsetWidth;
+        let scrollHeight = containerEl.scrollHeight || containerEl.offsetHeight;
+
+        if (canvasEl) {
+          originalCanvasStyle = canvasEl.getAttribute('style') || '';
+          originalContainerStyle = containerEl.getAttribute('style') || '';
+
+          const canvasGrid = canvasEl.querySelector('.bi-visuals-grid');
+          const gridWidth = canvasGrid ? (canvasGrid.scrollWidth || canvasGrid.offsetWidth) : canvasEl.scrollWidth;
+          const gridHeight = canvasGrid ? (canvasGrid.scrollHeight || canvasGrid.offsetHeight) : canvasEl.scrollHeight;
+          const headerHeight = canvasEl.querySelector('.bi-report-header-banner')?.offsetHeight || 60;
+          
+          scrollWidth = Math.max(canvasEl.scrollWidth, gridWidth, canvasEl.offsetWidth);
+          scrollHeight = Math.max(canvasEl.scrollHeight, gridHeight + headerHeight, canvasEl.offsetHeight);
+
+          // Force containerEl and canvasEl to fully expand without scroll clipping
+          canvasEl.style.setProperty('width', `${scrollWidth}px`, 'important');
+          canvasEl.style.setProperty('height', `${scrollHeight}px`, 'important');
+          canvasEl.style.setProperty('overflow', 'visible', 'important');
+          canvasEl.style.setProperty('overflow-y', 'visible', 'important');
+          canvasEl.style.setProperty('overflow-x', 'visible', 'important');
+
+          containerEl.style.setProperty('width', `${scrollWidth}px`, 'important');
+          containerEl.style.setProperty('height', `${scrollHeight}px`, 'important');
+          containerEl.style.setProperty('overflow', 'visible', 'important');
+        }
+
+        // Wait a tiny bit for layout to settle with full dimensions
+        await new Promise(resolve => setTimeout(resolve, 50));
+
         const canvas = await html2canvas(containerEl, {
           backgroundColor: '#ffffff',
           scale: 2,
           logging: false,
-          useCORS: true
+          useCORS: true,
+          scrollX: 0,
+          scrollY: 0,
+          width: scrollWidth,
+          height: scrollHeight,
+          windowWidth: scrollWidth,
+          windowHeight: scrollHeight
         });
+
+        // Restore styles
+        if (canvasEl) {
+          canvasEl.setAttribute('style', originalCanvasStyle);
+          containerEl.setAttribute('style', originalContainerStyle);
+        }
 
         // Restore layout styles
         if (selectedEl) selectedEl.classList.add('selected');
@@ -717,10 +783,11 @@ const BIWorkspace = ({
 
   const handleDeleteVisual = useCallback((id) => {
     if (!id) return;
+    pushDashboardHistory();
     setGraphs((prev) => prev.filter((g) => g.id !== id));
     setActiveVisualId((prev) => (prev === id ? null : prev));
     setFocusedVisualId((prev) => (prev === id ? null : prev));
-  }, []);
+  }, [pushDashboardHistory]);
 
   const handleExpandVisual = useCallback((graph) => {
     if (!graph?.id) return;
@@ -1192,6 +1259,9 @@ const BIWorkspace = ({
 
   const applyVisualUpdate = useCallback((visualId, updates) => {
     const startedAt = performance.now();
+    if (isRecordableVisualUpdate(updates)) {
+      pushDashboardHistory();
+    }
     const nextOptions = updates?.options;
     const fieldWellChanged = Boolean(
       nextOptions &&
@@ -1245,7 +1315,7 @@ const BIWorkspace = ({
     }
 
     appendPerfLog('Visual update', performance.now() - startedAt);
-  }, [appendPerfLog]);
+  }, [appendPerfLog, pushDashboardHistory]);
 
   /** Clear cached chart payloads so cross-filter refetches run on every visual. */
   const invalidateAllVisualCaches = useCallback(() => {
@@ -1515,7 +1585,8 @@ const BIWorkspace = ({
         fetch(`/analytics/api/files/${fileId}/graphs`),
         fetch(`/analytics/api/files/${fileId}/model`),
         fetch(`/analytics/api/files/${fileId}/model/diagnostics`),
-        fetch(`/analytics/api/modeling/measures?file_id=${fileId}`)
+        fetch(`/analytics/api/modeling/measures?file_id=${fileId}`),
+        fetch(`/analytics/api/files/${fileId}/warm-graph-cache`, { method: 'POST' }).catch(() => null),
       ]);
 
       if (schemaRes.ok) {
@@ -1675,6 +1746,7 @@ const BIWorkspace = ({
         }
 
         setGraphs(normalizedGraphs);
+        clearDashboardHistory();
         if (nextPages && nextActivePageId) {
           let pagesToApply = nextPages;
           const nextActiveNorm = String(nextActivePageId).trim();
@@ -2072,27 +2144,59 @@ const BIWorkspace = ({
     if (!reportRef.current) return;
     setIsExporting(true);
     try {
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#f3f4f6'
+      // 1. Capture the full dashboard snapshot as a base64 string (no cropping)
+      const snapshotUrl = await captureFullDashboardSnapshot();
+      if (!snapshotUrl) {
+        throw new Error("Could not capture dashboard snapshot");
+      }
+
+      // 2. Strip the data URL prefix to send raw base64 data to the API
+      const image_b64 = snapshotUrl.split(',', 2)[1];
+
+      // 3. Prepare payload matching DirectPDFRequest schema
+      const payload = {
+        title: reportHeaderText || fileName || 'Dashboard',
+        page_size: 'A4',
+        orientation: 'landscape',
+        elements: [
+          {
+            type: 'visual',
+            config: {
+              title: '',
+              image_b64: image_b64,
+              max_height: 5.6 * 72 // Fill height of landscape A4 (approx 5.6 inches)
+            }
+          }
+        ]
+      };
+
+      // 4. Hit direct PDF generation endpoint
+      const response = await fetch('/analytics/api/reports/generate-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
       });
 
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('l', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || `Server returned status ${response.status}`);
+      }
 
-      const margin = 10;
-      const contentWidth = pdfWidth - (2 * margin);
-      const contentHeight = (canvas.height * contentWidth) / canvas.width;
-
-      pdf.addImage(imgData, 'PNG', margin, margin, contentWidth, contentHeight);
-      pdf.save(`${fileName || 'report'}.pdf`);
+      // 5. Download the PDF blob from the stream
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${fileName || 'report'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(downloadUrl);
     } catch (err) {
       console.error("PDF Export failed:", err);
-      alert("Failed to export PDF.");
+      alert("Failed to export PDF: " + err.message);
     } finally {
       setIsExporting(false);
     }
@@ -2693,6 +2797,7 @@ const BIWorkspace = ({
         if (!activeVisualId) break;
         const visualToCut = graphs.find(g => g.id === activeVisualId);
         if (visualToCut) setClipboardVisual(visualToCut);
+        pushDashboardHistory();
         setGraphs(prev => prev.filter(g => g.id !== activeVisualId));
         setActiveVisualId(null);
         break;
@@ -2705,6 +2810,7 @@ const BIWorkspace = ({
       }
       case 'paste': {
         if (!clipboardVisual) break;
+        pushDashboardHistory();
         const copiedOptions = cloneValue(clipboardVisual.options || {});
         const pastedVisual = {
           ...clipboardVisual,
@@ -3337,6 +3443,7 @@ const BIWorkspace = ({
   };
 
   const handleAddVisual = (type, dropPosition = null) => {
+    pushDashboardHistory();
     const newId = uniqueVisualId('graph');
     const defaultWidth = 520;
     const defaultHeight = 360;
@@ -4142,6 +4249,7 @@ const BIWorkspace = ({
 
   const handleDropFieldOnCanvas = (fieldName, dropPosition) => {
     if (isViewOnly) return;
+    pushDashboardHistory();
     const kind = classifyField(fieldName);
     const newId = uniqueVisualId('graph');
     const fallbackOffset = (graphs.length % 8) * 24;
@@ -4195,7 +4303,8 @@ const BIWorkspace = ({
 
   const handleDropFieldOnVisual = (fieldName, visualId) => {
     if (isViewOnly) return;
-    
+    pushDashboardHistory();
+
     setGraphs(prev => prev.map(graph => {
       if (graph.id !== visualId) return graph;
       
@@ -5300,6 +5409,7 @@ const BIWorkspace = ({
                             <BIDashboardCanvas
                               graphs={activeVisibleGraphs}
                               fileId={fileId}
+                              previewRows={Array.isArray(dataset?.rows) ? dataset.rows : null}
                               selection={selectedData}
                               measures={measures}
                               schema={schema}
@@ -5761,6 +5871,11 @@ const BIWorkspace = ({
                         onArchiveMeasure={isViewOnly ? undefined : handleArchiveMeasure}
                         onDeprecateMeasure={isViewOnly ? undefined : handleDeprecateMeasure}
                         onCaptureDashboard={handleCaptureDashboardSnap}
+                        canDashboardUndo={canDashboardUndo}
+                        canDashboardRedo={canDashboardRedo}
+                        onDashboardUndo={isViewOnly ? undefined : undoDashboard}
+                        onDashboardRedo={isViewOnly ? undefined : redoDashboard}
+                        dashboardUndoRevision={dashboardUndoRevision}
                       />
                     </Panel>
                   </>
@@ -5854,7 +5969,7 @@ const BIWorkspace = ({
       {showStoryMode && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          background: '#faf3ff', overflow: 'hidden', display: 'flex', flexDirection: 'column'
+          background: '#f8fafc', overflow: 'hidden', display: 'flex', flexDirection: 'column'
         }}>
           <StoryModePage
             fileId={fileId}

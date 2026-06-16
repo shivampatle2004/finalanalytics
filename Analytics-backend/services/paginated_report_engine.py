@@ -705,7 +705,7 @@ class PaginatedReportEngine:
                         target_width = page_width
                         target_height = page_width * aspect
 
-                        max_allowed_height = 4.5 * inch
+                        max_allowed_height = config.get("max_height", 4.5 * inch)
                         if target_height > max_allowed_height:
                             target_height = max_allowed_height
                             target_width = target_height / aspect
